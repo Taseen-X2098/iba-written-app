@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ExamTakerClient from "@/components/exams/exam-taker-client";
+import { getRedis, CacheKeys } from "@/lib/redis";
 
 export default async function TakeExamPage({
   params,
@@ -64,12 +65,35 @@ export default async function TakeExamPage({
     redirect(`/exams/${id}/results`);
   }
 
+  // 5. Server-Enforced Timer & Draft Hydration
+  const redis = getRedis();
+  const startTimeKey = `exam:start:${id}:${user.id}`;
+  let serverStartTime = await redis.get<number>(startTimeKey);
+  
+  if (!serverStartTime) {
+    serverStartTime = Date.now();
+    // Cache the start time exactly for the duration of the exam + a slight grace period
+    const durationMs = (exam.time_limit_minutes * 60 * 1000) + (5 * 60 * 1000); // 5 min grace
+    await redis.set(startTimeKey, serverStartTime, { ex: Math.floor(durationMs / 1000) });
+  }
+
+  // Fetch all existing drafts for this exam
+  const initialDrafts: Record<string, { ocrText: string; editedText: string }> = {};
+  for (const eq of examQuestions) {
+    const draft = await redis.get<{ ocrText: string; editedText: string }>(CacheKeys.examDraft(id, user.id, eq.id));
+    if (draft) {
+      initialDrafts[eq.id] = draft;
+    }
+  }
+
   return (
     <div className="min-h-[calc(100vh-64px)] bg-background">
       <ExamTakerClient 
         exam={exam} 
         examQuestions={examQuestions} 
-        userId={user.id} 
+        userId={user.id}
+        serverStartTime={serverStartTime}
+        initialDrafts={initialDrafts}
       />
     </div>
   );

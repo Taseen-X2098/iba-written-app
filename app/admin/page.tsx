@@ -6,11 +6,21 @@ export default async function AdminDashboard() {
   const supabase = await createClient();
   
   // Basic stats
-  const [{ count: usersCount }, { count: examsCount }, { count: submissionsCount }] = await Promise.all([
+  const [
+    { count: usersCount }, 
+    { count: examsCount }, 
+    { count: submissionsCount },
+    { count: activeSubsCount },
+    { data: revenueData }
+  ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }),
     supabase.from("exams").select("*", { count: "exact", head: true }),
     supabase.from("exam_submissions").select("*", { count: "exact", head: true }),
+    supabase.from("subscriptions").select("*", { count: "exact", head: true }).eq("is_active", true),
+    supabase.from("bkash_transactions").select("amount").eq("status", "Completed"),
   ]);
+
+  const totalRevenue = revenueData?.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) || 0;
 
   return (
     <div className="animate-fade-in">
@@ -36,6 +46,18 @@ export default async function AdminDashboard() {
           icon={<CheckCircle className="text-green-500" />} 
           bg="bg-green-50" 
         />
+        <StatCard 
+          title="Active Subs" 
+          value={activeSubsCount || 0} 
+          icon={<Users className="text-orange-500" />} 
+          bg="bg-orange-50" 
+        />
+        <StatCard 
+          title="Total Revenue" 
+          value={`৳${totalRevenue.toLocaleString()}`} 
+          icon={<FileText className="text-brand-500" />} 
+          bg="bg-brand-50" 
+        />
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
@@ -57,7 +79,7 @@ export default async function AdminDashboard() {
   );
 }
 
-function StatCard({ title, value, icon, bg }: { title: string, value: number, icon: React.ReactNode, bg: string }) {
+function StatCard({ title, value, icon, bg }: { title: string, value: number | string, icon: React.ReactNode, bg: string }) {
   return (
     <div className="bg-card border border-border rounded-xl p-6 flex items-center gap-4">
       <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${bg}`}>

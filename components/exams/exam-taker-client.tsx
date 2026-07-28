@@ -9,9 +9,11 @@ interface Props {
   exam: Exam;
   examQuestions: any[];
   userId: string;
+  serverStartTime: number;
+  initialDrafts: Record<string, { ocrText: string; editedText: string }>;
 }
 
-export default function ExamTakerClient({ exam, examQuestions, userId }: Props) {
+export default function ExamTakerClient({ exam, examQuestions, userId, serverStartTime, initialDrafts }: Props) {
   const router = useRouter();
   const [timeLeft, setTimeLeft] = useState<number>(exam.time_limit_minutes * 60);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -19,24 +21,25 @@ export default function ExamTakerClient({ exam, examQuestions, userId }: Props) 
   // State for each question: OCR text, edited text, uploading state
   const [answers, setAnswers] = useState<Record<string, { ocrText: string, editedText: string, uploading: boolean, error?: string }>>({});
 
+  // Ref for debouncing auto-saves
+  const saveTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+
   useEffect(() => {
-    // Initialize empty answers
+    // Initialize answers with drafts if they exist
     const initial: any = {};
     examQuestions.forEach(eq => {
-      initial[eq.id] = { ocrText: "", editedText: "", uploading: false };
+      const draft = initialDrafts[eq.id];
+      initial[eq.id] = { 
+        ocrText: draft?.ocrText || "", 
+        editedText: draft?.editedText || "", 
+        uploading: false 
+      };
     });
     setAnswers(initial);
 
-    // Timer logic
-    const storageKey = `exam_start_${exam.id}_${userId}`;
-    let startTime = localStorage.getItem(storageKey);
-    if (!startTime) {
-      startTime = Date.now().toString();
-      localStorage.setItem(storageKey, startTime);
-    }
-
+    // Timer logic completely relies on serverStartTime
     const interval = setInterval(() => {
-      const elapsedSecs = Math.floor((Date.now() - parseInt(startTime as string)) / 1000);
+      const elapsedSecs = Math.floor((Date.now() - serverStartTime) / 1000);
       const remaining = Math.max(0, (exam.time_limit_minutes * 60) - elapsedSecs);
       setTimeLeft(remaining);
 
@@ -84,10 +87,29 @@ export default function ExamTakerClient({ exam, examQuestions, userId }: Props) 
   };
 
   const updateText = (eqId: string, text: string) => {
-    setAnswers(prev => ({ 
-      ...prev, 
-      [eqId]: { ...prev[eqId], editedText: text } 
-    }));
+    setAnswers(prev => {
+      const updated = { ...prev, [eqId]: { ...prev[eqId], editedText: text } };
+      
+      // Auto-save logic
+      if (saveTimeoutRef.current[eqId]) {
+        clearTimeout(saveTimeoutRef.current[eqId]);
+      }
+      
+      saveTimeoutRef.current[eqId] = setTimeout(() => {
+        fetch("/api/exam/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            examId: exam.id,
+            examQuestionId: eqId,
+            ocrText: updated[eqId].ocrText,
+            editedText: text
+          })
+        }).catch(err => console.error("Auto-save failed", err));
+      }, 1500); // 1.5s debounce
+
+      return updated;
+    });
   };
 
   const handleSubmit = async () => {
@@ -115,7 +137,6 @@ export default function ExamTakerClient({ exam, examQuestions, userId }: Props) 
       if (!res.ok) throw new Error(result.error || "Submission failed");
 
       // Clear timer and redirect to results
-      localStorage.removeItem(`exam_start_${exam.id}_${userId}`);
       router.push(`/exams/${exam.id}/results`);
       router.refresh();
       
