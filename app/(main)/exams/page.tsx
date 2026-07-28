@@ -1,25 +1,172 @@
-import { Trophy } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { Clock, FileText, Lock, ChevronRight, Trophy } from "lucide-react";
+import Link from "next/link";
+import type { Exam } from "@/lib/types";
 
-export default function ExamsPage() {
+export default async function StudentExamsPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) return null;
+
+  // 1. Check if user has an active plan that allows weekly exams (plan_2 or plan_3)
+  const { data: activeSub } = await supabase
+    .from("subscriptions")
+    .select("plan_type")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .limit(1)
+    .single();
+
+  const hasAccess = activeSub?.plan_type === "plan_2" || activeSub?.plan_type === "plan_3";
+
+  // 2. Fetch published exams
+  const { data: exams, error } = await supabase
+    .from("exams")
+    .select("*")
+    .eq("is_published", true)
+    .order("starts_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching exams:", error);
+  }
+
+  const safeExams = exams || [];
+  const now = new Date().getTime();
+
   return (
-    <div className="px-4 py-6 lg:px-8 max-w-4xl mx-auto animate-fade-in">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="px-4 py-6 lg:px-8 max-w-5xl mx-auto animate-fade-in">
+      <div className="flex items-center gap-3 mb-8">
         <div className="h-10 w-10 rounded-lg bg-brand-50 flex items-center justify-center">
-          <Trophy size={20} className="text-brand-600" />
+          <FileText size={20} className="text-brand-600" />
         </div>
         <div>
           <h2 className="text-xl font-bold text-foreground">Weekly Exams</h2>
           <p className="text-sm text-muted-foreground">
-            Compete with others in timed weekly exams.
+            Test yourself under timed conditions and compete on the leaderboard.
           </p>
         </div>
       </div>
 
-      <div className="text-center py-16 text-muted-foreground">
-        <Trophy size={48} className="mx-auto mb-4 opacity-30" />
-        <p className="text-sm">Weekly exams will be implemented in Phase 4.</p>
-        <p className="text-xs mt-1">Check back soon!</p>
+      {!hasAccess && (
+        <div className="mb-8 p-6 bg-brand-50 border border-brand-200 rounded-xl flex items-start gap-4">
+          <Lock className="text-brand-600 shrink-0 mt-1" size={24} />
+          <div>
+            <h3 className="font-bold text-brand-900 text-lg">Exams Locked</h3>
+            <p className="text-brand-800 text-sm mt-1 mb-4">
+              You need the <strong>Complete Prep</strong> or <strong>Exams Only</strong> plan to participate in weekly exams.
+            </p>
+            <Link 
+              href="/subscription"
+              className="bg-brand-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-brand-700 transition-colors inline-block"
+            >
+              Upgrade Plan
+            </Link>
+          </div>
+        </div>
+      )}
+
+      <div className="grid md:grid-cols-2 gap-6">
+        {safeExams.length === 0 ? (
+          <div className="md:col-span-2 text-center py-16 text-muted-foreground border border-dashed border-border rounded-2xl bg-card/50">
+            <FileText size={48} className="mx-auto mb-4 opacity-30" />
+            <p className="text-sm">No weekly exams are currently scheduled.</p>
+          </div>
+        ) : (
+          safeExams.map((exam: Exam) => {
+            const startsAt = new Date(exam.starts_at).getTime();
+            const endsAt = new Date(exam.ends_at).getTime();
+            
+            let status: "upcoming" | "active" | "past" = "upcoming";
+            if (now >= startsAt && now <= endsAt) status = "active";
+            if (now > endsAt) status = "past";
+
+            return (
+              <div 
+                key={exam.id}
+                className={`bg-card border rounded-2xl p-6 transition-all relative overflow-hidden group ${
+                  status === "active" ? "border-brand-500 shadow-md shadow-brand-100/50" : "border-border hover:border-brand-300"
+                }`}
+              >
+                {status === "active" && (
+                  <div className="absolute top-0 right-0">
+                    <div className="bg-brand-500 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
+                      Live Now
+                    </div>
+                  </div>
+                )}
+                {status === "past" && (
+                  <div className="absolute top-0 right-0">
+                    <div className="bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg">
+                      Ended
+                    </div>
+                  </div>
+                )}
+
+                <h3 className="text-lg font-bold text-foreground mb-2 pr-16">{exam.title}</h3>
+                {exam.description && (
+                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
+                )}
+
+                <div className="flex flex-col gap-2 mb-6 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Clock size={16} className="text-brand-500" />
+                    <span className="font-medium text-foreground">{exam.time_limit_minutes} Minutes</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon size={16} className="opacity-70" />
+                    <span>
+                      {status === "upcoming" 
+                        ? `Starts: ${new Date(exam.starts_at).toLocaleString()}`
+                        : `Ends: ${new Date(exam.ends_at).toLocaleString()}`
+                      }
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {status === "active" ? (
+                    <Link
+                      href={hasAccess ? `/exams/${exam.id}` : "#"}
+                      className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                        hasAccess 
+                          ? "bg-brand-600 text-white hover:bg-brand-700 shadow-md shadow-brand-200/50" 
+                          : "bg-muted text-muted-foreground cursor-not-allowed opacity-50"
+                      }`}
+                    >
+                      {hasAccess ? "Enter Exam" : "Locked"}
+                      <ChevronRight size={16} />
+                    </Link>
+                  ) : status === "upcoming" ? (
+                    <button disabled className="flex-1 bg-muted text-muted-foreground px-4 py-2.5 rounded-xl text-sm font-bold cursor-not-allowed">
+                      Starts Soon
+                    </button>
+                  ) : (
+                    <Link
+                      href={`/exams/${exam.id}/results`}
+                      className="flex-1 flex items-center justify-center gap-2 bg-brand-50 text-brand-700 hover:bg-brand-100 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors"
+                    >
+                      <Trophy size={16} /> View Results
+                    </Link>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
+  );
+}
+
+function CalendarIcon({ size, className }: { size: number, className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/>
+      <line x1="16" x2="16" y1="2" y2="6"/>
+      <line x1="8" x2="8" y1="2" y2="6"/>
+      <line x1="3" x2="21" y1="10" y2="10"/>
+    </svg>
   );
 }

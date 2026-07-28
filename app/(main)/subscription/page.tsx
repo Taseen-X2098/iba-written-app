@@ -1,24 +1,46 @@
-import { Crown } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import SubscriptionClient from "@/components/subscription/subscription-client";
+import { redirect } from "next/navigation";
+import type { Subscription } from "@/lib/types";
 
-export default function SubscriptionPage() {
+export default async function SubscriptionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  // Fetch active subscription
+  const { data: activeSub } = await supabase
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .limit(1)
+    .single();
+
+  // Fetch free tests from profile
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("free_tests_remaining")
+    .eq("id", user.id)
+    .single();
+
+  const params = await searchParams;
+  const success = params.success === "true";
+  const error = typeof params.error === "string" ? params.error : undefined;
+
   return (
-    <div className="px-4 py-6 lg:px-8 max-w-4xl mx-auto animate-fade-in">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="h-10 w-10 rounded-lg bg-brand-50 flex items-center justify-center">
-          <Crown size={20} className="text-brand-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-foreground">Subscription</h2>
-          <p className="text-sm text-muted-foreground">
-            Choose a plan that suits your preparation.
-          </p>
-        </div>
-      </div>
-
-      <div className="text-center py-16 text-muted-foreground">
-        <Crown size={48} className="mx-auto mb-4 opacity-30" />
-        <p className="text-sm">Plans & bKash payment will be implemented in Phase 3.</p>
-      </div>
-    </div>
+    <SubscriptionClient
+      activeSubscription={activeSub as Subscription | null}
+      freeTestsRemaining={profile?.free_tests_remaining || 0}
+      success={success}
+      error={error}
+    />
   );
 }

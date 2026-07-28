@@ -35,6 +35,7 @@ export interface Profile {
   phone: string | null;
   free_tests_remaining: number;
   tips_enabled: boolean;
+  is_admin: boolean;
   created_at: string;
   updated_at: string;
 }

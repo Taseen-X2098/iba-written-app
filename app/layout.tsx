@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
+import Providers from "@/components/providers";
 import "./globals.css";
 
 const inter = Inter({
@@ -48,7 +49,7 @@ export default function RootLayout({
       className={`${inter.variable} ${geistMono.variable}`}
     >
       <body className="min-h-dvh flex flex-col bg-background text-foreground">
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
