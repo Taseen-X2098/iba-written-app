@@ -7,6 +7,7 @@ import {
   LogOut,
   FileText,
   CheckCircle,
+  Lightbulb,
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -54,6 +55,7 @@ export default async function AdminLayout({
           <NavItem href="/admin" icon={<LayoutDashboard size={20} />} label="Overview" />
           <NavItem href="/admin/exams" icon={<FileText size={20} />} label="Manage Exams" />
           <NavItem href="/admin/grading" icon={<CheckCircle size={20} />} label="Grading Queue" />
+          <NavItem href="/admin/tips" icon={<Lightbulb size={20} />} label="Manage Tips" />
           <NavItem href="/admin/users" icon={<Users size={20} />} label="Users" />
           <NavItem href="/admin/settings" icon={<Settings size={20} />} label="Settings" />
         </nav>

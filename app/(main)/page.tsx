@@ -74,14 +74,16 @@ export default function DashboardPage() {
       dayStreak: 0, // TODO: Calculate streak from submission dates
     });
 
-    // Random tip
-    const { data: tipData } = await supabase
-      .from("tips")
-      .select("*")
-      .eq("is_active", true)
-      .limit(1)
-      .order("created_at", { ascending: false }); // Will randomize properly later
-    if (tipData && tipData.length > 0) setTip(tipData[0]);
+    // Random tip via API
+    if (profileData?.tips_enabled) {
+      try {
+        const res = await fetch("/api/tips/random");
+        const { tip: randomTip } = await res.json();
+        if (randomTip) setTip(randomTip);
+      } catch (err) {
+        console.error("Failed to load tip", err);
+      }
+    }
   }
 
   return (
