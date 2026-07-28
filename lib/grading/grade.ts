@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { TOOLS, callFunction } from "./tools";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 
-const MODEL = "gpt-5.6"; // swap for gpt-5.6-luna (cheaper) if cost matters more than nuance
+const MODEL = "gpt-4.2";
 
 // Minimal shape of what we actually use from the OpenAI Responses API.
 // The real `openai` npm package's client satisfies this already —
@@ -33,8 +33,9 @@ export interface ResponsesClient {
 
 // Structured Outputs schema — the model MUST return exactly this shape.
 // `internal` is the full rubric breakdown, for your eyes only.
-// `student_feedback` is the only part safe to ever show a student — no
-// criteria names, no mark-by-mark breakdown, no rubric jargon.
+// `student_feedback` is the only part safe to ever show a student: a score,
+// a short plain-language summary, and specific highlights tied to exact
+// substrings of their own submission (for in-text highlighting in the UI).
 const GRADING_RESULT_FORMAT = {
   type: "json_schema",
   name: "grading_result",
@@ -69,9 +70,22 @@ const GRADING_RESULT_FORMAT = {
         type: "object",
         properties: {
           score: { type: "string" }, // e.g. "8/10" — the only number a student sees
-          feedback: { type: "string" }, // 2-4 plain-language sentences, no rubric jargon
+          summary: { type: "string" }, // 2-4 plain-language sentences, no rubric jargon
+          highlights: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                quote: { type: "string" }, // exact verbatim substring of the submission
+                comment: { type: "string" }, // specific, detailed observation about that quote
+                type: { type: "string", enum: ["strength", "improvement"] },
+              },
+              required: ["quote", "comment", "type"],
+              additionalProperties: false,
+            },
+          },
         },
-        required: ["score", "feedback"],
+        required: ["score", "summary", "highlights"],
         additionalProperties: false,
       },
     },
@@ -79,6 +93,12 @@ const GRADING_RESULT_FORMAT = {
     additionalProperties: false,
   },
 } as const;
+
+export interface Highlight {
+  quote: string;
+  comment: string;
+  type: "strength" | "improvement";
+}
 
 export interface GradingResult {
   internal: {
@@ -93,8 +113,30 @@ export interface GradingResult {
   };
   studentFeedback: {
     score: string;
-    feedback: string;
+    summary: string;
+    highlights: Highlight[];
   };
+}
+
+/**
+ * Structured Outputs enforces the *shape* of each highlight (it has a
+ * `quote`, `comment`, `type`) but not whether `quote` is actually a real
+ * substring of the submission — the model can still hallucinate or
+ * paraphrase one. Drop anything that doesn't match verbatim rather than
+ * shipping a highlight the UI can't locate.
+ */
+function validateHighlights(submission: string, highlights: Highlight[]): Highlight[] {
+  const valid: Highlight[] = [];
+  for (const h of highlights) {
+    if (submission.includes(h.quote)) {
+      valid.push(h);
+    } else {
+      console.warn(
+        `Dropping unlocatable highlight — quote not found verbatim in submission: ${JSON.stringify(h.quote)}`
+      );
+    }
+  }
+  return valid;
 }
 
 /**
@@ -167,7 +209,7 @@ export async function grade(
       max: number;
       criteria: { criterion: string; marks_awarded: number; marks_possible: number; reasoning: string }[];
     };
-    student_feedback: { score: string; feedback: string };
+    student_feedback: { score: string; summary: string; highlights: Highlight[] };
   };
 
   try {
@@ -191,7 +233,8 @@ export async function grade(
     },
     studentFeedback: {
       score: parsed.student_feedback.score,
-      feedback: parsed.student_feedback.feedback,
+      summary: parsed.student_feedback.summary,
+      highlights: validateHighlights(submission, parsed.student_feedback.highlights),
     },
   };
 }

@@ -20,16 +20,16 @@ async function main() {
 
   // 2. Exercise the full grade() loop with a mock client
   console.log("\n--- grade() via mock client ---");
-  const client = createMockClient({ taskType: "basic_paragraph", marks: 5 });
+  const submission =
+    "Cats make excellent pets because they are independent, clean, and affectionate on their own terms.";
+  const client = createMockClient({ taskType: "basic_paragraph", marks: 5, submission });
 
-  const result = await grade(
-    client,
-    "Cats make excellent pets because they are independent, clean, and affectionate on their own terms.",
-    "basic_paragraph",
-    5
-  );
+  const result = await grade(client, submission, "basic_paragraph", 5);
 
-  console.log(result);
+  console.log("internal (tutor only):");
+  console.log(JSON.stringify(result.internal, null, 2));
+  console.log("\nstudentFeedback (safe to show the student):");
+  console.log(JSON.stringify(result.studentFeedback, null, 2));
 }
 
 main().catch((err) => {

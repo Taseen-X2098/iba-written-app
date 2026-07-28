@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   const client: ResponsesClient =
     process.env.USE_MOCK_GRADER === "true"
-      ? createMockClient({ taskType, marks })
+      ? createMockClient({ taskType, marks, submission })
       : (new OpenAI() as unknown as ResponsesClient); // reads OPENAI_API_KEY from env
 
   try {
