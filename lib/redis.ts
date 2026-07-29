@@ -92,6 +92,21 @@ function createMemoryFallback(): Redis {
       }
       return remaining;
     },
+    keys: async (pattern: string) => {
+      const matched = [];
+      const regexStr = pattern.replace(/\*/g, '.*');
+      const regex = new RegExp(`^${regexStr}$`);
+      for (const [key, entry] of store.entries()) {
+        if (entry.expiresAt && Date.now() > entry.expiresAt) {
+          store.delete(key);
+          continue;
+        }
+        if (regex.test(key)) {
+          matched.push(key);
+        }
+      }
+      return matched;
+    },
   } as unknown as Redis;
 }
 

@@ -48,3 +48,47 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ success: true, id: data.id });
 }
+
+export async function PATCH(req: NextRequest) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile?.is_admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { id, prompt, category, difficulty, marks, source, spaceHint } = await req.json();
+
+  if (!id || !prompt || !category || !difficulty || !marks) {
+    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  }
+
+  const { error } = await supabase
+    .from("questions")
+    .update({
+      prompt,
+      category,
+      difficulty,
+      marks,
+      source: source || null,
+      space_hint: spaceHint || null,
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error("Failed to update question:", error);
+    return NextResponse.json({ error: "Failed to update question" }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

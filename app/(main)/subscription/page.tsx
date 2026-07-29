@@ -41,6 +41,8 @@ export default async function SubscriptionPage({
       freeTestsRemaining={profile?.free_tests_remaining || 0}
       success={success}
       error={error}
+      planPaymentFormUrl={process.env.PLAN_PAYMENT_FORM_URL || process.env.NEXT_PUBLIC_PLAN_PAYMENT_FORM_URL || ""}
+      slotsPaymentFormUrl={process.env.SLOTS_PAYMENT_FORM_URL || process.env.NEXT_PUBLIC_SLOTS_PAYMENT_FORM_URL || ""}
     />
   );
 }

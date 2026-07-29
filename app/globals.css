@@ -73,12 +73,13 @@
   border-color: var(--color-border);
 }
 
-body {
+html, body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────────────────────── */

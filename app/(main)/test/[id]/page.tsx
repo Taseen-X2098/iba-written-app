@@ -30,6 +30,11 @@ export default async function SingleTestPage({
     notFound();
   }
 
+  // Translation questions are only available in weekly exams, not individual tests
+  if (question.category === "translation") {
+    notFound();
+  }
+
   // Check if user has enough tests to start
   const hasTestsAvailable = await checkTestLimit(user.id);
 

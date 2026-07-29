@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { BarChart3, TrendingUp, Target, Award } from "lucide-react";
+import { BarChart3, TrendingUp, Target, Award, Flame } from "lucide-react";
 import { CATEGORY_LABELS } from "@/lib/types";
+import { calculateStreak, generateTrendData } from "@/lib/utils/analytics";
+import { ProgressChart } from "@/components/progress/progress-chart";
 
 export default async function ProgressPage() {
   const supabase = await createClient();
@@ -31,7 +33,8 @@ export default async function ProgressPage() {
   
   safeSubmissions.forEach((sub: any) => {
     const result = sub.grading_result;
-    const scoreStr = result?.studentFeedback?.score;
+    const studentFeedback = result?.studentFeedback || result?.student_feedback;
+    const scoreStr = studentFeedback?.score || (result?.marks ? `${result.marks}/${sub.questions?.marks || 10}` : undefined);
     const category = sub.questions.category;
     
     if (scoreStr) {
@@ -51,6 +54,9 @@ export default async function ProgressPage() {
   });
 
   const overallPercentage = totalMarks > 0 ? Math.round((totalScore / totalMarks) * 100) : 0;
+  
+  const streak = calculateStreak(safeSubmissions.map((s: any) => new Date(s.created_at)));
+  const trendData = generateTrendData(safeSubmissions);
 
   return (
     <div className="px-4 py-6 lg:px-8 max-w-4xl mx-auto animate-fade-in">
@@ -74,7 +80,7 @@ export default async function ProgressPage() {
       ) : (
         <div className="space-y-6">
           {/* Top Stats Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-card border border-border rounded-xl p-5">
               <div className="flex items-center gap-2 mb-2 text-muted-foreground">
                 <Target size={16} />
@@ -95,7 +101,7 @@ export default async function ProgressPage() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-5 col-span-2 md:col-span-1">
+            <div className="bg-card border border-border rounded-xl p-5">
               <div className="flex items-center gap-2 mb-2 text-muted-foreground">
                 <TrendingUp size={16} />
                 <span className="text-xs font-semibold uppercase tracking-wider">Total Score</span>
@@ -104,6 +110,22 @@ export default async function ProgressPage() {
                 {totalScore} <span className="text-sm font-medium text-muted-foreground">/ {totalMarks}</span>
               </div>
             </div>
+
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-2 text-muted-foreground">
+                <Flame size={16} className="text-orange-500" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-orange-600/80">Day Streak</span>
+              </div>
+              <div className="text-3xl font-bold text-orange-600">
+                {streak}
+              </div>
+            </div>
+          </div>
+
+          {/* Trend Graph */}
+          <div className="bg-card border border-border rounded-xl p-6">
+            <h3 className="text-lg font-bold text-foreground mb-6">Accuracy Trend</h3>
+            <ProgressChart data={trendData} />
           </div>
 
           {/* Category Performance */}

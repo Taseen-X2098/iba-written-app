@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 export async function createClient() {
@@ -32,26 +33,16 @@ export async function createClient() {
  * ONLY use in admin API routes, never expose to the client.
  */
 export async function createAdminClient() {
-  const cookieStore = await cookies();
-
-  return createServerClient(
+  // Use the standard client without cookie-reading, so it doesn't attach the user JWT.
+  // The service role key bypasses RLS on its own.
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {
-            // Ignored in Server Components
-          }
-        },
-      },
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
     }
   );
 }

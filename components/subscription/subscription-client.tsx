@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Check, AlertCircle, Plus, Loader2, Sparkles, TrendingUp } from "lucide-react";
+import { Crown, Check, AlertCircle, Plus, Loader2, Sparkles, TrendingUp, ChevronDown } from "lucide-react";
 import type { Subscription } from "@/lib/types";
 import { useRouter } from "next/navigation";
 
@@ -10,6 +10,8 @@ interface Props {
   freeTestsRemaining: number;
   success?: boolean;
   error?: string;
+  planPaymentFormUrl: string;
+  slotsPaymentFormUrl: string;
 }
 
 const PLANS = [
@@ -58,6 +60,8 @@ export default function SubscriptionClient({
   freeTestsRemaining,
   success,
   error,
+  planPaymentFormUrl,
+  slotsPaymentFormUrl,
 }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -103,6 +107,8 @@ export default function SubscriptionClient({
     return `~${Math.ceil(diff * 0.5)} (prorated)`; // Very rough visual estimate
   };
 
+  const canBuySlots = activeSubscription && (activeSubscription.plan_type === "plan_1" || activeSubscription.plan_type === "plan_2");
+
   return (
     <div className="px-4 py-6 lg:px-8 max-w-6xl mx-auto animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
@@ -111,7 +117,7 @@ export default function SubscriptionClient({
             <Crown className="text-brand-600" /> Subscription & Limits
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage your plans and buy extra test slots with bKash.
+            Manage your plans and buy extra test slots.
           </p>
         </div>
       </div>
@@ -165,30 +171,38 @@ export default function SubscriptionClient({
             </div>
           </div>
 
-          <div className="shrink-0 bg-brand-50 border border-brand-100 rounded-xl p-5 min-w-[280px]">
+          <div className="shrink-0 bg-brand-50 border border-brand-100 rounded-xl p-5 w-full md:w-auto md:min-w-[280px]">
             <h4 className="text-sm font-bold text-brand-900 mb-1 flex items-center gap-1.5">
               <Plus size={16} /> Need more slots?
             </h4>
             <p className="text-xs text-brand-700 mb-3">Buy extra tests for 5 ৳ each.</p>
-            <div className="flex items-center gap-2">
-              <select 
-                value={extraSlots}
-                onChange={(e) => setExtraSlots(Number(e.target.value))}
-                className="bg-white border border-brand-200 text-brand-900 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              >
-                <option value={10}>10 Tests (50 ৳)</option>
-                <option value={20}>20 Tests (100 ৳)</option>
-                <option value={50}>50 Tests (250 ৳)</option>
-                <option value={100}>100 Tests (500 ৳)</option>
-              </select>
-              <button
-                onClick={() => handleCheckout("extra_slots")}
-                disabled={loading !== null}
-                className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50"
-              >
-                {loading === "extra" ? <Loader2 size={16} className="animate-spin" /> : "Buy Now"}
-              </button>
-            </div>
+            {canBuySlots ? (
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="relative w-full sm:w-auto">
+                  <select 
+                    value={extraSlots}
+                    onChange={(e) => setExtraSlots(Number(e.target.value))}
+                    className="bg-white border border-brand-200 text-brand-900 rounded-lg pl-3 pr-10 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 w-full"
+                  >
+                    <option value={10}>10 Tests (50 ৳)</option>
+                    <option value={20}>20 Tests (100 ৳)</option>
+                    <option value={50}>50 Tests (250 ৳)</option>
+                    <option value={100}>100 Tests (500 ৳)</option>
+                  </select>
+                  <ChevronDown size={16} className="text-brand-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none z-0" />
+                </div>
+                <button
+                  onClick={() => window.open(slotsPaymentFormUrl, "_blank")}
+                  className="bg-brand-600 text-white rounded-lg px-4 py-2.5 sm:py-2 text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 w-full sm:w-auto"
+                >
+                  Buy Now
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white/60 border border-brand-200 text-brand-800 rounded-lg px-3 py-2 text-xs font-medium text-center">
+                Requires Basic Practice or Complete Prep plan to purchase extra slots.
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -198,7 +212,7 @@ export default function SubscriptionClient({
       <div className="grid md:grid-cols-3 gap-6">
         {PLANS.map((plan) => {
           const isCurrentPlan = activeSubscription?.plan_type === plan.id;
-          const isDowngrade = activeSubscription?.plan_type === "plan_2" && plan.id === "plan_1";
+          const isDowngrade = activeSubscription?.plan_type === "plan_2" && (plan.id === "plan_1" || plan.id === "plan_3");
           const isUpgrade = activeSubscription?.plan_type === "plan_1" && plan.id === "plan_2";
           
           return (
@@ -235,8 +249,8 @@ export default function SubscriptionClient({
               </div>
 
               <button
-                onClick={() => handleCheckout("plan", plan.id)}
-                disabled={loading !== null || isCurrentPlan || isDowngrade}
+                onClick={() => window.open(planPaymentFormUrl, "_blank")}
+                disabled={isCurrentPlan || isDowngrade}
                 className={`w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                   isCurrentPlan 
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
@@ -247,16 +261,14 @@ export default function SubscriptionClient({
                     : 'bg-brand-50 text-brand-700 hover:bg-brand-100'
                 }`}
               >
-                {loading === plan.id ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : isCurrentPlan ? (
+                {isCurrentPlan ? (
                   "Current Plan"
                 ) : isDowngrade ? (
                   "Downgrade not allowed"
                 ) : isUpgrade ? (
                   <>Upgrade ({calculateUpgradeCost(plan.price)} ৳) <TrendingUp size={16}/></>
                 ) : (
-                  "Subscribe with bKash"
+                  "Subscribe"
                 )}
               </button>
             </div>

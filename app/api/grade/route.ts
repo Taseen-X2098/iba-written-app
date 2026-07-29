@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
 import { checkTestLimit, consumeTestSlot } from "@/lib/api/usage";
 
 // POST /api/grade
@@ -57,23 +58,28 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Save to database
-    const { error: dbError } = await supabase
+    // Use admin client to bypass RLS since users can no longer insert directly
+    const adminSupabase = await createAdminClient();
+    const { error: dbError } = await adminSupabase
       .from("submissions")
       .insert({
         user_id: user.id,
         question_id: question.id,
-        exam_id: null, // Weekly exams are null for normal tests
-        ocr_text: ocrText,
-        final_text: submissionText,
-        time_taken_seconds: timeTakenSeconds,
+        ocr_text: ocrText || "",
+        edited_text: submissionText || "",
+        time_taken_seconds: timeTakenSeconds || 0,
         grading_result: result,
       });
 
     if (dbError) {
       console.error("Failed to save submission:", dbError);
-      // We don't fail the request here, but we log it. 
-      // In production, we'd want a retry queue or alerting.
+      const fs = require("fs");
+      fs.writeFileSync("db_error_log.txt", JSON.stringify(dbError, null, 2));
     }
+
+    // Force Next.js to purge cache for history and progress so the user sees the new test immediately
+    revalidatePath("/history");
+    revalidatePath("/progress");
 
     // Return student feedback
     return NextResponse.json({ gradingResult: result });

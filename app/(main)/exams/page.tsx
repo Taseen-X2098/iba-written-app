@@ -27,12 +27,16 @@ export default async function StudentExamsPage() {
     .eq("is_published", true)
     .order("starts_at", { ascending: false });
 
-  if (error) {
+  // Ignore empty object errors (common in some Supabase edge cases when returning 0 rows)
+  if (error && Object.keys(error).length > 0) {
     console.error("Error fetching exams:", error);
   }
 
   const safeExams = exams || [];
   const now = new Date().getTime();
+
+  const upcomingOrLiveExams = safeExams.filter((exam: Exam) => new Date(exam.ends_at).getTime() >= now);
+  const pastExams = safeExams.filter((exam: Exam) => new Date(exam.ends_at).getTime() < now);
 
   return (
     <div className="px-4 py-6 lg:px-8 max-w-5xl mx-auto animate-fade-in">
@@ -66,20 +70,19 @@ export default async function StudentExamsPage() {
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {safeExams.length === 0 ? (
+      <div className="grid md:grid-cols-2 gap-6 mb-12">
+        {upcomingOrLiveExams.length === 0 ? (
           <div className="md:col-span-2 text-center py-16 text-muted-foreground border border-dashed border-border rounded-2xl bg-card/50">
             <FileText size={48} className="mx-auto mb-4 opacity-30" />
             <p className="text-sm">No weekly exams are currently scheduled.</p>
           </div>
         ) : (
-          safeExams.map((exam: Exam) => {
+          upcomingOrLiveExams.map((exam: Exam) => {
             const startsAt = new Date(exam.starts_at).getTime();
             const endsAt = new Date(exam.ends_at).getTime();
             
-            let status: "upcoming" | "active" | "past" = "upcoming";
+            let status: "upcoming" | "active" = "upcoming";
             if (now >= startsAt && now <= endsAt) status = "active";
-            if (now > endsAt) status = "past";
 
             return (
               <div 
@@ -93,13 +96,6 @@ export default async function StudentExamsPage() {
                     <div className="bg-brand-500 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg flex items-center gap-1">
                       <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
                       Live Now
-                    </div>
-                  </div>
-                )}
-                {status === "past" && (
-                  <div className="absolute top-0 right-0">
-                    <div className="bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg">
-                      Ended
                     </div>
                   </div>
                 )}
@@ -138,17 +134,10 @@ export default async function StudentExamsPage() {
                       {hasAccess ? "Enter Exam" : "Locked"}
                       <ChevronRight size={16} />
                     </Link>
-                  ) : status === "upcoming" ? (
+                  ) : (
                     <button disabled className="flex-1 bg-muted text-muted-foreground px-4 py-2.5 rounded-xl text-sm font-bold cursor-not-allowed">
                       Starts Soon
                     </button>
-                  ) : (
-                    <Link
-                      href={`/exams/${exam.id}/results`}
-                      className="flex-1 flex items-center justify-center gap-2 bg-brand-50 text-brand-700 hover:bg-brand-100 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors"
-                    >
-                      <Trophy size={16} /> View Results
-                    </Link>
                   )}
                 </div>
               </div>
@@ -156,6 +145,64 @@ export default async function StudentExamsPage() {
           })
         )}
       </div>
+
+      {pastExams.length > 0 && (
+        <details className="group">
+          <summary className="flex items-center gap-2 cursor-pointer list-none text-muted-foreground hover:text-foreground font-bold mb-6 transition-colors">
+            <span className="bg-muted px-3 py-1.5 rounded-lg border border-border group-open:bg-brand-50 group-open:text-brand-700 group-open:border-brand-200 transition-colors flex items-center gap-2">
+              <ChevronRight size={18} className="group-open:rotate-90 transition-transform" />
+              View Past Exams ({pastExams.length})
+            </span>
+          </summary>
+          
+          <div className="grid md:grid-cols-2 gap-6 mt-4">
+            {pastExams.map((exam: Exam) => (
+              <div 
+                key={exam.id}
+                className="bg-card border border-border rounded-2xl p-6 relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0">
+                  <div className="bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg">
+                    Ended
+                  </div>
+                </div>
+
+                <h3 className="text-lg font-bold text-foreground mb-2 pr-16">{exam.title}</h3>
+                {exam.description && (
+                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
+                )}
+
+                <div className="flex flex-col gap-2 mb-6 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Clock size={16} className="text-muted-foreground" />
+                    <span className="font-medium text-foreground">{exam.time_limit_minutes} Minutes</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <Link
+                    href={`/exams/${exam.id}/results`}
+                    className="flex-1 w-full flex items-center justify-center gap-2 bg-muted text-foreground hover:bg-border px-4 py-2.5 rounded-xl text-sm font-bold transition-colors"
+                  >
+                    <Trophy size={16} /> Leaderboard
+                  </Link>
+                  <Link
+                    href={hasAccess ? `/exams/${exam.id}?practice=true` : "#"}
+                    className={`flex-1 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                      hasAccess 
+                        ? "bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200" 
+                        : "bg-muted text-muted-foreground cursor-not-allowed opacity-50 border border-transparent"
+                    }`}
+                  >
+                    <FileText size={16} /> 
+                    {hasAccess ? "Practice Exam" : "Locked"}
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

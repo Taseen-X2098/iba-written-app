@@ -4,14 +4,16 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
   Play, Upload, FileText, CheckCircle2, AlertCircle, 
-  Clock, X, Loader2, ArrowRight, ChevronRight, PenLine, Sparkles
+  Clock, X, Loader2, ArrowRight, ChevronRight, PenLine, Sparkles, Camera
 } from "lucide-react";
-import type { Question, GradingResultJSON } from "@/lib/types";
+import { WebcamCapture } from "@/components/ui/webcam-capture";
 import { CATEGORY_LABELS } from "@/lib/types";
+import { HighlightedText } from "@/components/ui/highlighted-text";
 
 type TestState = 
   | "idle" 
   | "running" 
+  | "paused"
   | "uploading" 
   | "ocr_processing" 
   | "editing" 
@@ -34,11 +36,59 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [showCamera, setShowCamera] = useState(false);
   const [ocrText, setOcrText] = useState("");
   const [editedText, setEditedText] = useState("");
   
   // Grading state
   const [gradingResult, setGradingResult] = useState<GradingResultJSON | null>(null);
+
+  // Initialize from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("in_progress_test");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        
+        // Expire after 1 hour (3600000 ms) of inactivity
+        if (Date.now() - parsed.lastUpdatedAt > 3600000) {
+          localStorage.removeItem("in_progress_test");
+          return;
+        }
+
+        if (parsed.questionId === question.id) {
+          if (parsed.state === "running") {
+            const currentElapsed = parsed.secondsElapsed + Math.floor((Date.now() - parsed.lastUpdatedAt) / 1000);
+            setSecondsElapsed(currentElapsed);
+            setState("running");
+          } else if (parsed.state === "paused") {
+            setSecondsElapsed(parsed.secondsElapsed);
+            setState("paused");
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [question.id]);
+
+  // Save to localStorage
+  useEffect(() => {
+    if (state === "running" || state === "paused") {
+      const payload = {
+        questionId: question.id,
+        prompt: question.prompt,
+        category: question.category,
+        marks: question.marks,
+        secondsElapsed,
+        state,
+        lastUpdatedAt: Date.now()
+      };
+      console.log("Saving in-progress test to localStorage:", payload);
+      localStorage.setItem("in_progress_test", JSON.stringify(payload));
+      window.dispatchEvent(new Event("in_progress_test_updated"));
+    }
+  }, [state, secondsElapsed, question]);
 
   // Timer logic
   useEffect(() => {
@@ -71,6 +121,30 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const handlePauseToggle = () => {
+    if (state === "running") {
+      setState("paused");
+    } else if (state === "paused") {
+      setState("running");
+    }
+  };
+
+  const handleRestartTimer = () => {
+    if (confirm("Are you sure you want to restart the timer?")) {
+      setSecondsElapsed(0);
+      setState("running");
+    }
+  };
+
+  const handleCancelSession = () => {
+    if (confirm("Are you sure you want to cancel this session? Your timer will be reset and removed from history.")) {
+      localStorage.removeItem("in_progress_test");
+      window.dispatchEvent(new Event("in_progress_test_updated"));
+      setSecondsElapsed(0);
+      setState("idle");
     }
   };
 
@@ -128,6 +202,10 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       setGradingResult(data.gradingResult);
       setState("feedback");
       
+      // Clear localStorage on success
+      localStorage.removeItem("in_progress_test");
+      window.dispatchEvent(new Event("in_progress_test_updated"));
+      
       // Tell Next.js router to refresh so the user's slot count updates
       router.refresh();
     } catch (err: any) {
@@ -166,7 +244,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       )}
 
       {/* State Machine UI */}
-      <div className="flex-1 bg-card border border-border rounded-2xl p-6 shadow-sm flex flex-col">
+      <div className="flex-1 bg-card border border-border rounded-2xl p-4 sm:p-6 shadow-sm flex flex-col">
         {state === "idle" && (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
             <div className="h-16 w-16 bg-brand-50 rounded-full flex items-center justify-center mb-6 shadow-inner">
@@ -178,7 +256,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
             </p>
             <button
               onClick={handleStart}
-              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
                          hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
             >
               <Play size={16} />
@@ -192,40 +270,99 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
           </div>
         )}
 
-        {state === "running" && (
+        {(state === "running" || state === "paused") && (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-12 animate-fade-in">
-            <div className="text-5xl md:text-7xl font-mono font-bold tracking-tight text-foreground mb-4">
+            <div className="text-5xl md:text-7xl font-mono font-bold tracking-tight text-foreground mb-2">
               {formatTime(secondsElapsed)}
             </div>
+            
+            <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 mb-8 w-full">
+              <button
+                onClick={handlePauseToggle}
+                className="w-full sm:w-auto px-6 py-2.5 sm:px-4 sm:py-1.5 rounded-xl sm:rounded-full text-sm sm:text-xs font-semibold uppercase tracking-widest transition-colors border
+                           bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground border-border"
+              >
+                {state === "paused" ? "Resume Timer" : "Pause Timer"}
+              </button>
+              
+              <button
+                onClick={handleRestartTimer}
+                className="w-full sm:w-auto px-6 py-2.5 sm:px-4 sm:py-1.5 rounded-xl sm:rounded-full text-sm sm:text-xs font-semibold uppercase tracking-widest transition-colors border
+                           bg-destructive/10 text-destructive hover:bg-destructive/20 border-destructive/20"
+              >
+                Restart Timer
+              </button>
+              
+              <button
+                onClick={handleCancelSession}
+                className="w-full sm:w-auto px-6 py-2.5 sm:px-4 sm:py-1.5 rounded-xl sm:rounded-full text-sm sm:text-xs font-semibold uppercase tracking-widest transition-colors border
+                           bg-muted text-muted-foreground hover:bg-destructive hover:text-destructive-foreground border-border hover:border-destructive"
+              >
+                Cancel Session
+              </button>
+            </div>
+            
             <p className="text-sm text-muted-foreground mb-8">
-              Write your answer on paper. The timer is running.
+              {state === "paused" 
+                ? "Test is paused. Your time has been suspended."
+                : "Write your answer on paper. The timer is running."}
             </p>
             
-            <div className="w-full max-w-sm rounded-xl border-2 border-dashed border-border bg-muted/30 p-8 hover:bg-muted/50 transition-colors">
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileSelect}
-                className="hidden"
-                id="file-upload"
-              />
-              <label 
-                htmlFor="file-upload"
-                className="cursor-pointer flex flex-col items-center gap-3"
-              >
-                <div className="h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center">
-                  <Upload size={24} className="text-brand-600" />
+            <div className={`w-full max-w-md ${state === "paused" ? "opacity-50 pointer-events-none" : ""}`}>
+              {showCamera ? (
+                <div className="mb-8">
+                  <WebcamCapture 
+                    onCapture={(file) => {
+                      setSelectedFile(file);
+                      setShowCamera(false);
+                    }}
+                    onCancel={() => setShowCamera(false)}
+                  />
                 </div>
-                <div>
-                  <span className="text-sm font-semibold text-brand-600 block mb-1">
-                    Upload your handwritten answer
-                  </span>
-                  <span className="text-xs text-muted-foreground block">
-                    Take a photo or choose from gallery
-                  </span>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Camera Button */}
+                  <button
+                    onClick={() => setShowCamera(true)}
+                    className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center"
+                  >
+                    <div className="h-10 w-10 rounded-full bg-brand-100 flex items-center justify-center mb-3">
+                      <Camera size={20} className="text-brand-600" />
+                    </div>
+                    <span className="text-sm font-semibold text-brand-600 block mb-1">
+                      Take Photo
+                    </span>
+                    <span className="text-[10px] text-muted-foreground block text-center">
+                      Use camera directly
+                    </span>
+                  </button>
+
+                  {/* Gallery Button */}
+                  <div className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                      id="file-upload-gallery"
+                    />
+                    <label 
+                      htmlFor="file-upload-gallery"
+                      className="cursor-pointer flex flex-col items-center w-full text-center"
+                    >
+                      <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mb-3">
+                        <FileText size={20} className="text-secondary-foreground" />
+                      </div>
+                      <span className="text-sm font-semibold text-foreground block mb-1">
+                        Upload File
+                      </span>
+                      <span className="text-[10px] text-muted-foreground block">
+                        Choose from gallery
+                      </span>
+                    </label>
+                  </div>
                 </div>
-              </label>
+              )}
             </div>
             
             {selectedFile && (
@@ -282,10 +419,10 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                          focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
               placeholder="Your answer will appear here..."
             />
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex flex-col sm:flex-row sm:justify-end">
               <button
                 onClick={handleSubmitForGrading}
-                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
                            hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
               >
                 Submit for Grading <Sparkles size={16} />
@@ -312,19 +449,19 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
         {state === "feedback" && gradingResult && (
           <div className="flex-1 animate-fade-in space-y-8">
             {/* Score Banner */}
-            <div className="flex flex-col md:flex-row items-center gap-6 bg-brand-50 border border-brand-100 rounded-2xl p-6">
-              <div className="h-24 w-24 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 border-4 border-brand-200">
+              <div className="flex flex-col md:flex-row items-center gap-4 sm:gap-6 bg-brand-50 border border-brand-100 rounded-2xl p-5 sm:p-6 text-center md:text-left">
+              <div className="h-20 w-20 sm:h-24 sm:w-24 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 border-4 border-brand-200">
                 <div className="text-center">
-                  <span className="block text-2xl font-bold text-brand-700 leading-none">
+                  <span className="block text-xl sm:text-2xl font-bold text-brand-700 leading-none">
                     {gradingResult.studentFeedback.score.split("/")[0]}
                   </span>
-                  <span className="block text-xs font-semibold text-brand-500 mt-1">
+                  <span className="block text-[10px] sm:text-xs font-semibold text-brand-500 mt-1">
                     OUT OF {gradingResult.studentFeedback.score.split("/")[1]}
                   </span>
                 </div>
               </div>
               <div>
-                <h3 className="text-xl font-bold text-brand-900 mb-2">AI Feedback Summary</h3>
+                <h3 className="text-lg sm:text-xl font-bold text-brand-900 mb-1.5 sm:mb-2">AI Feedback Summary</h3>
                 <p className="text-sm text-brand-800 leading-relaxed">
                   {gradingResult.studentFeedback.summary}
                 </p>
@@ -354,11 +491,11 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
               </div>
             </div>
 
-            <div className="pt-4 border-t border-border flex justify-end">
+            <div className="pt-4 sm:pt-6 border-t border-border flex flex-col sm:flex-row sm:justify-end">
               <button
                 onClick={() => router.push("/questions")}
-                className="inline-flex items-center gap-2 rounded-xl bg-card border border-border px-6 py-2.5 text-sm font-medium text-foreground
-                           hover:bg-muted transition-colors"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-card border border-border px-6 py-3 sm:py-2.5 text-sm font-medium text-foreground
+                           hover:bg-muted transition-colors active:scale-[0.98]"
               >
                 Back to Questions
               </button>
@@ -370,70 +507,3 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   );
 }
 
-// ─── Highlighted Text Component ──────────────────────────────────────────
-
-function HighlightedText({ text, highlights }: { text: string; highlights: any[] }) {
-  const [activeHighlight, setActiveHighlight] = useState<number | null>(null);
-
-  // Simple string search implementation. 
-  // For a robust implementation, we'd need to find all overlapping indices.
-  // Assuming non-overlapping highlights for this MVP.
-  
-  let result: React.ReactNode[] = [];
-  let currentIndex = 0;
-
-  // Sort highlights by their position in text
-  const sortedHighlights = [...highlights]
-    .map((h, i) => {
-      const index = text.indexOf(h.quote);
-      return { ...h, originalIndex: i, startIndex: index, endIndex: index + h.quote.length };
-    })
-    .filter(h => h.startIndex !== -1)
-    .sort((a, b) => a.startIndex - b.startIndex);
-
-  sortedHighlights.forEach((h, i) => {
-    // Add text before highlight
-    if (h.startIndex > currentIndex) {
-      result.push(<span key={`text-${currentIndex}`}>{text.slice(currentIndex, h.startIndex)}</span>);
-    }
-    
-    // Add highlighted section
-    if (h.startIndex >= currentIndex) {
-      result.push(
-        <span key={`highlight-wrapper-${i}`} className="relative inline-block group">
-          <mark 
-            data-type={h.type}
-            onMouseEnter={() => setActiveHighlight(i)}
-            onMouseLeave={() => setActiveHighlight(null)}
-          >
-            {text.slice(h.startIndex, h.endIndex)}
-          </mark>
-          
-          {/* Tooltip */}
-          {activeHighlight === i && (
-            <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-foreground text-background text-xs rounded-lg shadow-xl animate-fade-in pointer-events-none">
-              <div className="font-semibold mb-1 uppercase tracking-wide opacity-80">
-                {h.type === "strength" ? "Good" : "Improvement"}
-              </div>
-              {h.comment}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-foreground" />
-            </div>
-          )}
-        </span>
-      );
-      currentIndex = h.endIndex;
-    }
-  });
-
-  // Add remaining text
-  if (currentIndex < text.length) {
-    result.push(<span key={`text-${currentIndex}`}>{text.slice(currentIndex)}</span>);
-  }
-
-  // Fallback if no highlights matched
-  if (result.length === 0) {
-    return <span>{text}</span>;
-  }
-
-  return <>{result}</>;
-}

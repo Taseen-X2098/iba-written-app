@@ -4,15 +4,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { fetchQuestionsClient } from "@/lib/api/questions-client";
-import { BookOpen, Search, Filter, Loader2, ArrowRight } from "lucide-react";
+import { BookOpen, Search, Filter, Loader2, ArrowRight, ChevronDown } from "lucide-react";
 import Link from "next/link";
-import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "@/lib/types";
+import { CATEGORY_LABELS, DIFFICULTY_LABELS, type QuestionCategory } from "@/lib/types";
 
 interface Props {
   initialSearch?: string;
   initialCategory: string;
   initialDifficulty: string;
   initialSortBy: string;
+  initialCompletionStatus?: string;
 }
 
 export default function QuestionBankClient({
@@ -20,6 +21,7 @@ export default function QuestionBankClient({
   initialCategory,
   initialDifficulty,
   initialSortBy,
+  initialCompletionStatus = "not_done",
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -30,6 +32,7 @@ export default function QuestionBankClient({
   const [category, setCategory] = useState(initialCategory);
   const [difficulty, setDifficulty] = useState(initialDifficulty);
   const [sortBy, setSortBy] = useState(initialSortBy);
+  const [completionStatus, setCompletionStatus] = useState(initialCompletionStatus);
 
   // Sync state to URL without infinite loops (following URL syncing KI)
   const syncToUrl = useCallback(() => {
@@ -56,11 +59,16 @@ export default function QuestionBankClient({
       else params.delete("sortBy");
       changed = true;
     }
+    if (completionStatus !== (params.get("completionStatus") || "not_done")) {
+      if (completionStatus !== "not_done") params.set("completionStatus", completionStatus);
+      else params.delete("completionStatus");
+      changed = true;
+    }
 
     if (changed) {
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     }
-  }, [search, category, difficulty, sortBy, pathname, router, searchParams]);
+  }, [search, category, difficulty, sortBy, completionStatus, pathname, router, searchParams]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -71,13 +79,14 @@ export default function QuestionBankClient({
   // When filters change, sync to URL immediately
   useEffect(() => {
     syncToUrl();
-  }, [category, difficulty, sortBy, syncToUrl]);
+  }, [category, difficulty, sortBy, completionStatus, syncToUrl]);
 
   // Query uses URL params to match hydration key
   const activeSearch = searchParams.get("search") || undefined;
   const activeCategory = searchParams.get("category") || "all";
   const activeDifficulty = searchParams.get("difficulty") || "all";
   const activeSortBy = searchParams.get("sortBy") || "newest";
+  const activeCompletionStatus = searchParams.get("completionStatus") || "not_done";
 
   const {
     data,
@@ -93,6 +102,7 @@ export default function QuestionBankClient({
         category: activeCategory,
         difficulty: activeDifficulty,
         sortBy: activeSortBy,
+        status: activeCompletionStatus,
       },
     ],
     queryFn: ({ pageParam = 1 }) =>
@@ -103,6 +113,8 @@ export default function QuestionBankClient({
         category: activeCategory as any,
         difficulty: activeDifficulty as any,
         sortBy: activeSortBy as any,
+        status: activeCompletionStatus as any,
+        excludeTranslation: true,
       }),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => lastPage.nextPage,
@@ -148,7 +160,7 @@ export default function QuestionBankClient({
 
       {/* Filters and Search */}
       <div className="space-y-3 mb-6">
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <Search
               size={16}
@@ -167,34 +179,37 @@ export default function QuestionBankClient({
           </div>
           <button
             onClick={syncToUrl}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors"
+            className="rounded-lg bg-brand-600 px-4 py-2.5 sm:py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors w-full sm:w-auto"
           >
             Search
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex items-center border border-border rounded-lg bg-card px-3">
-            <Filter size={14} className="text-muted-foreground mr-2 shrink-0" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-2">
+          <div className="relative w-full lg:w-auto">
+            <Filter size={14} className="text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="bg-transparent py-2 text-sm focus:outline-none text-foreground cursor-pointer pr-4 appearance-none"
+              className="bg-card border border-border rounded-lg pl-9 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-foreground cursor-pointer appearance-none w-full"
             >
               <option value="all">All Topics</option>
-              {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
+              {Object.entries(CATEGORY_LABELS)
+                .filter(([key]) => key !== "translation")
+                .map(([key, label]) => (
                 <option key={key} value={key}>
                   {label}
                 </option>
               ))}
             </select>
+            <ChevronDown size={14} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          <div className="relative flex items-center border border-border rounded-lg bg-card px-3">
+          <div className="relative w-full lg:w-auto">
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value)}
-              className="bg-transparent py-2 text-sm focus:outline-none text-foreground cursor-pointer pr-4 appearance-none"
+              className="bg-card border border-border rounded-lg pl-4 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-foreground cursor-pointer appearance-none w-full"
             >
               <option value="all">All Difficulties</option>
               {Object.entries(DIFFICULTY_LABELS).map(([key, label]) => (
@@ -203,18 +218,33 @@ export default function QuestionBankClient({
                 </option>
               ))}
             </select>
+            <ChevronDown size={14} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          <div className="relative flex items-center border border-border rounded-lg bg-card px-3 ml-auto">
+          <div className="relative w-full lg:w-auto">
+            <select
+              value={completionStatus}
+              onChange={(e) => setCompletionStatus(e.target.value)}
+              className="bg-card border border-border rounded-lg pl-4 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-foreground cursor-pointer appearance-none w-full"
+            >
+              <option value="not_done">Not Done Yet</option>
+              <option value="done">Done</option>
+              <option value="all">Any Status</option>
+            </select>
+            <ChevronDown size={14} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+
+          <div className="relative w-full lg:w-auto lg:ml-auto">
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="bg-transparent py-2 text-sm focus:outline-none text-foreground cursor-pointer pr-4 appearance-none"
+              className="bg-card border border-border rounded-lg pl-4 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 text-foreground cursor-pointer appearance-none w-full"
             >
               <option value="newest">Newest First</option>
               <option value="oldest">Oldest First</option>
               <option value="difficulty">By Difficulty</option>
             </select>
+            <ChevronDown size={14} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
         </div>
       </div>
@@ -253,7 +283,9 @@ export default function QuestionBankClient({
                           ? "bg-green-50 text-green-700"
                           : q.difficulty === "medium"
                           ? "bg-yellow-50 text-yellow-700"
-                          : "bg-red-50 text-red-700"
+                          : q.difficulty === "hard"
+                          ? "bg-red-50 text-red-700"
+                          : "bg-purple-50 text-purple-700"
                       }`}
                   >
                     {DIFFICULTY_LABELS[q.difficulty] || q.difficulty}

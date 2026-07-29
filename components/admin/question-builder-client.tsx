@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Save, Loader2 } from "lucide-react";
+import { Save, Loader2, ChevronDown } from "lucide-react";
 import type { QuestionCategory, Difficulty } from "@/lib/types";
 
 const CATEGORIES: { value: QuestionCategory; label: string }[] = [
@@ -17,17 +17,21 @@ const CATEGORIES: { value: QuestionCategory; label: string }[] = [
   { value: "grammar", label: "Grammar & Vocabulary" },
 ];
 
-export default function QuestionBuilderClient() {
+export default function QuestionBuilderClient({
+  initialData,
+}: {
+  initialData?: any;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   
   const [form, setForm] = useState({
-    prompt: "",
-    category: "essay" as QuestionCategory,
-    difficulty: "medium" as Difficulty,
-    marks: 10,
-    source: "",
-    spaceHint: "",
+    prompt: initialData?.prompt || "",
+    category: (initialData?.category || "essay") as QuestionCategory,
+    difficulty: (initialData?.difficulty || "medium") as Difficulty,
+    marks: initialData?.marks || 10,
+    source: initialData?.source || "",
+    spaceHint: initialData?.space_hint || "",
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -36,10 +40,14 @@ export default function QuestionBuilderClient() {
     
     setLoading(true);
     try {
+      const isEditing = !!initialData;
       const res = await fetch("/api/admin/questions", {
-        method: "POST",
+        method: isEditing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ 
+          ...form,
+          id: initialData?.id 
+        }),
       });
 
       if (!res.ok) {
@@ -56,6 +64,10 @@ export default function QuestionBuilderClient() {
 
   return (
     <form onSubmit={handleSave} className="bg-card border border-border rounded-xl p-6 space-y-6">
+      <h1 className="text-xl font-semibold mb-6">
+        {initialData ? "Edit Question" : "Create New Question"}
+      </h1>
+
       <div>
         <label className="block text-sm font-medium text-foreground mb-1">Question Prompt *</label>
         <textarea 
@@ -70,26 +82,33 @@ export default function QuestionBuilderClient() {
       <div className="grid md:grid-cols-2 gap-6">
         <div>
           <label className="block text-sm font-medium text-foreground mb-1">Category</label>
-          <select 
-            value={form.category}
-            onChange={e => setForm({...form, category: e.target.value as QuestionCategory})}
-            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
+          <div className="relative">
+            <select 
+              value={form.category}
+              onChange={e => setForm({...form, category: e.target.value as QuestionCategory})}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 pr-10"
+            >
+              {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            <ChevronDown size={16} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none z-0" />
+          </div>
         </div>
         
         <div>
           <label className="block text-sm font-medium text-foreground mb-1">Difficulty</label>
-          <select 
-            value={form.difficulty}
-            onChange={e => setForm({...form, difficulty: e.target.value as Difficulty})}
-            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            <option value="easy">Easy</option>
-            <option value="medium">Medium</option>
-            <option value="hard">Hard</option>
-          </select>
+          <div className="relative">
+            <select 
+              value={form.difficulty}
+              onChange={e => setForm({...form, difficulty: e.target.value as Difficulty})}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 pr-10"
+            >
+              <option value="easy">Easy</option>
+              <option value="medium">Medium</option>
+              <option value="hard">Hard</option>
+              <option value="very_hard">Very Hard</option>
+            </select>
+            <ChevronDown size={16} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none z-0" />
+          </div>
         </div>
 
         <div>

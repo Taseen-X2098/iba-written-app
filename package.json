@@ -16,6 +16,8 @@
     "@tanstack/react-query": "^5.101.4",
     "@upstash/redis": "^1.38.0",
     "date-fns": "^4.4.0",
+    "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
     "lucide-react": "^1.27.0",
     "next": "^16.2.12",
     "openai": "^7.0.0",

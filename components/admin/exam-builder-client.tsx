@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Calendar, Clock, Save, GripVertical, Trash2, Plus } from "lucide-react";
+import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown } from "lucide-react";
 import type { Question } from "@/lib/types";
 
 interface Props {
@@ -21,14 +21,22 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
   // Selected questions with order and marks
   const [selectedQuestions, setSelectedQuestions] = useState<{q: Question, marks: number}[]>([]);
 
-  const handleAddQuestion = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const qId = e.target.value;
-    if (!qId) return;
-    const q = availableQuestions.find(x => x.id === qId);
-    if (q && !selectedQuestions.find(x => x.q.id === qId)) {
-      setSelectedQuestions([...selectedQuestions, { q, marks: q.marks }]);
-    }
-    e.target.value = "";
+  const handleAddBlankQuestion = () => {
+    const tempId = `temp_${Date.now()}_${Math.random()}`;
+    const q: Question = {
+      id: tempId,
+      prompt: "",
+      category: "basic_paragraph",
+      difficulty: "medium",
+      marks: 10,
+      source: null,
+      space_hint: null,
+      max_images: 2,
+      is_active: true,
+      created_at: new Date().toISOString(),
+      created_by: null
+    };
+    setSelectedQuestions([...selectedQuestions, { q, marks: 10 }]);
   };
 
   const removeQuestion = (id: string) => {
@@ -36,13 +44,49 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
   };
 
   const handleSave = async (publish: boolean) => {
-    if (!title || !startsAt || !endsAt || selectedQuestions.length === 0) {
-      alert("Please fill in all required fields and select at least one question.");
+    if (!title || !startsAt || !endsAt) {
+      alert("Please fill in all required exam details.");
+      return;
+    }
+    if (publish && selectedQuestions.length === 0) {
+      alert("Please add at least one question to publish the exam.");
       return;
     }
     
     setLoading(true);
     try {
+      // First, save any temporary questions
+      const finalQuestions = [];
+      for (let i = 0; i < selectedQuestions.length; i++) {
+        const sq = selectedQuestions[i];
+        if (sq.q.id.startsWith("temp_")) {
+          // POST to create question
+          const qRes = await fetch("/api/admin/questions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt: sq.q.prompt || "Untitled Question",
+              category: sq.q.category,
+              difficulty: sq.q.difficulty,
+              marks: sq.marks,
+            })
+          });
+          if (!qRes.ok) throw new Error("Failed to create custom question");
+          const qData = await qRes.json();
+          finalQuestions.push({
+            questionId: qData.id,
+            orderIndex: i,
+            marks: sq.marks
+          });
+        } else {
+          finalQuestions.push({
+            questionId: sq.q.id,
+            orderIndex: i,
+            marks: sq.marks
+          });
+        }
+      }
+
       const res = await fetch("/api/admin/exams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,11 +97,7 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
           startsAt: new Date(startsAt).toISOString(),
           endsAt: new Date(endsAt).toISOString(),
           isPublished: publish,
-          questions: selectedQuestions.map((sq, i) => ({
-            questionId: sq.q.id,
-            orderIndex: i,
-            marks: sq.marks
-          }))
+          questions: finalQuestions
         })
       });
 
@@ -133,15 +173,12 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
         <div className="bg-card border border-border rounded-xl p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-bold text-foreground">Questions ({selectedQuestions.length})</h2>
-            <select 
-              onChange={handleAddQuestion}
-              className="bg-brand-50 border border-brand-100 text-brand-700 rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500"
+            <button 
+              onClick={handleAddBlankQuestion}
+              className="bg-brand-50 text-brand-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-brand-100 transition-colors flex items-center gap-1 border border-brand-200"
             >
-              <option value="">+ Add Question</option>
-              {availableQuestions.filter(q => !selectedQuestions.find(sq => sq.q.id === q.id)).map(q => (
-                <option key={q.id} value={q.id}>{q.prompt.slice(0, 50)}...</option>
-              ))}
-            </select>
+              <Plus size={16} /> Write Question
+            </button>
           </div>
 
           <div className="space-y-3">
@@ -156,8 +193,22 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
                     <GripVertical size={20} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-foreground line-clamp-1">{sq.q.prompt}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{sq.q.category} • Difficulty: {sq.q.difficulty}</p>
+                    {sq.q.id.startsWith("temp_") ? (
+                      <textarea
+                        value={sq.q.prompt}
+                        onChange={(e) => {
+                          const newArr = [...selectedQuestions];
+                          newArr[index].q.prompt = e.target.value;
+                          setSelectedQuestions(newArr);
+                        }}
+                        className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm"
+                        placeholder="Type your custom question here..."
+                        rows={2}
+                      />
+                    ) : (
+                      <p className="text-sm font-medium text-foreground line-clamp-1">{sq.q.prompt}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">{sq.q.category} • Difficulty: {sq.q.difficulty}</p>
                   </div>
                   <div className="w-20">
                     <input 

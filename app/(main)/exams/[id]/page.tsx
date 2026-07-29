@@ -1,14 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ExamTakerClient from "@/components/exams/exam-taker-client";
+import AutoFinalizer from "@/components/exams/auto-finalizer";
 import { getRedis, CacheKeys } from "@/lib/redis";
 
 export default async function TakeExamPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ practice?: string }>;
 }) {
   const { id } = await params;
+  const { practice } = await searchParams;
+  const isPractice = practice === "true";
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -27,12 +32,12 @@ export default async function TakeExamPage({
     redirect("/exams");
   }
 
-  // 2. Security Check: Is Exam Active?
+  // 2. Security Check: Is Exam Active? (Bypass for practice mode)
   const now = new Date().getTime();
   const startsAt = new Date(exam.starts_at).getTime();
   const endsAt = new Date(exam.ends_at).getTime();
 
-  if (now < startsAt || now > endsAt) {
+  if (!isPractice && (now < startsAt || now > endsAt)) {
     redirect("/exams"); // Not active
   }
 
@@ -54,15 +59,17 @@ export default async function TakeExamPage({
   }
 
   // 4. Check if student already submitted this exam
-  const { data: existingResult } = await supabase
-    .from("exam_results")
-    .select("id")
-    .eq("exam_id", id)
-    .eq("user_id", user.id)
-    .single();
+  if (!isPractice) {
+    const { data: existingResult } = await supabase
+      .from("exam_results")
+      .select("id")
+      .eq("exam_id", id)
+      .eq("user_id", user.id)
+      .single();
 
-  if (existingResult) {
-    redirect(`/exams/${id}/results`);
+    if (existingResult) {
+      redirect(`/exams/${id}/results`);
+    }
   }
 
   // 5. Server-Enforced Timer & Draft Hydration
@@ -72,9 +79,19 @@ export default async function TakeExamPage({
   
   if (!serverStartTime) {
     serverStartTime = Date.now();
-    // Cache the start time exactly for the duration of the exam + a slight grace period
-    const durationMs = (exam.time_limit_minutes * 60 * 1000) + (5 * 60 * 1000); // 5 min grace
-    await redis.set(startTimeKey, serverStartTime, { ex: Math.floor(durationMs / 1000) });
+    // Cache the start time for 48 hours. Expiration checks are handled mathematically below.
+    const durationMs = (exam.time_limit_minutes * 60 * 1000) + (3 * 60 * 1000); // 3 min grace
+    await redis.set(startTimeKey, serverStartTime, { ex: 2 * 24 * 60 * 60 }); // 48 hours TTL
+  } else {
+    // Check if expired
+    const durationMs = (exam.time_limit_minutes * 60 * 1000) + (3 * 60 * 1000); // 3 min grace
+    if (Date.now() - serverStartTime > durationMs) {
+      return (
+        <div className="min-h-[calc(100vh-64px)] bg-background flex items-center justify-center p-4">
+          <AutoFinalizer examId={id} />
+        </div>
+      );
+    }
   }
 
   // Fetch all existing drafts for this exam
@@ -94,6 +111,7 @@ export default async function TakeExamPage({
         userId={user.id}
         serverStartTime={serverStartTime}
         initialDrafts={initialDrafts}
+        isPractice={isPractice}
       />
     </div>
   );

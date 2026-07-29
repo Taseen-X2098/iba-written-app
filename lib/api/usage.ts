@@ -1,7 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 
 export async function checkTestLimit(userId: string): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
 
   // 1. Check if user has an active subscription with tests remaining
   const { data: sub } = await supabase
@@ -32,7 +32,7 @@ export async function checkTestLimit(userId: string): Promise<boolean> {
 }
 
 export async function consumeTestSlot(userId: string): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = await createAdminClient();
 
   // 1. Try to consume from active subscription (extra tests first, then plan tests)
   const { data: sub } = await supabase

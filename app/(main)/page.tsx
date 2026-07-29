@@ -15,15 +15,17 @@ import {
   Flame,
 } from "lucide-react";
 import type { Profile, Tip } from "@/lib/types";
+import { calculateStreak, generateTrendData, type TrendDataPoint } from "@/lib/utils/analytics";
+import { AreaChart, Area, ResponsiveContainer, YAxis } from "recharts";
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const [stats, setStats] = useState({
     evaluations: 0,
-    avgScore: 0,
     dayStreak: 0,
   });
+  const [trend, setTrend] = useState<TrendDataPoint[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -48,31 +50,30 @@ export default function DashboardPage() {
       .select("*", { count: "exact", head: true })
       .eq("user_id", user.id);
 
-    // Average score
+    // Average score and trend from recent submissions
     const { data: submissions } = await supabase
       .from("submissions")
-      .select("grading_result")
+      .select("created_at, grading_result")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(100);
 
-    let avgScore = 0;
-    if (submissions && submissions.length > 0) {
-      const scores = submissions.map((s) => {
-        const result = s.grading_result as { internal?: { total: number; max: number } };
-        if (result?.internal) {
-          return (result.internal.total / result.internal.max) * 100;
-        }
-        return 0;
-      });
-      avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-    }
+    // Fetch dates for streak (limit 365 to keep it light but cover a year)
+    const { data: dateRows } = await supabase
+      .from("submissions")
+      .select("created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(365);
 
     setStats({
       evaluations: evalCount ?? 0,
-      avgScore,
-      dayStreak: 0, // TODO: Calculate streak from submission dates
+      dayStreak: dateRows ? calculateStreak(dateRows.map(r => new Date(r.created_at))) : 0,
     });
+
+    if (submissions) {
+      setTrend(generateTrendData(submissions));
+    }
 
     // Random tip via API
     if (profileData?.tips_enabled) {
@@ -108,24 +109,39 @@ export default function DashboardPage() {
         </div>
 
         <h3 className="text-xl font-bold text-foreground mb-1">
-          AI Evaluation
+          Detailed Evaluation
         </h3>
-        <p className="text-sm text-muted-foreground mb-5 max-w-xs">
-          Upload your handwritten answer and get AI feedback instantly.
+        <p className="text-sm text-muted-foreground mb-5 max-w-xs relative z-10">
+          Upload your handwritten answer and get feedback instantly.
         </p>
 
         <Link
           href="/questions"
           className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white
-                     hover:bg-brand-700 transition-all active:scale-[0.97] shadow-md shadow-brand-200"
+                     hover:bg-brand-700 transition-all active:scale-[0.97] shadow-md shadow-brand-200 relative z-10"
         >
           <Upload size={16} />
           Upload Answer
         </Link>
 
-        {/* Decorative paper illustration placeholder */}
-        <div className="absolute -bottom-2 -right-2 w-28 h-28 opacity-10">
-          <FileText size={112} className="text-brand-600" />
+        {/* Sparkline Graph */}
+        <div className="absolute -bottom-2 right-0 w-1/2 h-28 opacity-20 pointer-events-none">
+          {trend.length > 1 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trend} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--brand-600))" stopOpacity={0.8}/>
+                    <stop offset="95%" stopColor="hsl(var(--brand-600))" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <YAxis domain={['auto', 'auto']} hide />
+                <Area type="monotone" dataKey="score" stroke="hsl(var(--brand-600))" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <FileText size={112} className="text-brand-600 absolute -bottom-2 -right-2 opacity-50" />
+          )}
         </div>
       </div>
 
@@ -134,7 +150,7 @@ export default function DashboardPage() {
         <h3 className="text-sm font-semibold text-foreground mb-3">
           Quick Actions
         </h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Link
             href="/exams"
             className="group rounded-xl border border-border bg-card p-4 hover:border-brand-200 hover:shadow-sm transition-all"
@@ -195,20 +211,13 @@ export default function DashboardPage() {
         <h3 className="text-sm font-semibold text-foreground mb-3">
           Your Overview
         </h3>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <StatCard
             icon={FileText}
             value={stats.evaluations.toString()}
             label="Evaluations"
             color="text-brand-600"
             bgColor="bg-brand-50"
-          />
-          <StatCard
-            icon={Target}
-            value={stats.avgScore > 0 ? `${stats.avgScore}%` : "—"}
-            label="Avg. Score"
-            color="text-blue-600"
-            bgColor="bg-blue-50"
           />
           <StatCard
             icon={Flame}

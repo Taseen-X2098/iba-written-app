@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Plus, Clock, FileText } from "lucide-react";
 import type { Exam } from "@/lib/types";
+import { ForceGradeButton } from "./ForceGradeButton";
+import { ExtendTimerButton } from "./ExtendTimerButton";
 
 export default async function AdminExamsPage() {
   const supabase = await createClient();
@@ -71,9 +73,15 @@ export default async function AdminExamsPage() {
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <Link href={`/admin/exams/${exam.id}`} className="text-brand-600 font-medium hover:underline text-sm">
-                      Edit
-                    </Link>
+                    <div className="flex flex-col items-end gap-2">
+                      <Link href={`/admin/exams/${exam.id}`} className="text-brand-600 font-medium hover:underline text-sm">
+                        Edit
+                      </Link>
+                      <div className="flex justify-end gap-2 mt-1">
+                        <ExtendTimerButton examId={exam.id} />
+                        <ForceGradeButton examId={exam.id} />
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ))}

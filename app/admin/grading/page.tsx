@@ -7,17 +7,16 @@ export default async function AdminGradingPage() {
 
   // Fetch pending submissions
   const { data: submissions, error } = await supabase
-    .from("exam_submissions")
+    .from("submissions")
     .select(`
       id,
-      started_at,
-      submitted_at,
+      created_at,
+      time_taken_seconds,
       grading_result,
       profiles ( name, institute ),
-      exams ( title ),
       questions ( prompt, marks )
     `)
-    .order("submitted_at", { ascending: false });
+    .order("created_at", { ascending: false });
 
   if (error) {
     console.error("Error fetching submissions:", error);
@@ -57,13 +56,13 @@ export default async function AdminGradingPage() {
                     <p className="text-xs text-muted-foreground">{sub.profiles.institute}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <p className="font-medium text-foreground line-clamp-1">{sub.exams.title}</p>
-                    <p className="text-xs text-muted-foreground line-clamp-1">{sub.questions.prompt}</p>
+                    <p className="font-medium text-foreground line-clamp-1">Practice Test</p>
+                    <p className="text-xs text-muted-foreground line-clamp-1">{sub.questions?.prompt || "Unknown Question"}</p>
                   </td>
                   <td className="px-6 py-4 text-muted-foreground">
                     <div className="flex items-center gap-1.5 text-xs">
                       <Clock size={14} /> 
-                      {sub.submitted_at ? new Date(sub.submitted_at).toLocaleDateString() : "In progress"}
+                      {sub.created_at ? new Date(sub.created_at).toLocaleDateString() : "In progress"}
                     </div>
                   </td>
                   <td className="px-6 py-4 font-bold text-brand-700">

@@ -13,11 +13,12 @@ export default async function QuestionsPage({
   const category = (typeof params.category === "string" ? params.category : "all") as any;
   const difficulty = (typeof params.difficulty === "string" ? params.difficulty : "all") as any;
   const sortBy = (typeof params.sortBy === "string" ? params.sortBy : "newest") as any;
+  const completionStatus = (typeof params.completionStatus === "string" ? params.completionStatus : "not_done") as any;
 
   const queryClient = new QueryClient();
 
   await queryClient.prefetchInfiniteQuery({
-    queryKey: ["questions", { search, category, difficulty, sortBy }],
+    queryKey: ["questions", { search, category, difficulty, sortBy, status: completionStatus }],
     queryFn: ({ pageParam = 1 }) =>
       fetchQuestionsServer({
         page: pageParam as number,
@@ -26,6 +27,8 @@ export default async function QuestionsPage({
         category,
         difficulty,
         sortBy,
+        status: completionStatus,
+        excludeTranslation: true,
       }),
     initialPageParam: 1,
   });
@@ -37,6 +40,7 @@ export default async function QuestionsPage({
         initialCategory={category}
         initialDifficulty={difficulty}
         initialSortBy={sortBy}
+        initialCompletionStatus={completionStatus}
       />
     </HydrationBoundary>
   );

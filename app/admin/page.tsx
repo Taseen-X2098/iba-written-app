@@ -13,7 +13,7 @@ export default async function AdminDashboard() {
     { count: activeSubsCount },
     { data: revenueData }
   ] = await Promise.all([
-    supabase.from("profiles").select("*", { count: "exact", head: true }),
+    supabase.from("profiles").select("*", { count: "exact", head: true }).eq("is_admin", false),
     supabase.from("exams").select("*", { count: "exact", head: true }),
     supabase.from("exam_submissions").select("*", { count: "exact", head: true }),
     supabase.from("subscriptions").select("*", { count: "exact", head: true }).eq("is_active", true),

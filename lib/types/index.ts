@@ -13,7 +13,7 @@ export type QuestionCategory =
   | "precis"
   | "grammar";
 
-export type Difficulty = "easy" | "medium" | "hard";
+export type Difficulty = "easy" | "medium" | "hard" | "very_hard";
 
 export type PaymentStatus = "pending" | "completed" | "failed" | "refunded";
 export type PaymentType = "subscription" | "upgrade" | "extra_tests";
@@ -234,4 +234,5 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   easy: "Easy",
   medium: "Medium",
   hard: "Hard",
+  very_hard: "Very Hard",
 };

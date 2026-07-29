@@ -10,7 +10,6 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", institute: "", phone: "" });
-  const [tipsEnabled, setTipsEnabled] = useState(true);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
@@ -31,7 +30,6 @@ export default function SettingsPage() {
     if (data) {
       setProfile(data);
       setForm({ name: data.name, institute: data.institute, phone: data.phone ?? "" });
-      setTipsEnabled(data.tips_enabled);
     }
     setLoading(false);
   }
@@ -48,7 +46,6 @@ export default function SettingsPage() {
         name: form.name,
         institute: form.institute,
         phone: form.phone || null,
-        tips_enabled: tipsEnabled,
       })
       .eq("id", profile!.id);
 
@@ -129,26 +126,7 @@ export default function SettingsPage() {
             />
           </div>
 
-          {/* Tips Toggle */}
-          <div className="flex items-center justify-between rounded-lg border border-border p-3">
-            <div className="flex items-center gap-2">
-              <Lightbulb size={16} className="text-brand-600" />
-              <span className="text-sm font-medium">Show Tips Button</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setTipsEnabled(!tipsEnabled)}
-              className={`relative h-6 w-11 rounded-full transition-colors ${
-                tipsEnabled ? "bg-brand-500" : "bg-border"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                  tipsEnabled ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
-          </div>
+
 
           {message && (
             <div

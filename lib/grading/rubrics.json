@@ -50,6 +50,106 @@
         }
       ]
     },
+    "12": {
+      "total": 12,
+      "criteria": [
+        {
+          "criterion": "Topic understanding",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Expressing the opinion",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Logic behind opinion (at least 2 lines of logic)",
+          "marks": 4,
+          "guidance": "Main scoring zone — average students land 3-4 here"
+        },
+        {
+          "criterion": "Examples for logic + relevance of example",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Explanation why the other option is wrong/less plausible, and why the opinion taken is better",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Example for this + relevance explanation",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Conclusion",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Good flow and paragraphing",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": ""
+        }
+      ]
+    },
+    "13": {
+      "total": 13,
+      "criteria": [
+        {
+          "criterion": "Topic understanding",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Expressing the opinion",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Logic behind opinion (at least 2 lines of logic)",
+          "marks": 4,
+          "guidance": "Main scoring zone — average students land 3-4 here"
+        },
+        {
+          "criterion": "Examples for logic + relevance of example",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Explanation why the other option is wrong/less plausible, and why the opinion taken is better",
+          "marks": 2,
+          "guidance": ""
+        },
+        {
+          "criterion": "Example for this + relevance explanation",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Conclusion",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Good flow and paragraphing",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": ""
+        }
+      ]
+    },
     "10": {
       "total": 10,
       "criteria": [
@@ -136,6 +236,41 @@
           "guidance": ""
         }
       ]
+    },
+    "6": {
+      "total": 6,
+      "criteria": [
+        {
+          "criterion": "Understanding the quote & expressing a stance",
+          "marks": 0.5,
+          "guidance": "Merged — at this length, both must appear in the opening 1-2 sentences"
+        },
+        {
+          "criterion": "Logic behind the interpretation (at least 2 reasons)",
+          "marks": 2,
+          "guidance": "Main scoring zone"
+        },
+        {
+          "criterion": "Example for logic + relevance",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Conclusion",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Flow & paragraphing",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 1.5,
+          "guidance": ""
+        }
+      ]
     }
   },
   "creative_writing": {
@@ -149,7 +284,7 @@
         },
         {
           "criterion": "Plot/idea development",
-          "marks": 4,
+          "marks": 2,
           "guidance": "Originality of concept + coherent arc (beginning-middle-end), pacing"
         },
         {
@@ -164,7 +299,7 @@
         },
         {
           "criterion": "Theme / message / emotional impact",
-          "marks": 1,
+          "marks": 3,
           "guidance": "Does the piece land an emotion or an idea, beyond just \"a thing happened\""
         },
         {
@@ -184,8 +319,8 @@
         }
       ]
     },
-    "10": {
-      "total": 10,
+    "13": {
+      "total": 13,
       "criteria": [
         {
           "criterion": "Topic/prompt relevance",
@@ -208,8 +343,98 @@
           "guidance": ""
         },
         {
-          "criterion": "Theme/emotional impact",
+          "criterion": "Theme/emotional impact and core message",
+          "marks": 3.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Ending/conclusion",
           "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Flow, structure & grammar",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": ""
+        }
+      ]
+    },
+    "12": {
+      "total": 12,
+      "criteria": [
+        {
+          "criterion": "Topic/prompt relevance",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Plot/idea development",
+          "marks": 2.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Characterization & descriptive detail",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Language & style",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Theme/emotional impact and core message",
+          "marks": 2.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Ending/conclusion",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Flow, structure & grammar",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": ""
+        }
+      ]
+    },
+    "10": {
+      "total": 10,
+      "criteria": [
+        {
+          "criterion": "Topic/prompt relevance",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Plot/idea development",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Characterization & descriptive detail",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Language & style",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Theme/emotional impact and core message",
+          "marks": 2,
           "guidance": ""
         },
         {
@@ -635,6 +860,86 @@
           "criterion": "Extraordinary (strict)",
           "marks": 3,
           "guidance": "Exceptional word choice, an unusually sharp angle, or control well beyond level. Zero for normal students by default"
+        }
+      ]
+    },
+    "13": {
+      "total": 13,
+      "criteria": [
+        {
+          "criterion": "Topic understanding & topic sentence",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Development of the main idea",
+          "marks": 5,
+          "guidance": "Main scoring zone"
+        },
+        {
+          "criterion": "Examples / specific details & relevance",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Unity & logical order",
+          "marks": 2,
+          "guidance": ""
+        },
+        {
+          "criterion": "Concluding sentence",
+          "marks": 1,
+          "guidance": ""
+        },
+        {
+          "criterion": "Flow, language & grammar",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": ""
+        }
+      ]
+    },
+    "12": {
+      "total": 12,
+      "criteria": [
+        {
+          "criterion": "Topic understanding & topic sentence",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Development of the main idea",
+          "marks": 5,
+          "guidance": "Main scoring zone"
+        },
+        {
+          "criterion": "Examples / specific details & relevance",
+          "marks": 1.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Unity & logical order",
+          "marks": 2,
+          "guidance": ""
+        },
+        {
+          "criterion": "Concluding sentence",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Flow, language & grammar",
+          "marks": 0.5,
+          "guidance": ""
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": ""
         }
       ]
     },

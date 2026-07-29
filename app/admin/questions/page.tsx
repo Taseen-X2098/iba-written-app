@@ -63,7 +63,8 @@ export default async function AdminQuestionsPage() {
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
                       q.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
                       q.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-red-100 text-red-700'
+                      q.difficulty === 'hard' ? 'bg-red-100 text-red-700' :
+                      'bg-purple-100 text-purple-700'
                     }`}>
                       {q.difficulty}
                     </span>

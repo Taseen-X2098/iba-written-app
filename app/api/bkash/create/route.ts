@@ -33,12 +33,27 @@ export async function POST(req: NextRequest) {
 
   const { purchaseType, planId, slots } = await req.json();
 
+  // Fetch active subscription for validation
+  const { data: activeSub } = await supabase
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .limit(1)
+    .single();
+
   let amount = 0;
   let finalPlan = planId;
   
   // 1. Calculate amount
   if (purchaseType === "extra_slots") {
     if (!slots || slots <= 0) return NextResponse.json({ error: "Invalid slots" }, { status: 400 });
+    
+    // Validate that user is on Plan 1 or Plan 2
+    if (!activeSub || (activeSub.plan_type !== "plan_1" && activeSub.plan_type !== "plan_2")) {
+      return NextResponse.json({ error: "You must have an active Basic Practice or Complete Prep plan to buy extra slots." }, { status: 403 });
+    }
+    
     amount = slots * 5; // 5tk per test
   } else if (purchaseType === "plan") {
     if (!PLAN_PRICES[planId as keyof typeof PLAN_PRICES]) {
@@ -46,13 +61,6 @@ export async function POST(req: NextRequest) {
     }
 
     // Check if upgrading
-    const { data: activeSub } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("is_active", true)
-      .limit(1)
-      .single();
 
     if (activeSub && activeSub.plan_type !== planId) {
       // Upgrading logic
