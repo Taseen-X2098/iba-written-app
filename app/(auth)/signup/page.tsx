@@ -41,6 +41,7 @@ export default function SignupPage() {
     setLoading(true);
 
     const supabase = createClient();
+    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://iba-written.netlify.app";
     const { error } = await supabase.auth.signUp({
       email: form.email,
       password: form.password,
@@ -50,7 +51,7 @@ export default function SignupPage() {
           institute: form.institute,
           phone: form.phone || null,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${SITE_URL}/auth/callback`,
       },
     });
 
