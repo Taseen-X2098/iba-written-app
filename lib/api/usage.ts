@@ -1,4 +1,5 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { getRedis } from "@/lib/redis";
 
 export async function checkTestLimit(userId: string): Promise<boolean> {
   const supabase = await createAdminClient();
@@ -32,9 +33,22 @@ export async function checkTestLimit(userId: string): Promise<boolean> {
 }
 
 export async function consumeTestSlot(userId: string): Promise<boolean> {
-  const supabase = await createAdminClient();
+  const redis = getRedis();
+  const lockKey = `lock:consumeTestSlot:${userId}`;
+  
+  // Acquire distributed lock (expire in 10s to prevent deadlocks)
+  const lockAcquired = await redis.set(lockKey, "1", { nx: true, ex: 10 });
+  if (!lockAcquired) {
+    // If lock is held, it means another grading request for this user is processing right now.
+    // Instead of waiting, we can either throw or retry. Throwing is safer for preventing abuse.
+    console.warn(`Concurrent test slot consumption blocked for user ${userId}`);
+    throw new Error("Please wait for your previous grading request to finish before submitting another.");
+  }
 
-  // 1. Try to consume from active subscription (extra tests first, then plan tests)
+  try {
+    const supabase = await createAdminClient();
+
+    // 1. Try to consume from active subscription (extra tests first, then plan tests)
   const { data: sub } = await supabase
     .from("subscriptions")
     .select("*")
@@ -76,4 +90,8 @@ export async function consumeTestSlot(userId: string): Promise<boolean> {
   }
 
   return false;
+  } finally {
+    // Release the lock
+    await redis.del(lockKey);
+  }
 }

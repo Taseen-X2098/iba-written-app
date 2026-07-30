@@ -1,7 +1,7 @@
 import { BkashClient } from './client';
 
 // Mock the global fetch
-global.fetch = jest.fn();
+global.fetch = jest.fn() as unknown as typeof fetch;
 
 describe('BkashClient', () => {
   const mockConfig = {
@@ -31,13 +31,13 @@ describe('BkashClient', () => {
     const client = new BkashClient(mockConfig);
     
     // Mock the grantToken fetch
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ id_token: 'new_token', refresh_token: 'refresh', expires_in: '3600' })
     });
     
     // Mock the businessRequest fetch
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ statusMessage: 'Success' })
     });
@@ -56,7 +56,7 @@ describe('BkashClient', () => {
   it('should throw an error if grantToken fails', async () => {
     const client = new BkashClient(mockConfig);
     
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: false,
       text: async () => 'Unauthorized'
     });
@@ -71,11 +71,11 @@ describe('BkashClient', () => {
 
   it('should execute payment correctly', async () => {
     const client = new BkashClient(mockConfig);
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ id_token: 'new_token', refresh_token: 'refresh', expires_in: '3600' })
     });
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ paymentID: 'PAY123', statusMessage: 'Executed' })
     });
@@ -86,11 +86,11 @@ describe('BkashClient', () => {
 
   it('should query payment correctly', async () => {
     const client = new BkashClient(mockConfig);
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ id_token: 'new_token', refresh_token: 'refresh', expires_in: '3600' })
     });
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ paymentID: 'PAY123', transactionStatus: 'Completed' })
     });
@@ -107,11 +107,11 @@ describe('BkashClient', () => {
 
   it('should format createPayment payload correctly', async () => {
     const client = new BkashClient(mockConfig);
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ id_token: 'token' })
     });
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as unknown as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({})
     });
@@ -123,7 +123,7 @@ describe('BkashClient', () => {
       merchantInvoiceNumber: 'INV-1'
     });
 
-    const createCall = (global.fetch as jest.Mock).mock.calls[1];
+    const createCall = (global.fetch as unknown as jest.Mock).mock.calls[1];
     expect(createCall[0]).toBe('https://sandbox.bkash.com/checkout/create');
     const body = JSON.parse(createCall[1].body);
     expect(body.amount).toBe('500');

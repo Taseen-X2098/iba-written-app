@@ -10,7 +10,7 @@ export function calculateStreak(dates: Date[]): number {
 
   const today = new Date();
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const yesterdayStart = todayStart - 86400000;
+  const yesterdayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).getTime();
 
   // Check if active today or yesterday
   if (uniqueDates[0] !== todayStart && uniqueDates[0] !== yesterdayStart) {
@@ -18,13 +18,13 @@ export function calculateStreak(dates: Date[]): number {
   }
 
   let streak = 1;
-  let currentDate = uniqueDates[0];
+  let currentDateObj = new Date(uniqueDates[0]);
 
   for (let i = 1; i < uniqueDates.length; i++) {
-    const expectedPrevDay = currentDate - 86400000;
+    const expectedPrevDay = new Date(currentDateObj.getFullYear(), currentDateObj.getMonth(), currentDateObj.getDate() - 1).getTime();
     if (uniqueDates[i] === expectedPrevDay) {
       streak++;
-      currentDate = expectedPrevDay;
+      currentDateObj = new Date(expectedPrevDay);
     } else {
       break;
     }

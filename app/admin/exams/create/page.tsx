@@ -10,6 +10,7 @@ export default async function AdminCreateExamPage() {
     .from("questions")
     .select("*")
     .eq("is_active", true)
+    .neq("category", "translation")
     .order("created_at", { ascending: false });
 
   if (error) {

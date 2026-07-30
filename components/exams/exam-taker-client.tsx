@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Upload, Loader2, CheckCircle, AlertCircle, Image as ImageIcon, Save } from "lucide-react";
+import { Clock, Upload, Loader2, CheckCircle, AlertCircle, Image as ImageIcon, Save, Camera } from "lucide-react";
+import { WebcamCapture } from "@/components/ui/webcam-capture";
 import type { Exam } from "@/lib/types";
 
 interface Props {
@@ -19,6 +20,7 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
   const [timeLeft, setTimeLeft] = useState<number>(exam.time_limit_minutes * 60);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingAll, setIsSavingAll] = useState(false);
+  const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
   const [practiceResults, setPracticeResults] = useState<any[] | null>(null);
   
   // State for each question: OCR text, edited text, uploading state, isDirty
@@ -106,7 +108,8 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
           examId: exam.id,
           examQuestionId: eqId,
           ocrText: newText,
-          editedText: newText
+          editedText: newText,
+          isPractice: isPractice
         })
       }).catch(err => console.error("Auto-save after OCR failed", err));
 
@@ -138,7 +141,8 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
           examId: exam.id,
           examQuestionId: eqId,
           ocrText: ocrText ?? currentAns.ocrText,
-          editedText: editedText ?? currentAns.editedText
+          editedText: editedText ?? currentAns.editedText,
+          isPractice: isPractice
         })
       });
       setAnswers(prev => ({ ...prev, [eqId]: { ...prev[eqId], saving: false, isDirty: false } }));
@@ -164,6 +168,7 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
               examQuestionId: eqId,
               ocrText: data.ocrText,
               editedText: data.editedText,
+              isPractice: isPractice
             }),
           })
         )
@@ -208,7 +213,17 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
       });
 
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Submission failed");
+      if (!res.ok) {
+        if (res.status === 400 && result.error === "Exam already submitted") {
+          // Gracefully handle duplicate submission clicks
+          localStorage.removeItem("in_progress_exam");
+          window.dispatchEvent(new Event("in_progress_exam_updated"));
+          router.push(`/exams/${exam.id}/results`);
+          router.refresh();
+          return;
+        }
+        throw new Error(result.error || "Submission failed");
+      }
 
       // Clear from localStorage since we submitted
       localStorage.removeItem("in_progress_exam");
@@ -332,36 +347,64 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
 
               {/* Upload or Editor */}
               {!ans.editedText && !ans.uploading ? (
-                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-brand-400 hover:bg-brand-50/30 transition-all">
-                  <input 
-                    type="file" 
-                    accept="image/*"
-                    capture="environment"
-                    multiple={eq.marks > 10}
-                    className="hidden" 
-                    id={`upload-${eq.id}`}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        const maxAllowed = eq.marks > 10 ? 2 : 1;
-                        if (e.target.files.length > maxAllowed) {
-                           alert(`You can only upload up to ${maxAllowed} image(s) for this question.`);
-                           return;
-                        }
-                        handleFileUpload(eq.id, e.target.files);
-                      }
-                    }}
-                  />
-                  <label htmlFor={`upload-${eq.id}`} className="cursor-pointer flex flex-col items-center">
-                    <div className="h-12 w-12 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center mb-4">
-                      <ImageIcon size={24} />
+                activeCameraId === eq.id ? (
+                  <div className="mb-8">
+                    <WebcamCapture 
+                      onCapture={(file) => {
+                        handleFileUpload(eq.id, [file]);
+                        setActiveCameraId(null);
+                      }}
+                      onCancel={() => setActiveCameraId(null)}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        onClick={() => setActiveCameraId(eq.id)}
+                        className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center justify-center text-center h-full"
+                      >
+                        <div className="h-10 w-10 rounded-full bg-brand-100 flex items-center justify-center mb-3">
+                          <Camera size={20} className="text-brand-600" />
+                        </div>
+                        <span className="text-sm font-semibold text-brand-600 block mb-1">
+                          Take Photo
+                        </span>
+                        <span className="text-[10px] text-muted-foreground block text-center">
+                          Use camera directly
+                        </span>
+                      </button>
+                      
+                      <label htmlFor={`upload-${eq.id}`} className="cursor-pointer rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center justify-center text-center h-full">
+                        <div className="h-10 w-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center mb-3">
+                          <ImageIcon size={20} />
+                        </div>
+                        <span className="text-sm font-semibold text-foreground block mb-1">Upload File</span>
+                        <span className="text-[10px] text-muted-foreground font-medium">
+                          Max {eq.marks > 10 ? 2 : 1} image{eq.marks > 10 ? "s" : ""}
+                        </span>
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          multiple={eq.marks > 10}
+                          className="hidden" 
+                          id={`upload-${eq.id}`}
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0) {
+                              const maxAllowed = eq.marks > 10 ? 2 : 1;
+                              if (e.target.files.length > maxAllowed) {
+                                 alert(`You can only upload up to ${maxAllowed} image(s) for this question.`);
+                                 return;
+                              }
+                              handleFileUpload(eq.id, e.target.files);
+                            }
+                          }}
+                        />
+                      </label>
                     </div>
-                    <span className="font-bold text-foreground block mb-1">Upload Handwritten Answer</span>
-                    <span className="text-xs text-muted-foreground font-medium">
-                      Max {eq.marks > 10 ? 2 : 1} image{eq.marks > 10 ? "s" : ""}. Please DO NOT include answers for other questions in this image.
-                    </span>
-                  </label>
-                  {ans.error && <p className="text-red-500 text-sm mt-3">{ans.error}</p>}
-                </div>
+                    {ans.error && <p className="text-red-500 text-sm mt-3 text-center">{ans.error}</p>}
+                  </div>
+                )
               ) : ans.uploading ? (
                 <div className="border border-border rounded-xl p-12 text-center flex flex-col items-center bg-muted/30">
                   <Loader2 className="animate-spin text-brand-500 mb-4" size={32} />
@@ -406,15 +449,31 @@ export default function ExamTakerClient({ exam, examQuestions, userId, serverSta
                       {ans.saving ? "Saving..." : ans.isDirty ? "Save Draft" : "Draft Saved"}
                     </button>
                   </div>
-                  <textarea
-                    value={ans.editedText}
-                    onChange={(e) => updateText(eq.id, e.target.value)}
-                    className="w-full h-48 bg-background border border-border rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none font-medium text-foreground/90 leading-relaxed"
-                    placeholder="Your answer will appear here..."
-                  />
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <AlertCircle size={12} /> Please review the extracted text and correct any spelling mistakes before submitting.
-                  </p>
+                  {(() => {
+                    const maxWords = eq.marks > 10 ? 250 : 150;
+                    const maxChars = maxWords * 5;
+                    const currentWords = ans.editedText.trim() === "" ? 0 : ans.editedText.trim().split(/\s+/).length;
+                    
+                    return (
+                      <>
+                        <textarea
+                          value={ans.editedText}
+                          onChange={(e) => updateText(eq.id, e.target.value)}
+                          maxLength={maxChars}
+                          className="w-full h-48 bg-background border border-border rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none font-medium text-foreground/90 leading-relaxed"
+                          placeholder="Your answer will appear here..."
+                        />
+                        <div className="flex justify-between items-center mt-2 text-[11px] text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <AlertCircle size={12} /> Please review the extracted text and correct any spelling mistakes before submitting.
+                          </span>
+                          <span className={currentWords >= maxWords ? "text-red-500 font-medium" : ""}>
+                            {currentWords} / {maxWords} words
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>

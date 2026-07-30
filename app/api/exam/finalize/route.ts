@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { getRedis, CacheKeys } from "@/lib/redis";
-import { grade, type ResponsesClient } from "@/lib/grading/grade";
-import OpenAI from "openai";
+
 
 // POST /api/exam/finalize
 // Can be called by student (auto-trigger when entering expired exam) or Admin.
@@ -51,16 +50,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Exam not found" }, { status: 404 });
     }
 
-    // Check if result already exists
-    const { data: existingResult } = await adminSupabase
-      .from("exam_results")
+    // Check if result already exists in exam_submissions
+    const { data: existingSubmissions } = await adminSupabase
+      .from("exam_submissions")
       .select("id")
       .eq("exam_id", examId)
       .eq("user_id", studentId)
-      .single();
+      .not("submitted_at", "is", null)
+      .limit(1);
 
-    if (existingResult) {
-      return NextResponse.json({ success: true, message: "Exam already finalized", resultId: existingResult.id });
+    if (existingSubmissions && existingSubmissions.length > 0) {
+      return NextResponse.json({ success: true, message: "Exam already finalized" });
     }
 
     const redis = getRedis();
@@ -111,11 +111,8 @@ export async function POST(req: NextRequest) {
       .select("id, questions(id, category, marks)")
       .eq("exam_id", examId);
 
-    let totalEarned = 0;
     let totalMax = 0;
     const submissionsToInsert = [];
-
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ResponsesClient;
 
     if (examQuestions) {
       for (const eq of examQuestions) {
@@ -128,35 +125,29 @@ export async function POST(req: NextRequest) {
         const draft = await redis.get<{ocrText: string; editedText: string}>(draftKey);
 
         if (draft && draft.editedText.trim()) {
-          // Grade it!
-          try {
-            const gradingResult = await grade(openai, draft.editedText, q.category, q.marks);
-            totalEarned += gradingResult.internal.total;
-            submissionsToInsert.push({
-              exam_id: examId,
-              user_id: studentId,
-              exam_question_id: eq.id,
-              ocr_text: draft.ocrText,
-              edited_text: draft.editedText,
-              time_taken_seconds: 0, // Unknown on force finalize
-              grading_result: gradingResult
-            });
-          } catch (err) {
-            console.error(`Failed to auto-grade draft for ${studentId} Q${eq.id}:`, err);
-            // On failure, insert a 0 for this question to prevent blocking the whole exam
-            submissionsToInsert.push({
-              exam_id: examId,
-              user_id: studentId,
-              exam_question_id: eq.id,
-              ocr_text: draft.ocrText,
-              edited_text: draft.editedText,
-              time_taken_seconds: 0,
-              grading_result: {
-                internal: { total: 0, max: q.marks, criteria: [] },
-                studentFeedback: { score: `0/${q.marks}`, summary: "Grading failed.", highlights: [] }
-              }
-            });
-          }
+          submissionsToInsert.push({
+            exam_id: examId,
+            user_id: studentId,
+            question_id: eq.id,
+            ocr_text: draft.ocrText,
+            edited_text: draft.editedText,
+            submitted_at: new Date().toISOString(),
+            grading_result: null,
+            graded_by: null
+          });
+        } else {
+          // Insert empty row so the DB registers that they completed the exam
+          // even if they answered 0 questions.
+          submissionsToInsert.push({
+            exam_id: examId,
+            user_id: studentId,
+            question_id: eq.id,
+            ocr_text: "",
+            edited_text: "",
+            submitted_at: new Date().toISOString(),
+            grading_result: null,
+            graded_by: null
+          });
         }
         
         // Clean up draft
@@ -179,24 +170,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Insert final result
-    const { data: finalResult, error: resultError } = await adminSupabase
-      .from("exam_results")
-      .insert({
-        exam_id: examId,
-        user_id: studentId,
-        total_score: totalEarned,
-        is_practice: false, // finalized drafts are always official
-      })
-      .select("id")
-      .single();
-
-    if (resultError) {
-      console.error("Failed to insert final result:", resultError);
-      return NextResponse.json({ error: "Failed to save final result" }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, message: "Exam auto-finalized", resultId: finalResult.id });
+    return NextResponse.json({ success: true, message: "Exam auto-finalized (pending grading)" });
 
   } catch (error: any) {
     console.error("Finalize error:", error);

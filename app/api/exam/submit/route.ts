@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
-import OpenAI from "openai";
+import { OpenAI } from "openai";
+import { getRedis } from "@/lib/redis";
+import { checkTestLimit, consumeTestSlot } from "@/lib/api/usage";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
-import { getRedis } from "@/lib/redis";
 import { revalidatePath } from "next/cache";
 
 export async function POST(req: NextRequest) {
@@ -31,6 +32,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Exam not found" }, { status: 404 });
   }
 
+  if (isPractice && !exam.results_published) {
+    return NextResponse.json({ error: "Practice mode is only available after official results are published" }, { status: 403 });
+  }
+
   // ─── Server-Side Security Checks (skip for practice mode) ─────────────
   if (!isPractice) {
     // 2a. Deadline enforcement: reject if exam window has closed
@@ -50,29 +55,35 @@ export async function POST(req: NextRequest) {
     const startTimeKey = `exam:start:${examId}:${user.id}`;
     const serverStartTime = await redis.get<number>(startTimeKey);
 
-    if (serverStartTime) {
-      const elapsedMs = now - serverStartTime;
-      // Admin-set time limit + 3 min grace for upload/OCR processing latency
-      const TIMER_GRACE_MS = 3 * 60 * 1000;
-      const allowedMs = (exam.time_limit_minutes * 60 * 1000) + TIMER_GRACE_MS;
-
-      if (elapsedMs > allowedMs) {
-        return NextResponse.json(
-          { error: `Time limit exceeded. You had ${exam.time_limit_minutes} minutes.` },
-          { status: 403 }
-        );
-      }
+    if (!serverStartTime) {
+      return NextResponse.json(
+        { error: "Personal time limit exceeded. Your explicit submission was rejected, but your previously auto-saved drafts have been finalized." },
+        { status: 403 }
+      );
     }
 
-    // 2c. Duplicate submission check
-    const { data: existing } = await supabase
-      .from("exam_results")
+    const elapsedMs = now - serverStartTime;
+    // Admin-set time limit + 3 min grace for upload/OCR processing latency
+    const TIMER_GRACE_MS = 3 * 60 * 1000;
+    const allowedMs = (exam.time_limit_minutes * 60 * 1000) + TIMER_GRACE_MS;
+
+    if (elapsedMs > allowedMs) {
+      return NextResponse.json(
+        { error: `Time limit exceeded. You had ${exam.time_limit_minutes} minutes.` },
+        { status: 403 }
+      );
+    }
+
+    // 2d. Duplicate submission check
+    const { data: existingSubmissions } = await supabase
+      .from("exam_submissions")
       .select("id")
       .eq("exam_id", examId)
       .eq("user_id", user.id)
-      .single();
+      .not("submitted_at", "is", null)
+      .limit(1);
 
-    if (existing) {
+    if (existingSubmissions && existingSubmissions.length > 0) {
       return NextResponse.json({ error: "Exam already submitted" }, { status: 400 });
     }
   }
@@ -88,98 +99,73 @@ export async function POST(req: NextRequest) {
   }
 
   const isMock = process.env.USE_MOCK_GRADER === "true";
-  let totalScore = 0;
   let maxScore = 0;
 
-  // 4. Grade each answer
-  const submissionsToInsert: any[] = [];
-  
-  // Grade in parallel for speed
-  const gradedResults = await Promise.all(
-    answers.map(async (ans) => {
-      const eq: any = examQuestions.find(x => x.id === ans.examQuestionId);
-      if (!eq) return null; // invalid question id
-
-      maxScore += eq.marks;
-
-      if (!ans.editedText) {
-        // Did not answer
-        return {
-          eqId: eq.id,
-          qId: eq.questions.id,
-          ocrText: "",
-          editedText: "",
-          result: {
-            internal: { total: 0, max: eq.marks, criteria: [] },
-            studentFeedback: { score: `0/${eq.marks}`, summary: "No answer provided.", highlights: [] }
-          },
-          earned: 0
-        };
-      }
-
-      const client: ResponsesClient = isMock
-        ? createMockClient({ taskType: eq.questions.category, marks: eq.marks, submission: ans.editedText })
-        : (new OpenAI() as unknown as ResponsesClient);
-
-      try {
-        const result = await grade(client, ans.editedText, eq.questions.category, eq.marks);
-        const earned = parseFloat(result.studentFeedback.score.split("/")[0]) || 0;
-        return {
-          eqId: eq.id,
-          qId: eq.questions.id,
-          ocrText: ans.ocrText,
-          editedText: ans.editedText,
-          result,
-          earned
-        };
-      } catch (e) {
-        console.error("Grading failed for question", eq.id, e);
-        // Fallback for failed grading
-        return {
-          eqId: eq.id,
-          qId: eq.questions.id,
-          ocrText: ans.ocrText,
-          editedText: ans.editedText,
-          result: {
-             internal: { total: 0, max: eq.marks, criteria: [] },
-             studentFeedback: { score: `0/${eq.marks}`, summary: "Grading failed.", highlights: [] }
-          },
-          earned: 0
-        };
-      }
-    })
-  );
-
-  // Filter out invalid answers and aggregate
-  for (const item of gradedResults) {
-    if (!item) continue;
-    totalScore += item.earned;
-    
-    submissionsToInsert.push({
-      exam_id: examId,
-      user_id: user.id,
-      question_id: item.eqId,
-      ocr_text: item.ocrText,
-      edited_text: item.editedText,
-      submitted_at: new Date().toISOString(),
-      grading_result: item.result,
-      graded_by: "ai",
-    });
+  // Calculate max score
+  for (const eq of examQuestions) {
+    maxScore += eq.marks;
   }
 
-  // ─── Practice Mode: return feedback without saving to DB ──────────────
+  // ─── Practice Mode: Grade immediately & return feedback without DB save ──────────────
   if (isPractice) {
-    // SECURITY: Strip internal rubric data — students must never see it
-    const sanitizedResults = gradedResults
-      .filter(Boolean)
-      .map((item: any) => ({
+    let totalScore = 0;
+    
+    const gradedResults = await Promise.all(
+      answers.map(async (ans) => {
+        const eq: any = examQuestions.find(x => x.id === ans.examQuestionId);
+        if (!eq) return null;
+
+        if (!ans.editedText) {
+          return {
+            eqId: eq.id,
+            earned: 0,
+            result: { studentFeedback: { score: `0/${eq.marks}`, summary: "No answer provided.", highlights: [] } }
+          };
+        }
+
+        const client: ResponsesClient = isMock
+          ? createMockClient({ taskType: eq.questions.category, marks: eq.marks, submission: ans.editedText })
+          : (new OpenAI() as unknown as ResponsesClient);
+
+        try {
+          let consumed = false;
+          const hasTests = await checkTestLimit(user.id);
+          if (hasTests) {
+            consumed = await consumeTestSlot(user.id);
+          }
+          
+          if (!consumed) {
+             return {
+               eqId: eq.id,
+               earned: 0,
+               result: { studentFeedback: { score: `0/${eq.marks}`, summary: "Grading failed: Out of tests.", highlights: [] } },
+               editedText: ans.editedText
+             };
+          }
+
+          const result = await grade(client, ans.editedText, eq.questions.category, eq.marks);
+          const earned = parseFloat(result.studentFeedback.score.split("/")[0]) || 0;
+          return { eqId: eq.id, earned, result, editedText: ans.editedText };
+        } catch (e) {
+          console.error("Grading failed", e);
+          return {
+            eqId: eq.id,
+            earned: 0,
+            result: { studentFeedback: { score: `0/${eq.marks}`, summary: "Grading failed.", highlights: [] } }
+          };
+        }
+      })
+    );
+
+    const sanitizedResults = gradedResults.filter(Boolean).map((item: any) => {
+      totalScore += item.earned;
+      return {
         eqId: item.eqId,
         editedText: item.editedText,
         earned: item.earned,
-        result: {
-          studentFeedback: item.result.studentFeedback,
-        },
-      }));
+        result: { studentFeedback: item.result.studentFeedback },
+      };
+    });
 
     return NextResponse.json({ 
       success: true, 
@@ -189,12 +175,24 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // ─── Official Mode: persist to database ───────────────────────────────
+  // ─── Official Mode: Persist as Pending ───────────────────────────────
   // Use admin client to bypass RLS for these security-critical tables.
-  // Students are no longer allowed to insert into these tables directly via RLS.
-  const adminSupabase = await createAdminClient();
+  // 4. Official Mode: Save drafts as pending manual grading
+  const submissionsToInsert = examQuestions.map((eq: any) => {
+    const ans = answers.find((a: any) => a.examQuestionId === eq.id);
+    return {
+      exam_id: examId,
+      user_id: user.id,
+      question_id: eq.id,
+      ocr_text: ans ? ans.ocrText : "",
+      edited_text: ans ? ans.editedText : "",
+      submitted_at: new Date().toISOString(),
+      grading_result: null, // Pending grading
+      graded_by: null,
+    };
+  });
 
-  // 5. Insert individual submissions
+  const adminSupabase = await createAdminClient();
   const { error: subError } = await adminSupabase
     .from("exam_submissions")
     .insert(submissionsToInsert);
@@ -204,25 +202,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to save submissions" }, { status: 500 });
   }
 
-  // 6. Insert final exam result
-  const { error: resultError } = await adminSupabase
-    .from("exam_results")
-    .insert({
-      exam_id: examId,
-      user_id: user.id,
-      total_score: totalScore,
-      max_score: maxScore,
-    });
+  // Notice: We NO LONGER insert into exam_results here.
+  // The results will be published by an Admin later.
 
-  if (resultError) {
-    console.error("Error inserting exam result:", resultError);
-    return NextResponse.json({ error: "Failed to save final result" }, { status: 500 });
-  }
-
-  // Force cache invalidation so history/progress show the new exam immediately
   revalidatePath("/history");
   revalidatePath("/progress");
   revalidatePath("/exams");
 
-  return NextResponse.json({ success: true, totalScore, maxScore });
+  return NextResponse.json({ success: true, maxScore });
 }

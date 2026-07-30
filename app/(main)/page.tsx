@@ -92,7 +92,7 @@ export default function DashboardPage() {
       {/* Welcome */}
       <div>
         <h2 className="text-2xl font-bold text-foreground">
-          {getGreeting()}, {profile?.name?.split(" ")[0] ?? "there"} 👋
+          {getGreeting()}, {profile?.name?.split(" ")[0] ?? "there"}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
           Ready to sharpen your writing skills today?

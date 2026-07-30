@@ -24,6 +24,7 @@ import {
 import type { Profile, Subscription } from "@/lib/types";
 import { messaging } from "@/lib/firebase";
 import { getToken } from "firebase/messaging";
+import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
 
 // ─── Tab Configuration ────────────────────────────────────────────────────
 
@@ -695,73 +696,6 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
       )}
     </div>
   );
-}
-
-// ─── Usage Bar Component ──────────────────────────────────────────────────
-
-interface UsageInfo {
-  label: string;
-  remaining: number;
-  total: number;
-  percentage: number;
-  color: string;
-  showUpgrade: boolean;
-  expiresAt?: string;
-}
-
-function getUsageInfo(
-  profile: Profile | null,
-  subscription: Subscription | null
-): UsageInfo {
-  // Free tier
-  if (!subscription) {
-    const remaining = profile?.free_tests_remaining ?? 3;
-    const total = 3;
-    const pct = (remaining / total) * 100;
-    return {
-      label: "Free Tests",
-      remaining,
-      total,
-      percentage: pct,
-      color: getUsageColor(pct),
-      showUpgrade: remaining <= 1,
-    };
-  }
-
-  // Plan with tests
-  if (subscription.plan_type === "plan_1" || subscription.plan_type === "plan_2") {
-    const remaining = subscription.tests_remaining + subscription.extra_tests_purchased;
-    const total = 300 + subscription.extra_tests_purchased;
-    const pct = total > 0 ? (remaining / total) * 100 : 0;
-    return {
-      label:
-        subscription.plan_type === "plan_1" ? "Practice Plan" : "Complete Plan",
-      remaining,
-      total,
-      percentage: pct,
-      color: getUsageColor(pct),
-      showUpgrade: pct <= 40,
-      expiresAt: subscription.expires_at,
-    };
-  }
-
-  // Plan 3 (exam only)
-  return {
-    label: "Exam Plan",
-    remaining: 0,
-    total: 0,
-    percentage: 100,
-    color: "bg-brand-500",
-    showUpgrade: false,
-    expiresAt: subscription.expires_at,
-  };
-}
-
-function getUsageColor(pct: number): string {
-  if (pct > 60) return "bg-usage-green";
-  if (pct > 40) return "bg-usage-yellow";
-  if (pct > 20) return "bg-usage-orange";
-  return "bg-usage-red";
 }
 
 function UsageBar({ info }: { info: UsageInfo }) {

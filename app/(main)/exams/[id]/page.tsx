@@ -32,13 +32,19 @@ export default async function TakeExamPage({
     redirect("/exams");
   }
 
-  // 2. Security Check: Is Exam Active? (Bypass for practice mode)
+  // 2. Security Check: Is Exam Active?
   const now = new Date().getTime();
   const startsAt = new Date(exam.starts_at).getTime();
   const endsAt = new Date(exam.ends_at).getTime();
 
   if (!isPractice && (now < startsAt || now > endsAt)) {
     redirect("/exams"); // Not active
+  }
+
+  // Anti-Cheat: Practice mode is ONLY allowed after the official results have been published.
+  // This prevents students from bypassing time-locks to view questions early or use AI grading to leak the rubric before official results are out.
+  if (isPractice && !exam.results_published) {
+    redirect("/exams");
   }
 
   // 3. Fetch Exam Questions
@@ -60,35 +66,37 @@ export default async function TakeExamPage({
 
   // 4. Check if student already submitted this exam
   if (!isPractice) {
-    const { data: existingResult } = await supabase
-      .from("exam_results")
+    const { data: existingSubmissions } = await supabase
+      .from("exam_submissions")
       .select("id")
       .eq("exam_id", id)
       .eq("user_id", user.id)
-      .single();
+      .not("submitted_at", "is", null)
+      .limit(1);
 
-    if (existingResult) {
+    if (existingSubmissions && existingSubmissions.length > 0) {
       redirect(`/exams/${id}/results`);
     }
   }
 
   // 5. Server-Enforced Timer & Draft Hydration
   const redis = getRedis();
-  const startTimeKey = `exam:start:${id}:${user.id}`;
+  const startTimeKey = isPractice ? `practice:exam:start:${id}:${user.id}` : `exam:start:${id}:${user.id}`;
   let serverStartTime = await redis.get<number>(startTimeKey);
   
   if (!serverStartTime) {
     serverStartTime = Date.now();
-    // Cache the start time for 48 hours. Expiration checks are handled mathematically below.
-    const durationMs = (exam.time_limit_minutes * 60 * 1000) + (3 * 60 * 1000); // 3 min grace
-    await redis.set(startTimeKey, serverStartTime, { ex: 2 * 24 * 60 * 60 }); // 48 hours TTL
+    // Cache the start time for 48 hours so Admins can still find and force-grade abandoned sessions.
+    // If a student bypasses the client timer, the math below (and in the API) still rejects them.
+    const ttlSeconds = 48 * 60 * 60; // 48 hours
+    await redis.set(startTimeKey, serverStartTime, { ex: ttlSeconds });
   } else {
     // Check if expired
     const durationMs = (exam.time_limit_minutes * 60 * 1000) + (3 * 60 * 1000); // 3 min grace
     if (Date.now() - serverStartTime > durationMs) {
       return (
         <div className="min-h-[calc(100vh-64px)] bg-background flex items-center justify-center p-4">
-          <AutoFinalizer examId={id} />
+          <AutoFinalizer examId={id} isPractice={isPractice} />
         </div>
       );
     }
@@ -97,7 +105,10 @@ export default async function TakeExamPage({
   // Fetch all existing drafts for this exam
   const initialDrafts: Record<string, { ocrText: string; editedText: string }> = {};
   for (const eq of examQuestions) {
-    const draft = await redis.get<{ ocrText: string; editedText: string }>(CacheKeys.examDraft(id, user.id, eq.id));
+    const draftKey = isPractice 
+      ? CacheKeys.practiceExamDraft(id, user.id, eq.id) 
+      : CacheKeys.examDraft(id, user.id, eq.id);
+    const draft = await redis.get<{ ocrText: string; editedText: string }>(draftKey);
     if (draft) {
       initialDrafts[eq.id] = draft;
     }

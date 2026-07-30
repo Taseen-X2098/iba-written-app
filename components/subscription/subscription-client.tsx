@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Crown, Check, AlertCircle, Plus, Loader2, Sparkles, TrendingUp, ChevronDown } from "lucide-react";
 import type { Subscription } from "@/lib/types";
+import { getUsageInfo } from "@/lib/utils/subscription";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -67,10 +68,10 @@ export default function SubscriptionClient({
   const [loading, setLoading] = useState<string | null>(null);
   const [extraSlots, setExtraSlots] = useState<number>(10);
 
-  const totalRemaining = 
-    (activeSubscription?.tests_remaining || 0) + 
-    (activeSubscription?.extra_tests_purchased || 0) + 
-    freeTestsRemaining;
+  // We construct a temporary Profile just to pass the free tests count 
+  // since the new universal utility accepts profile and subscription.
+  const profileMock = { free_tests_remaining: freeTestsRemaining } as any;
+  const usage = getUsageInfo(profileMock, activeSubscription);
 
   const handleCheckout = async (purchaseType: "plan" | "extra_slots", planId?: string) => {
     setLoading(purchaseType === "plan" ? (planId as string) : "extra");
@@ -149,25 +150,21 @@ export default function SubscriptionClient({
           <div className="flex-1 w-full">
             <div className="flex justify-between text-sm font-medium mb-2">
               <span className="text-muted-foreground">Tests Remaining</span>
-              <span className="text-foreground text-lg">{totalRemaining} <span className="text-sm font-normal text-muted-foreground">tests</span></span>
+              <span className="text-foreground text-lg">{usage.remaining} <span className="text-sm font-normal text-muted-foreground">tests</span></span>
             </div>
             
             {/* Visual gradient bar for limits */}
             <div className="h-4 w-full bg-muted rounded-full overflow-hidden flex">
               <div 
-                className={`h-full transition-all duration-1000 ${
-                  totalRemaining > 50 ? 'bg-green-500' : totalRemaining > 20 ? 'bg-yellow-500' : 'bg-red-500'
-                }`}
-                style={{ width: `${Math.min((totalRemaining / 300) * 100, 100)}%` }}
+                className={`h-full transition-all duration-1000 ${usage.color}`}
+                style={{ width: `${Math.max(usage.percentage, 2)}%` }}
               />
             </div>
             
             <div className="flex gap-4 mt-3 text-xs text-muted-foreground">
-              {activeSubscription && (
-                <span>Plan: {PLANS.find(p => p.id === activeSubscription.plan_type)?.name || activeSubscription.plan_type}</span>
-              )}
-              {freeTestsRemaining > 0 && <span>Free: {freeTestsRemaining}</span>}
-              {(activeSubscription?.extra_tests_purchased || 0) > 0 && <span>Extra: {activeSubscription?.extra_tests_purchased}</span>}
+              <span>Plan: {usage.planRemaining}</span>
+              <span>Free: {usage.freeRemaining}</span>
+              <span>Extra: {usage.extraRemaining}</span>
             </div>
           </div>
 

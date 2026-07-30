@@ -135,7 +135,8 @@ export default async function ProgressPage() {
             <div className="space-y-6">
               {Object.entries(categoryStats).map(([category, stats]) => {
                 const percentage = Math.round((stats.earned / stats.total) * 100);
-                const label = CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS] || category;
+                const label = CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS] || 
+                              category.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                 
                 return (
                   <div key={category}>

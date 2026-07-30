@@ -7,7 +7,7 @@ import {
   Clock, X, Loader2, ArrowRight, ChevronRight, PenLine, Sparkles, Camera
 } from "lucide-react";
 import { WebcamCapture } from "@/components/ui/webcam-capture";
-import { CATEGORY_LABELS } from "@/lib/types";
+import { CATEGORY_LABELS, type Question, type GradingResultJSON, type QuestionCategory } from "@/lib/types";
 import { HighlightedText } from "@/components/ui/highlighted-text";
 
 type TestState = 
@@ -219,8 +219,8 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       {/* Header Info */}
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-3">
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-xs font-medium uppercase tracking-wide">
-            {CATEGORY_LABELS[question.category] || question.category}
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-brand-50 text-brand-700 text-[10px] sm:text-xs font-bold uppercase tracking-wider">
+            {CATEGORY_LABELS[question.category as QuestionCategory] || question.category}
           </span>
           <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-medium uppercase tracking-wide">
             {question.marks} Marks
@@ -412,13 +412,33 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
             <p className="text-sm text-muted-foreground mb-4">
               Review the extracted text and fix any mistakes the AI made reading your handwriting.
             </p>
-            <textarea
-              value={editedText}
-              onChange={(e) => setEditedText(e.target.value)}
-              className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
-                         focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
-              placeholder="Your answer will appear here..."
-            />
+            
+            {(() => {
+              const maxWords = question.marks > 10 ? 250 : 150;
+              const maxChars = maxWords * 5;
+              const currentWords = editedText.trim() === "" ? 0 : editedText.trim().split(/\s+/).length;
+              
+              return (
+                <>
+                  <textarea
+                    value={editedText}
+                    onChange={(e) => setEditedText(e.target.value)}
+                    maxLength={maxChars}
+                    className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
+                               focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
+                    placeholder="Your answer will appear here..."
+                  />
+                  <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                    </span>
+                    <span className={currentWords >= maxWords ? "text-red-500 font-medium" : ""}>
+                      {currentWords} / {maxWords} words
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
+
             <div className="mt-4 flex flex-col sm:flex-row sm:justify-end">
               <button
                 onClick={handleSubmitForGrading}

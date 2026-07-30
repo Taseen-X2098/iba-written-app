@@ -1,7 +1,17 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+
+async function verifyAdmin() {
+  const supabase = await createServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+
+  const { data: profile } = await supabase.from("profiles").select("is_admin").eq("id", user.id).single();
+  if (!profile?.is_admin) throw new Error("Forbidden: Admin access required");
+}
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,23 +20,28 @@ const supabaseAdmin = createClient(
 
 export async function adminActivateSubscription(userId: string, planType: string) {
   try {
-    // 1. Deactivate existing plans
+    await verifyAdmin();
+    // 1. Fetch existing extra tests to carry over
+    const { data: oldSub } = await supabaseAdmin.from("subscriptions").select("extra_tests_purchased").eq("user_id", userId).eq("is_active", true).single();
+    const carriedOverExtra = oldSub ? (oldSub.extra_tests_purchased || 0) : 0;
+
+    // 2. Deactivate existing plans
     await supabaseAdmin
       .from("subscriptions")
       .update({ is_active: false })
       .eq("user_id", userId)
       .eq("is_active", true);
 
-    // 2. Determine default tests based on plan
+    // 3. Determine default tests based on plan
     let testsRemaining = 300;
     if (planType === "plan_3") testsRemaining = 0;
 
-    // 3. Create new subscription
+    // 4. Create new subscription
     const { error } = await supabaseAdmin.from("subscriptions").insert({
       user_id: userId,
       plan_type: planType,
       tests_remaining: testsRemaining,
-      extra_tests_purchased: 0,
+      extra_tests_purchased: carriedOverExtra,
       is_active: true,
       expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
     });
@@ -41,6 +56,7 @@ export async function adminActivateSubscription(userId: string, planType: string
 
 export async function adminDeactivateSubscription(userId: string) {
   try {
+    await verifyAdmin();
     const { error } = await supabaseAdmin
       .from("subscriptions")
       .update({ is_active: false })
@@ -57,6 +73,7 @@ export async function adminDeactivateSubscription(userId: string) {
 
 export async function adminAddSlots(userId: string, amount: number, slotType: "free" | "extra") {
   try {
+    await verifyAdmin();
     if (slotType === "free") {
       // Get current profile
       const { data: profile } = await supabaseAdmin

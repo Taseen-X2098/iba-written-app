@@ -32,6 +32,17 @@ export default async function StudentExamsPage() {
     console.error("Error fetching exams:", error);
   }
 
+  // 3. Fetch user's exam submissions to check for ongoing exams
+  const { data: userSubmissions } = await supabase
+    .from("exam_submissions")
+    .select("exam_id, started_at, submitted_at")
+    .eq("user_id", user.id);
+
+  const submissionsByExamId = (userSubmissions || []).reduce((acc: any, sub: any) => {
+    acc[sub.exam_id] = sub;
+    return acc;
+  }, {});
+
   const safeExams = exams || [];
   const now = new Date().getTime();
 
@@ -123,17 +134,55 @@ export default async function StudentExamsPage() {
 
                 <div className="flex items-center gap-3">
                   {status === "active" ? (
-                    <Link
-                      href={hasAccess ? `/exams/${exam.id}` : "#"}
-                      className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                        hasAccess 
-                          ? "bg-brand-600 text-white hover:bg-brand-700 shadow-md shadow-brand-200/50" 
-                          : "bg-muted text-muted-foreground cursor-not-allowed opacity-50"
-                      }`}
-                    >
-                      {hasAccess ? "Enter Exam" : "Locked"}
-                      <ChevronRight size={16} />
-                    </Link>
+                    (() => {
+                      const submission = submissionsByExamId[exam.id];
+                      const hasSubmitted = submission && submission.submitted_at;
+                      const isOngoing = submission && !submission.submitted_at;
+                      
+                      let canContinue = false;
+                      if (isOngoing) {
+                        const startedAt = new Date(submission.started_at).getTime();
+                        const deadline = startedAt + exam.time_limit_minutes * 60 * 1000;
+                        canContinue = now < deadline;
+                      }
+
+                      if (hasSubmitted) {
+                        return (
+                          <Link
+                            href={`/exams/${exam.id}/results`}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200"
+                          >
+                            View Status
+                            <ChevronRight size={16} />
+                          </Link>
+                        );
+                      }
+
+                      let buttonText = "Enter Exam";
+                      if (canContinue) {
+                        buttonText = "Continue Exam";
+                      } else if (isOngoing) {
+                        buttonText = "Finalize Exam";
+                      }
+
+                      return (
+                        <Link
+                          href={hasAccess ? `/exams/${exam.id}` : "#"}
+                          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                            hasAccess 
+                              ? canContinue 
+                                ? "bg-amber-500 text-white hover:bg-amber-600 shadow-md shadow-amber-200/50"
+                                : isOngoing 
+                                  ? "bg-red-500 text-white hover:bg-red-600 shadow-md shadow-red-200/50"
+                                  : "bg-brand-600 text-white hover:bg-brand-700 shadow-md shadow-brand-200/50" 
+                              : "bg-muted text-muted-foreground cursor-not-allowed opacity-50"
+                          }`}
+                        >
+                          {hasAccess ? buttonText : "Locked"}
+                          <ChevronRight size={16} />
+                        </Link>
+                      );
+                    })()
                   ) : (
                     <button disabled className="flex-1 bg-muted text-muted-foreground px-4 py-2.5 rounded-xl text-sm font-bold cursor-not-allowed">
                       Starts Soon

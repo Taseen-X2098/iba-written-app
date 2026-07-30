@@ -400,19 +400,19 @@ describe("Exam visibility and filtering", () => {
 
 describe("Plan-based access control", () => {
   it("plan_1 does NOT have weekly exam access", () => {
-    const planType = "plan_1";
+    const planType = "plan_1" as string;
     const hasAccess = planType === "plan_2" || planType === "plan_3";
     expect(hasAccess).toBe(false);
   });
 
   it("plan_2 HAS weekly exam access", () => {
-    const planType = "plan_2";
+    const planType = "plan_2" as string;
     const hasAccess = planType === "plan_2" || planType === "plan_3";
     expect(hasAccess).toBe(true);
   });
 
   it("plan_3 HAS weekly exam access", () => {
-    const planType = "plan_3";
+    const planType = "plan_3" as string;
     const hasAccess = planType === "plan_2" || planType === "plan_3";
     expect(hasAccess).toBe(true);
   });

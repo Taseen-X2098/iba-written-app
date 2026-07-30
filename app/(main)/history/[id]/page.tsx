@@ -40,7 +40,7 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
   }
 
   const result = sub.grading_result;
-  const question = sub.questions;
+  const question = Array.isArray(sub.questions) ? sub.questions[0] : sub.questions;
   const studentFeedback = result?.studentFeedback || result?.student_feedback;
   const scoreStr = studentFeedback?.score || (result?.marks ? `${result.marks}/${question.marks || 10}` : undefined);
   const scoreParts = scoreStr ? scoreStr.split("/") : ["?", "?"];

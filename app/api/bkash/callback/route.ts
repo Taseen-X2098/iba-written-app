@@ -28,6 +28,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL("/subscription?error=payment_not_found", req.url));
   }
 
+  // 1b. Idempotency Check
+  if (paymentRecord.status === "completed") {
+    return NextResponse.redirect(new URL("/subscription?success=true", req.url));
+  }
+
   // 2. Handle failure or cancel
   if (status !== "success") {
     await supabase
@@ -100,6 +105,10 @@ export async function GET(req: NextRequest) {
       }
     } else if (paymentRecord.payment_type === "plan") {
       // It's a plan subscription
+      // Get old sub to carry over extra tests
+      const { data: oldSub } = await supabase.from("subscriptions").select("extra_tests_purchased").eq("user_id", paymentRecord.user_id).eq("is_active", true).single();
+      const carriedOverExtra = oldSub ? (oldSub.extra_tests_purchased || 0) : 0;
+
       // Deactivate old subscription
       await supabase
         .from("subscriptions")
@@ -122,7 +131,7 @@ export async function GET(req: NextRequest) {
           user_id: paymentRecord.user_id,
           plan_type: paymentRecord.plan_type,
           tests_remaining: tests,
-          extra_tests_purchased: 0,
+          extra_tests_purchased: carriedOverExtra,
           expires_at: expiry.toISOString(),
           is_active: true
         });

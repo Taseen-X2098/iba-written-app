@@ -4,13 +4,21 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
-export default function AutoFinalizer({ examId }: { examId: string }) {
+export default function AutoFinalizer({ examId, isPractice }: { examId: string, isPractice?: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const finalize = async () => {
       try {
+        if (isPractice) {
+          localStorage.removeItem("in_progress_exam");
+          window.dispatchEvent(new Event("in_progress_exam_updated"));
+          router.push(`/exams`);
+          router.refresh();
+          return;
+        }
+
         const res = await fetch("/api/exam/finalize", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -20,6 +28,10 @@ export default function AutoFinalizer({ examId }: { examId: string }) {
         
         if (!res.ok) throw new Error(data.error || "Failed to finalize");
         
+        // Clear from localStorage since we submitted
+        localStorage.removeItem("in_progress_exam");
+        window.dispatchEvent(new Event("in_progress_exam_updated"));
+
         // Redirect to results page after finalizing
         router.push(`/exams/${examId}/results`);
         router.refresh();
@@ -29,7 +41,7 @@ export default function AutoFinalizer({ examId }: { examId: string }) {
     };
 
     finalize();
-  }, [examId, router]);
+  }, [examId, isPractice, router]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] animate-pulse">

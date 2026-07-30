@@ -77,6 +77,9 @@ export default async function AdminExamsPage() {
                       <Link href={`/admin/exams/${exam.id}`} className="text-brand-600 font-medium hover:underline text-sm">
                         Edit
                       </Link>
+                      <Link href={`/admin/exams/${exam.id}/submissions`} className="text-brand-600 font-medium hover:underline text-sm">
+                        Submissions
+                      </Link>
                       <div className="flex justify-end gap-2 mt-1">
                         <ExtendTimerButton examId={exam.id} />
                         <ForceGradeButton examId={exam.id} />

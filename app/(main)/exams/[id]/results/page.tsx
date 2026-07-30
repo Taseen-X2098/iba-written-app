@@ -19,6 +19,49 @@ export default async function ExamResultsPage({
   const { data: exam } = await supabase.from("exams").select("*").eq("id", id).single();
   if (!exam) redirect("/exams");
 
+  const now = Date.now();
+  const endsAt = new Date(exam.ends_at).getTime();
+  const isExamOngoing = now < endsAt;
+
+  if (isExamOngoing) {
+    return (
+      <div className="max-w-4xl mx-auto py-16 px-4 text-center animate-fade-in">
+        <div className="bg-brand-50 border border-brand-200 rounded-3xl p-12 max-w-lg mx-auto">
+          <Clock size={48} className="mx-auto mb-4 text-brand-500" />
+          <h1 className="text-2xl font-bold text-brand-900 mb-2">Exam Session Concluded</h1>
+          <p className="text-brand-800">
+            You have successfully completed this exam. The global timer is still ongoing for other students. Your results and the leaderboard will be revealed after the exam officially ends on <br/><br/>
+            <strong>{new Date(exam.ends_at).toLocaleString()}</strong>
+          </p>
+          <div className="mt-8">
+            <Link href="/exams" className="bg-brand-600 text-white font-bold px-8 py-3 rounded-xl shadow-md hover:bg-brand-700 transition-colors inline-block">
+              Back to Dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isExamOngoing && !exam.results_published) {
+    return (
+      <div className="max-w-4xl mx-auto py-16 px-4 text-center animate-fade-in">
+        <div className="bg-brand-50 border border-brand-200 rounded-3xl p-12 max-w-lg mx-auto">
+          <Clock size={48} className="mx-auto mb-4 text-brand-500" />
+          <h1 className="text-2xl font-bold text-brand-900 mb-2">Results Pending</h1>
+          <p className="text-brand-800">
+            The exam has concluded, but grading is currently in progress. Your results and the leaderboard will be published shortly.
+          </p>
+          <div className="mt-8">
+            <Link href="/exams" className="bg-brand-600 text-white font-bold px-8 py-3 rounded-xl shadow-md hover:bg-brand-700 transition-colors inline-block">
+              Back to Dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // 2. Fetch User's Result
   const { data: myResult } = await supabase
     .from("exam_results")

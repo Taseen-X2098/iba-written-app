@@ -49,7 +49,13 @@ function createMemoryFallback(): Redis {
         return entry.value;
       }
     },
-    set: async (key: string, value: unknown, options?: { ex?: number }) => {
+    set: async (key: string, value: unknown, options?: { ex?: number; nx?: boolean }) => {
+      if (options?.nx) {
+        const existing = store.get(key);
+        if (existing && (!existing.expiresAt || Date.now() <= existing.expiresAt)) {
+          return null;
+        }
+      }
       const expiresAt = options?.ex ? Date.now() + options.ex * 1000 : null;
       store.set(key, { value: JSON.stringify(value), expiresAt });
       return "OK";
@@ -120,6 +126,10 @@ export const CacheKeys = {
   examDraft: (examId: string, userId: string, questionId: string) =>
     `exam:${examId}:submission:${userId}:${questionId}`,
 
+  /** In-progress practice exam answer */
+  practiceExamDraft: (examId: string, userId: string, questionId: string) =>
+    `practice:exam:${examId}:submission:${userId}:${questionId}`,
+
   /** In-progress single test answer */
   testDraft: (userId: string, questionId: string) =>
     `test:draft:${userId}:${questionId}`,
@@ -130,13 +140,17 @@ export const CacheKeys = {
   /** All draft keys for a user in an exam (pattern for scanning) */
   examDraftPattern: (examId: string, userId: string) =>
     `exam:${examId}:submission:${userId}:*`,
+
+  /** All draft keys for a user in a practice exam (pattern for scanning) */
+  practiceExamDraftPattern: (examId: string, userId: string) =>
+    `practice:exam:${examId}:submission:${userId}:*`,
 } as const;
 
 // ─── TTL Constants ──────────────────────────────────────────────────────────
 
 export const CacheTTL = {
-  /** Single test drafts expire after 1 day */
-  TEST_DRAFT: 86400, // 24 hours in seconds
+  /** Single test drafts expire after 48 hours to match exam start TTL */
+  TEST_DRAFT: 172800, // 48 hours in seconds
 
   /** Leaderboard cache: 1 hour (re-cached on first hit after invalidation) */
   LEADERBOARD: 3600,

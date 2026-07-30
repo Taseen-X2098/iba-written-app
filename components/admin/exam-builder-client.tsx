@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown } from "lucide-react";
-import type { Question } from "@/lib/types";
+import type { Question, QuestionCategory, Difficulty } from "@/lib/types";
+import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "@/lib/types";
 
 interface Props {
   availableQuestions: Question[];
@@ -194,21 +195,53 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
                   </div>
                   <div className="flex-1">
                     {sq.q.id.startsWith("temp_") ? (
-                      <textarea
-                        value={sq.q.prompt}
-                        onChange={(e) => {
-                          const newArr = [...selectedQuestions];
-                          newArr[index].q.prompt = e.target.value;
-                          setSelectedQuestions(newArr);
-                        }}
-                        className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm"
-                        placeholder="Type your custom question here..."
-                        rows={2}
-                      />
+                      <div className="space-y-2">
+                        <textarea
+                          value={sq.q.prompt}
+                          onChange={(e) => {
+                            const newArr = [...selectedQuestions];
+                            newArr[index].q.prompt = e.target.value;
+                            setSelectedQuestions(newArr);
+                          }}
+                          className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm"
+                          placeholder="Type your custom question here..."
+                          rows={2}
+                        />
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={sq.q.category}
+                            onChange={(e) => {
+                              const newArr = [...selectedQuestions];
+                              newArr[index].q.category = e.target.value as QuestionCategory;
+                              setSelectedQuestions(newArr);
+                            }}
+                            className="bg-background border border-border rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          >
+                            {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
+                              <option key={key} value={key}>{label}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={sq.q.difficulty}
+                            onChange={(e) => {
+                              const newArr = [...selectedQuestions];
+                              newArr[index].q.difficulty = e.target.value as Difficulty;
+                              setSelectedQuestions(newArr);
+                            }}
+                            className="bg-background border border-border rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          >
+                            {Object.entries(DIFFICULTY_LABELS).map(([key, label]) => (
+                              <option key={key} value={key}>{label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                     ) : (
-                      <p className="text-sm font-medium text-foreground line-clamp-1">{sq.q.prompt}</p>
+                      <>
+                        <p className="text-sm font-medium text-foreground line-clamp-1">{sq.q.prompt}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{sq.q.category} • Difficulty: {sq.q.difficulty}</p>
+                      </>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">{sq.q.category} • Difficulty: {sq.q.difficulty}</p>
                   </div>
                   <div className="w-20">
                     <input 

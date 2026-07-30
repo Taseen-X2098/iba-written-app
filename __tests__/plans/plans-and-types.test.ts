@@ -62,8 +62,8 @@ describe("PLAN_CONFIG", () => {
 describe("CATEGORY_LABELS", () => {
   it("covers all question categories", () => {
     const categories: QuestionCategory[] = [
-      "essay", "quote_analysis", "creative_writing", "personal_reflection",
-      "translation", "basic_paragraph", "comprehension", "precis", "grammar",
+      "quote_analysis", "creative_writing", "personal_reflection",
+      "translation", "basic_paragraph"
     ];
     categories.forEach(cat => {
       expect(CATEGORY_LABELS[cat]).toBeTruthy();

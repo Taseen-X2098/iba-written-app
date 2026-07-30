@@ -3,15 +3,12 @@
 export type PlanType = "plan_1" | "plan_2" | "plan_3";
 
 export type QuestionCategory =
-  | "essay"
-  | "quote_analysis"
+  | "argumentative_essay"
+  | "basic_paragraph"
   | "creative_writing"
   | "personal_reflection"
-  | "translation"
-  | "basic_paragraph"
-  | "comprehension"
-  | "precis"
-  | "grammar";
+  | "quote_analysis"
+  | "translation";
 
 export type Difficulty = "easy" | "medium" | "hard" | "very_hard";
 
@@ -219,15 +216,12 @@ export const FREE_TESTS_ON_SIGNUP = 3;
 // ─── Category Display Names ──────────────────────────────────────────────────
 
 export const CATEGORY_LABELS: Record<QuestionCategory, string> = {
-  essay: "Essay Writing",
-  quote_analysis: "Quote Analysis",
+  argumentative_essay: "Argumentative Essay",
+  basic_paragraph: "Paragraph Writing",
   creative_writing: "Creative Writing",
   personal_reflection: "Personal Reflection",
+  quote_analysis: "Quote Analysis",
   translation: "Translation",
-  basic_paragraph: "Paragraph Writing",
-  comprehension: "Reading Comprehension",
-  precis: "Precis Writing",
-  grammar: "Grammar & Vocabulary",
 };
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {

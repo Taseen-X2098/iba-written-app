@@ -4,18 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save, Loader2, ChevronDown } from "lucide-react";
 import type { QuestionCategory, Difficulty } from "@/lib/types";
-
-const CATEGORIES: { value: QuestionCategory; label: string }[] = [
-  { value: "essay", label: "Essay Writing" },
-  { value: "quote_analysis", label: "Quote Analysis" },
-  { value: "creative_writing", label: "Creative Writing" },
-  { value: "personal_reflection", label: "Personal Reflection" },
-  { value: "translation", label: "Translation" },
-  { value: "basic_paragraph", label: "Paragraph Writing" },
-  { value: "comprehension", label: "Reading Comprehension" },
-  { value: "precis", label: "Precis Writing" },
-  { value: "grammar", label: "Grammar & Vocabulary" },
-];
+import { CATEGORY_LABELS } from "@/lib/types";
 
 export default function QuestionBuilderClient({
   initialData,
@@ -88,7 +77,11 @@ export default function QuestionBuilderClient({
               onChange={e => setForm({...form, category: e.target.value as QuestionCategory})}
               className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 pr-10"
             >
-              {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              {Object.entries(CATEGORY_LABELS)
+                .filter(([key]) => key !== "translation")
+                .map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
             </select>
             <ChevronDown size={16} className="text-muted-foreground absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none z-0" />
           </div>

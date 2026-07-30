@@ -8,6 +8,7 @@ export default async function AdminQuestionsPage() {
   const { data: questions, error } = await supabase
     .from("questions")
     .select("*")
+    .neq("category", "translation")
     .order("created_at", { ascending: false });
 
   if (error) {
