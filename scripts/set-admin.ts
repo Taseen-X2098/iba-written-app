@@ -6,7 +6,7 @@ async function setAdmin() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const targetEmail = "taseen2098@gmail.com";
+  const targetEmail = process.env.NEXT_PUBLIC_ADMIN_1_EMAIL || "taseen2098@gmail.com";
 
   console.log(`Looking for user with email: ${targetEmail}`);
 
