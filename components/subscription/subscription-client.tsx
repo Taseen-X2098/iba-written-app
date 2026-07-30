@@ -13,6 +13,7 @@ interface Props {
   error?: string;
   planPaymentFormUrl: string;
   slotsPaymentFormUrl: string;
+  mentorshipFormUrl: string;
 }
 
 const PLANS = [
@@ -63,6 +64,7 @@ export default function SubscriptionClient({
   error,
   planPaymentFormUrl,
   slotsPaymentFormUrl,
+  mentorshipFormUrl,
 }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -172,7 +174,7 @@ export default function SubscriptionClient({
             <h4 className="text-sm font-bold text-brand-900 mb-1 flex items-center gap-1.5">
               <Plus size={16} /> Need more slots?
             </h4>
-            <p className="text-xs text-brand-700 mb-3">Buy extra tests for 5 ৳ each.</p>
+            <p className="text-xs text-brand-700 mb-3">Buy extra tests for 10 ৳ each.</p>
             {canBuySlots ? (
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="relative w-full sm:w-auto">
@@ -181,10 +183,10 @@ export default function SubscriptionClient({
                     onChange={(e) => setExtraSlots(Number(e.target.value))}
                     className="bg-white border border-brand-200 text-brand-900 rounded-lg pl-3 pr-10 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 w-full"
                   >
-                    <option value={10}>10 Tests (50 ৳)</option>
-                    <option value={20}>20 Tests (100 ৳)</option>
-                    <option value={50}>50 Tests (250 ৳)</option>
-                    <option value={100}>100 Tests (500 ৳)</option>
+                    <option value={10}>10 Tests (100 ৳)</option>
+                    <option value={20}>20 Tests (200 ৳)</option>
+                    <option value={50}>50 Tests (500 ৳)</option>
+                    <option value={100}>100 Tests (1000 ৳)</option>
                   </select>
                   <ChevronDown size={16} className="text-brand-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none z-0" />
                 </div>
@@ -271,6 +273,27 @@ export default function SubscriptionClient({
             </div>
           );
         })}
+      </div>
+
+      {/* Mentorship Section */}
+      <h3 className="text-xl font-bold text-foreground mb-6 mt-16 flex items-center gap-2">
+        <Sparkles className="text-brand-600" /> 1-on-1 Mentorship
+      </h3>
+      <div className="bg-gradient-to-br from-brand-900 to-brand-800 rounded-2xl p-8 text-white shadow-xl relative overflow-hidden mb-12">
+        <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 opacity-10 blur-3xl rounded-full bg-white w-64 h-64 pointer-events-none" />
+        
+        <div className="relative z-10 max-w-2xl">
+          <h4 className="text-2xl font-bold mb-3">Need personalized guidance?</h4>
+          <p className="text-brand-100 mb-6 leading-relaxed">
+            Get dedicated 1-on-1 mentorship to fast-track your preparation. We'll identify your weaknesses, craft a custom study plan, and guide you through intensive writing practice.
+          </p>
+          <button
+            onClick={() => window.open(mentorshipFormUrl, "_blank")}
+            className="bg-white text-brand-900 rounded-xl px-6 py-3 font-bold hover:bg-brand-50 transition-colors shadow-lg shadow-black/10"
+          >
+            Apply for Mentorship
+          </button>
+        </div>
       </div>
     </div>
   );

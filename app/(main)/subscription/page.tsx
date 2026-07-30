@@ -43,6 +43,7 @@ export default async function SubscriptionPage({
       error={error}
       planPaymentFormUrl={process.env.PLAN_PAYMENT_FORM_URL || process.env.NEXT_PUBLIC_PLAN_PAYMENT_FORM_URL || ""}
       slotsPaymentFormUrl={process.env.SLOTS_PAYMENT_FORM_URL || process.env.NEXT_PUBLIC_SLOTS_PAYMENT_FORM_URL || ""}
+      mentorshipFormUrl={process.env.MENTORSHIP_FORM_URL || process.env.NEXT_PUBLIC_MENTORSHIP_FORM_URL || ""}
     />
   );
 }

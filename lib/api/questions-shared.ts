@@ -29,6 +29,13 @@ export async function fetchQuestionsQuery(
     .select("*", { count: "exact" })
     .eq("is_active", true);
 
+  // Exclude questions that are used in exams
+  const { data: eqData } = await supabase.from("exam_questions").select("question_id");
+  const examQuestionIds = eqData?.map((eq: any) => eq.question_id) || [];
+  if (examQuestionIds.length > 0) {
+    query = query.not("id", "in", `(${examQuestionIds.join(",")})`);
+  }
+
   if (excludeTranslation) {
     query = query.neq("category", "translation");
   }
