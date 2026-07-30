@@ -67,7 +67,7 @@ export default function AdminSettingsPage() {
                 <p className="text-xs text-muted-foreground">Sandbox vs Production API URLs.</p>
               </div>
               <div className="px-3 py-1 bg-gray-100 text-gray-700 font-mono text-xs font-bold rounded">
-                {process.env.BKASH_BASE_URL?.includes("sandbox") ? "SANDBOX" : "PRODUCTION"}
+                {process.env.NEXT_PUBLIC_BKASH_BASE_URL?.includes("sandbox") ? "SANDBOX" : "PRODUCTION"}
               </div>
             </div>
             

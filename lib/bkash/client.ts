@@ -168,10 +168,10 @@ export class BkashClient {
 // Singleton instance
 let bkashClientInstance: BkashClient | null = null;
 
-export function getBkashClient() {
+export function getBkashClient(): BkashClient {
   if (!bkashClientInstance) {
     bkashClientInstance = new BkashClient({
-      baseURL: process.env.BKASH_BASE_URL!,
+      baseURL: process.env.NEXT_PUBLIC_BKASH_BASE_URL!,
       appKey: process.env.BKASH_APP_KEY!,
       appSecret: process.env.BKASH_APP_SECRET!,
       username: process.env.BKASH_USERNAME!,
