@@ -19,7 +19,7 @@ export default function ForgotPasswordPage() {
     const supabase = createClient();
     const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://iba-written.netlify.app";
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${SITE_URL}/reset-password`,
+      redirectTo: `${SITE_URL}/auth/callback?next=/reset-password`,
     });
 
     if (error) {

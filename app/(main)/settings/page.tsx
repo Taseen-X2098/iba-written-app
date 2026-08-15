@@ -179,7 +179,7 @@ function ChangePasswordButton() {
 
     const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://iba-written.netlify.app";
     await supabase.auth.resetPasswordForEmail(user.email, {
-      redirectTo: `${SITE_URL}/reset-password`,
+      redirectTo: `${SITE_URL}/auth/callback?next=/reset-password`,
     });
 
     setSent(true);
