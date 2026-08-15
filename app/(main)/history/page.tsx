@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { BookOpen, Calendar, Clock, Trophy } from "lucide-react";
+import { dehydrate, HydrationBoundary, QueryClient } from "@tanstack/react-query";
+import { fetchHistoryServer } from "@/lib/api/history-server";
 import Link from "next/link";
 import { CATEGORY_LABELS } from "@/lib/types";
 import { InProgressPin } from "@/components/history/in-progress-pin";
@@ -19,7 +21,28 @@ export default async function HistoryPage({
 
   if (!user) return null;
 
+  const queryClient = new QueryClient();
 
+  const activeSearch = initialSearch || undefined;
+  const activeCategory = initialCategory || "all";
+
+  await queryClient.prefetchInfiniteQuery({
+    queryKey: [
+      "history",
+      {
+        search: activeSearch,
+        category: activeCategory,
+      },
+    ],
+    queryFn: ({ pageParam = 1 }) =>
+      fetchHistoryServer({
+        page: pageParam as number,
+        limit: 10,
+        search: activeSearch,
+        category: activeCategory as any,
+      }),
+    initialPageParam: 1,
+  });
   return (
     <div className="px-4 py-6 lg:px-8 max-w-4xl mx-auto animate-fade-in">
       <div className="flex items-center gap-3 mb-8">
@@ -37,10 +60,13 @@ export default async function HistoryPage({
       <div className="space-y-4">
         <InProgressPin />
 
-        <HistoryListClient 
-          initialSearch={initialSearch} 
-          initialCategory={initialCategory} 
-        /></div>
+        <HydrationBoundary state={dehydrate(queryClient)}>
+          <HistoryListClient 
+            initialSearch={initialSearch} 
+            initialCategory={initialCategory} 
+          />
+        </HydrationBoundary>
+      </div>
     </div>
   );
 }

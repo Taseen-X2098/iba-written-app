@@ -61,7 +61,9 @@ export async function updateSession(request: NextRequest) {
   }
 
   // If logged in and trying to access auth routes → redirect to home
-  if (user && isAuthRoute) {
+  // Exception: /reset-password must remain accessible because Supabase
+  // establishes a recovery session before the user reaches the form.
+  if (user && isAuthRoute && !pathname.startsWith("/reset-password")) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);
