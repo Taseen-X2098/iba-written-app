@@ -14,7 +14,7 @@ export default async function TakeExamPage({
   const { id } = await params;
   const { practice } = await searchParams;
   const mode: ExamAttemptMode = practice === "true" ? "practice" : "official";
-  await requirePageUser();
+  const user = await requirePageUser();
 
   // This GET is deliberately read-only and fetches metadata only. Questions and
   // attempt state are returned exclusively by the explicit start POST.
@@ -31,7 +31,17 @@ export default async function TakeExamPage({
   if (mode === "official") {
     const startsAt = new Date(exam.starts_at).getTime();
     const endsAt = new Date(exam.ends_at).getTime();
-    if (now < startsAt || now >= endsAt) redirect("/exams");
+    if (now < startsAt || now >= endsAt) {
+      const { data: resumable } = await supabase
+        .from("exam_attempts")
+        .select("id, status, expires_at")
+        .eq("exam_id", id)
+        .eq("user_id", user.id)
+        .eq("mode", "official")
+        .in("status", ["active", "locked"])
+        .maybeSingle();
+      if (!resumable || now > new Date(resumable.expires_at).getTime() + 3 * 60_000) redirect("/exams");
+    }
   } else if (!exam.results_published) {
     redirect("/exams");
   }
@@ -42,4 +52,3 @@ export default async function TakeExamPage({
     </div>
   );
 }
-

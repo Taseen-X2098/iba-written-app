@@ -27,14 +27,18 @@ export async function POST(request: NextRequest) {
       internal: { total: score, max: marks, criteria: [] },
       studentFeedback: { score: `${score}/${marks}`, summary, highlights: safeHighlights },
     };
-    const { error: saveError } = await admin
-      .from("exam_submissions")
-      .update({ grading_result: gradingResult, graded_by: "admin" })
-      .eq("id", submissionId);
-    if (saveError) throw saveError;
+    const { error: saveError } = await admin.rpc("save_manual_exam_grade", {
+      p_submission_id: submissionId,
+      p_grading_result: gradingResult,
+    });
+    if (saveError) {
+      if (saveError.message.includes("INVALID_GRADE")) {
+        throw new ApiError("VALIDATION_ERROR", `Score must be between 0 and ${marks}`, 400);
+      }
+      throw saveError;
+    }
     return NextResponse.json({ success: true, gradingResult });
   } catch (error) {
     return apiErrorResponse(error);
   }
 }
-

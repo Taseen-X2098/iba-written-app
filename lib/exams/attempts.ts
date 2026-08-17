@@ -28,6 +28,10 @@ export function writerTokenMatches(token: string, expectedHash: string) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+export async function getAttemptDrafts(attemptId: string) {
+  return (await getRedis().hgetall<AttemptDrafts>(CacheKeys.attemptDrafts(attemptId))) ?? {};
+}
+
 function normalizeAttempt(data: unknown): ExamAttempt & { writer_token_hash: string } {
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row !== "object") {
@@ -104,13 +108,6 @@ export async function startAttempt(input: {
   const startsAt = new Date(exam.starts_at).getTime();
   const endsAt = new Date(exam.ends_at).getTime();
 
-  if (input.mode === "official" && (now < startsAt || now >= endsAt)) {
-    throw new ApiError("EXAM_NOT_AVAILABLE", "The official exam is not currently available", 403);
-  }
-  if (input.mode === "practice" && !exam.results_published) {
-    throw new ApiError("RESULTS_EMBARGOED", "Practice opens after official results are published", 403);
-  }
-
   let existingQuery = admin
     .from("exam_attempts")
     .select("*")
@@ -132,8 +129,10 @@ export async function startAttempt(input: {
       input.writerToken &&
       writerTokenMatches(input.writerToken, existing.writer_token_hash)
     ) {
-      const redis = getRedis();
-      const drafts = (await redis.get<AttemptDrafts>(CacheKeys.attemptDrafts(existing.id))) ?? {};
+      if (Date.now() > new Date(existing.expires_at).getTime() + 3 * 60_000) {
+        throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
+      }
+      const drafts = await getAttemptDrafts(existing.id);
       return {
         attempt: existing,
         writerToken: input.writerToken,
@@ -149,6 +148,13 @@ export async function startAttempt(input: {
       409,
       { attemptId: existing.id, expiresAt: existing.expires_at, mode: existing.mode },
     );
+  }
+
+  if (input.mode === "official" && (now < startsAt || now >= endsAt)) {
+    throw new ApiError("EXAM_NOT_AVAILABLE", "The official exam is not currently available", 403);
+  }
+  if (input.mode === "practice" && !exam.results_published) {
+    throw new ApiError("RESULTS_EMBARGOED", "Practice opens after official results are published", 403);
   }
 
   if (input.mode === "official" && !(await hasOfficialExamPlan(input.userId))) {
@@ -225,16 +231,20 @@ export async function saveAttemptDrafts(input: {
 
   const redis = getRedis();
   const key = CacheKeys.attemptDrafts(attempt.id);
-  const current = (await redis.get<AttemptDrafts>(key)) ?? {};
   const updatedAt = new Date().toISOString();
+  const updates: AttemptDrafts = {};
   for (const answer of input.answers) {
-    current[answer.examQuestionId] = {
+    updates[answer.examQuestionId] = {
       ocrText: answer.ocrText,
       editedText: answer.editedText,
       updatedAt,
     };
   }
-  await redis.set(key, current, { ex: CacheTTL.ATTEMPT });
+  // HSET merges all fields atomically under one attempt key, so overlapping
+  // visibility/manual/interval saves cannot overwrite another acknowledged
+  // answer with an older read-modify-write snapshot.
+  await redis.hset(key, updates);
+  await redis.expire(key, CacheTTL.ATTEMPT);
   return { savedQuestionIds: ids, updatedAt };
 }
 
@@ -256,4 +266,3 @@ export async function getAvailableTestSlots(userId: string) {
   const plan = sub && ["plan_1", "plan_2"].includes(sub.plan_type) ? sub.tests_remaining : 0;
   return Math.max(0, (sub?.extra_tests_purchased ?? 0) + plan + (profile?.free_tests_remaining ?? 0));
 }
-

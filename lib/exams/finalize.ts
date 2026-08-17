@@ -3,19 +3,13 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getRedis, CacheKeys } from "@/lib/redis";
 import { ApiError } from "@/lib/api/errors";
-import { getAttempt, requireAttemptWriter, getAvailableTestSlots } from "@/lib/exams/attempts";
-import type { AttemptDrafts, GradingResultJSON } from "@/lib/types";
-
-function blankGrade(marks: number): GradingResultJSON {
-  return {
-    internal: { total: 0, max: marks, criteria: [] },
-    studentFeedback: {
-      score: `0/${marks}`,
-      summary: "No answer was submitted for this question.",
-      highlights: [],
-    },
-  };
-}
+import {
+  getAttempt,
+  getAttemptDrafts,
+  getAvailableTestSlots,
+  hashWriterToken,
+  requireAttemptWriter,
+} from "@/lib/exams/attempts";
 
 export async function finalizeOfficialAttempt(input: {
   attemptId: string;
@@ -38,58 +32,20 @@ export async function finalizeOfficialAttempt(input: {
   }
 
   const admin = await createAdminClient();
-  await admin
-    .from("exam_attempts")
-    .update({ status: "locked", submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq("id", attempt.id)
-    .in("status", ["active", "locked"]);
-
   const redis = getRedis();
-  const drafts = (await redis.get<AttemptDrafts>(CacheKeys.attemptDrafts(attempt.id))) ?? {};
-  const { data: questions, error: questionsError } = await admin
-    .from("exam_questions")
-    .select("id, marks")
-    .eq("exam_id", attempt.exam_id)
-    .order("order_index");
-  if (questionsError) throw questionsError;
-  if (!questions?.length) throw new ApiError("EXAM_NOT_FOUND", "Exam questions were not found", 404);
-
-  const submittedAt = new Date().toISOString();
-  const rows = questions.map((question) => {
-    const draft = drafts[question.id];
-    const editedText = draft?.editedText ?? "";
-    const isBlank = editedText.trim().length === 0;
-    return {
-      exam_id: attempt.exam_id,
-      user_id: attempt.user_id,
-      question_id: question.id,
-      attempt_id: attempt.id,
-      ocr_text: draft?.ocrText ?? "",
-      edited_text: editedText,
-      started_at: attempt.started_at,
-      submitted_at: submittedAt,
-      grading_result: isBlank ? blankGrade(question.marks) : null,
-      graded_by: isBlank ? "admin" : null,
-    };
+  const drafts = await getAttemptDrafts(attempt.id);
+  const { data: finalizedData, error: finalizeError } = await admin.rpc("finalize_exam_attempt", {
+    p_attempt_id: attempt.id,
+    p_user_id: input.userId ?? null,
+    p_writer_token_hash: input.writerToken ? hashWriterToken(input.writerToken) : null,
+    p_drafts: drafts,
   });
-
-  const { error: submissionError } = await admin
-    .from("exam_submissions")
-    .upsert(rows, { onConflict: "exam_id,user_id,question_id" });
-  if (submissionError) throw submissionError;
-
-  const { data: finalized, error: finalizeError } = await admin
-    .from("exam_attempts")
-    .update({
-      status: "finalized",
-      submitted_at: submittedAt,
-      finalized_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", attempt.id)
-    .select("*")
-    .single();
-  if (finalizeError) throw finalizeError;
+  if (finalizeError) {
+    if (finalizeError.message.includes("WRITER_REVOKED")) throw new ApiError("WRITER_REVOKED", "This writer was revoked", 409);
+    if (finalizeError.message.includes("ATTEMPT_EXPIRED")) throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
+    throw finalizeError;
+  }
+  const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData;
 
   await redis.del(CacheKeys.attemptDrafts(attempt.id));
   return { alreadyFinalized: false, attempt: finalized };
@@ -100,32 +56,31 @@ export async function lockPracticeAttempt(input: {
   userId: string;
   writerToken: string;
 }) {
-  const attempt = await requireAttemptWriter(input.attemptId, input.userId, input.writerToken);
-  if (attempt.mode !== "practice") {
-    throw new ApiError("VALIDATION_ERROR", "This is not a practice attempt", 400);
-  }
-  if (!["active", "awaiting_selection", "grading"].includes(attempt.status)) {
+  const admin = await createAdminClient();
+  const { data: attemptData, error: lockError } = await admin.rpc("lock_practice_attempt", {
+    p_attempt_id: input.attemptId,
+    p_user_id: input.userId,
+    p_writer_token_hash: hashWriterToken(input.writerToken),
+  });
+  if (lockError) {
+    if (lockError.message.includes("WRITER_REVOKED")) throw new ApiError("WRITER_REVOKED", "This writer was revoked", 409);
     throw new ApiError("ATTEMPT_NOT_ACTIVE", "Practice attempt is no longer active", 409);
   }
+  const attempt = (Array.isArray(attemptData) ? attemptData[0] : attemptData) as Awaited<ReturnType<typeof getAttempt>>;
 
-  const admin = await createAdminClient();
-  if (attempt.status === "active") {
-    const { error } = await admin
-      .from("exam_attempts")
-      .update({ status: "awaiting_selection", submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq("id", attempt.id)
-      .eq("status", "active");
-    if (error) throw error;
-  }
-
-  const redis = getRedis();
-  const drafts = (await redis.get<AttemptDrafts>(CacheKeys.attemptDrafts(attempt.id))) ?? {};
+  const drafts = await getAttemptDrafts(attempt.id);
   const { data: questions, error } = await admin
     .from("exam_questions")
     .select("id, marks, order_index, questions(category, prompt)")
     .eq("exam_id", attempt.exam_id)
     .order("order_index");
   if (error) throw error;
+  const { data: jobs } = await admin
+    .from("grading_jobs")
+    .select("id, status")
+    .eq("attempt_id", attempt.id)
+    .order("created_at", { ascending: false })
+    .limit(1);
 
   const selectable = (questions ?? [])
     .filter((row: any) => row.questions?.category !== "translation" && drafts[row.id]?.editedText?.trim())
@@ -143,6 +98,7 @@ export async function lockPracticeAttempt(input: {
     excludedTranslationIds: (questions ?? [])
       .filter((row: any) => row.questions?.category === "translation")
       .map((row: any) => row.id),
+    currentJob: jobs?.[0] ? { jobId: jobs[0].id, status: jobs[0].status } : null,
   };
 }
 
@@ -169,4 +125,3 @@ export async function finalizeDueAttempts(limit = 50) {
   }
   return finalized;
 }
-

@@ -39,11 +39,8 @@ On successful update, the user is automatically redirected to the dashboard afte
 A server-side `GET` route at `/auth/callback` extracts the `code` query parameter, calls `exchangeCodeForSession()`, and redirects to the `next` parameter (defaulting to `/`).
 This is the single point of PKCE code exchange for all auth flows: signup verification, password reset, and any future OAuth providers.
 
-### 1.8 Session Middleware
-Runs on every request to refresh the Supabase auth cookie and enforce route protection.
-Unauthenticated users accessing protected routes are redirected to `/login`.
-Authenticated users accessing auth routes (login, signup, forgot-password) are redirected to `/`, except for `/reset-password` which is exempt because Supabase establishes a recovery session before the user arrives.
-API routes are skipped entirely — they handle their own auth.
+### 1.8 Proxy and Request-Scoped Authentication
+The Next.js Proxy performs optimistic cookie routing only; it never calls Supabase. Protected layouts and API routes perform one authoritative `getUser()` validation through a React request cache, so nested server components reuse the same identity lookup. The authenticated layout loads profile, subscription, notification count, and shell state once. API routes still validate their own user or admin authorization.
 
 ---
 
@@ -60,7 +57,7 @@ All prices are in BDT (Bangladeshi Taka) per month.
 
 ### 2.2 Free Tier
 Every new user receives 3 free AI-graded tests on signup (`FREE_TESTS_ON_SIGNUP = 3`).
-These are tracked on the `profiles.free_tests_remaining` column and consumed before any paid quota.
+These are tracked on the `profiles.free_tests_remaining` column and remain available when no eligible paid slot exists.
 
 ### 2.3 Extra Test Slots
 Users on Plan 1 or Plan 2 can purchase additional test slots at ৳5 each (`EXTRA_TEST_PRICE = 5`).
@@ -71,10 +68,8 @@ A universal `getUsageInfo()` utility computes remaining tests, percentage, and a
 The color thresholds are: green (>60%), yellow (>40%), orange (>20%), red (≤20%).
 An upgrade prompt appears when usage drops below 40% for paid plans or below 1 test for free users.
 
-### 2.5 Test Slot Consumption
-Slot deduction is protected by a Redis-based distributed lock (`lock:consumeTestSlot:{userId}`) to prevent race conditions from concurrent submissions.
-The consumption order is: extra purchased slots → plan slots → free slots.
-If the lock is already held, the request fails immediately with a descriptive error rather than waiting, preventing abuse from rapid-fire submissions.
+### 2.5 Atomic Test Slot Consumption
+PostgreSQL usage ledgers reserve slots under row locks in the order extra purchased → plan → free. Standalone grading uses an idempotency key; practice exams record one charge per selected answer. A successful grade consumes its reservation, a terminal failure refunds it, and retries cannot double-charge. Quota and submission completion occur through service-role-only database functions.
 
 ### 2.6 Subscription Page
 Displays all three plans with feature lists, pricing, and a "Popular" badge on Plan 2.
@@ -103,7 +98,7 @@ These are used for filtering in the question bank and influence the mark allocat
 Each question stores: category, marks, difficulty, source (optional attribution), prompt text, space hint (e.g., "2 pages"), max images (how many photos a student can upload), an active/inactive toggle, and the creating admin's ID.
 
 ### 3.4 Question Bank Browsing
-Server-side prefetching via TanStack Query's `prefetchInfiniteQuery` for instant initial load.
+One authenticated application endpoint calls `get_question_bank_page`, which performs filtering, completion anti-joins, counting, ordering, and pagination in PostgreSQL. The browser no longer loads every exam-question ID and every prior submission ID before requesting a page.
 Client-side infinite scrolling loads 10 questions per page with automatic "Load More" triggers.
 Five filter dimensions are synced to URL search parameters for deep-linkable filtered views:
 - Text search (matches prompt text)
@@ -113,7 +108,7 @@ Five filter dimensions are synced to URL search parameters for deep-linkable fil
 - Completion status (not done / done / all) — cross-referenced against the user's submission history
 
 ### 3.5 Translation Question Exclusion
-Translation questions are filtered out of both the student question bank (`excludeTranslation: true`) and admin question list (`neq("category", "translation")`).
+Translation questions are filtered out of the student question bank but remain manageable by admins for official exams.
 Navigating directly to a translation question's test page returns a 404 to prevent bypassing the filter.
 
 ---
@@ -163,8 +158,7 @@ This step is essential because OCR is imperfect — students correct misread cha
 Both the original OCR text and the edited text are stored in the submission, creating an audit trail.
 
 ### 4.9 Test Quota Enforcement (Client & Server)
-Before a test begins, a client-side check verifies the student has available tests (subscription slots, extra slots, or free tests). If no tests are available, the "Start" button redirects to the subscription page.
-Critically, this quota is strictly enforced on the server. The `/api/grade` endpoint performs a secure server-side check before invoking the AI, and atomically consumes the slot via a distributed Redis lock (`consumeTestSlot()`) only after grading succeeds. This completely prevents bypass attacks where a user might try to hit the API directly.
+The client presents availability, but `/api/grade` derives the user, active question, category, and marks on the server. It reserves quota with `reserve_standalone_usage`, grades, and atomically inserts the submission plus consumes the charge with `complete_standalone_grade`. Failed grading calls `release_standalone_usage`; a stable request UUID makes lost-response retries safe.
 
 ### 4.10 Session Cancellation
 A "Cancel Session" button is available during the running/paused states.
@@ -218,60 +212,31 @@ Activated via `USE_MOCK_GRADER=true` for development and testing.
 
 ## 6. Weekly Exams
 
-### 6.1 Access Control
-Only students on Plan 2 (Complete) or Plan 3 (Exam Only) can participate.
-Students without access see a prominent "Exams Locked" banner with an upgrade CTA linking to the subscription page.
+### 6.1 Access and Explicit Start
+Plan 2 and Plan 3 can start an official exam while its global window is open. A page GET fetches metadata only: it neither starts an attempt nor returns questions, so prefetch and link scanning are harmless. The explicit start POST validates the plan, time window, and published state, then returns questions. Once started, an attempt can be completed even if the subscription later expires.
 
-### 6.2 Exam Data Model
-Each exam has: title, optional description, time limit (minutes), start/end datetime window, publish status, results-published flag, and the creating admin's ID.
-Questions are linked via `exam_questions` which adds per-question marks and ordering.
+### 6.2 Authoritative Attempt Model
+`exam_attempts` stores mode, status, server start/expiry, submission/finalization timestamps, and a versioned writer-token hash. A partial unique index permits one official attempt per student/exam while completed practice attempts do not block a new run. Official and live-practice creation is concurrency-safe.
 
-### 6.3 Exam States
-An exam progresses through: Draft → Published → Live (between start and end times) → Ended → Results Published.
-Students see upcoming/live exams in one section and past exams in another, sorted by start date.
+### 6.3 Timer, Resume, and Takeover
+The countdown is always derived from `expires_at`. At zero the editor locks immediately, performs one final draft batch, and uses only a three-minute network-completion grace. Reloads resume the same server time. An explicit takeover preserves time and drafts while rotating the writer token; the old writer receives `WRITER_REVOKED` and becomes read-only.
 
-### 6.4 Server-Enforced Timer
-The exam start time is recorded in Redis on first visit (`exam:start:{examId}:{userId}`).
-All subsequent visits compute remaining time from this server-stored start, making client-side timer manipulation impossible.
-The Redis key has a 48-hour TTL so admins can find and force-grade abandoned sessions.
-A 3-minute grace period is added to the time limit to account for network latency during the final submission.
-When the timer expires, `AutoFinalizer` fires, collecting all saved drafts from Redis and submitting them.
+### 6.4 Draft Persistence and Recovery
+All acknowledged answers live in one Redis hash at `attempt:{attemptId}:drafts`; atomic `HSET` batches avoid per-question keys and `KEYS` scans. Dirty answers flush every 30 seconds, after OCR, on manual save, and when the page becomes hidden. Only unacknowledged edits are kept locally, AES-GCM encrypted with a key held in tab-scoped session storage. Failed acknowledgements stay dirty.
 
-### 6.5 Multi-Question Interface
-Each exam question is displayed in a tabbed or scrollable interface with its own upload area and text editor.
-Students can upload images (including via webcam), edit OCR text, and manually save drafts for each question independently.
+### 6.5 Atomic Completion and Abandonment
+`finalize_exam_attempt` locks the official attempt, snapshots the latest acknowledged drafts, inserts every exam answer, assigns explicit zero grades to blanks, and marks finalization in one transaction. Duplicate calls return the completed state. The Railway worker finalizes expired abandoned attempts; connected clients, reloads, cron, and admin actions are idempotent fallbacks.
 
-### 6.6 Draft Persistence (Redis)
-Every answer is saved to Redis as a draft (`exam:{examId}:submission:{userId}:{questionId}`).
-Drafts auto-save immediately after OCR completes and can be manually triggered with a "Save Draft" button per question.
-A "Save All" button flushes all dirty (unsaved) answers in parallel.
-On re-entry (e.g., browser crash), all drafts are hydrated from Redis into the answer state.
+### 6.6 Practice Exam Completion
+Practice opens only after results publication and every run starts after explicit confirmation. Finishing locks the answer snapshot before quota selection. Each non-empty selected, non-translation answer costs one slot. Translation is excluded from AI grading, quota, total, and denominator; unselected or blank non-translation answers score zero. Terminal failures refund reservations and failed answers can be retried without recharging successful work.
 
-### 6.7 Exam Submission
-On manual submit or timer expiry, all unsaved drafts are flushed to Redis first, then the full payload is sent to `/api/exam/submit`.
-Duplicate submission clicks are handled gracefully — the server returns a specific "Exam already submitted" error that the client catches and redirects to results.
-After submission, the `in_progress_exam` localStorage entry is cleared and the exam banner disappears.
+### 6.7 Durable Grading Jobs
+Selected practice answers and official admin grading run through `grading_jobs` and `grading_job_items`. Items track claims, retries, exponential backoff, errors, cancellation, resume, and stale-claim recovery. Successful results are saved before completion is acknowledged; admin grades are never overwritten unless an admin explicitly enables regrading.
 
-### 6.8 Auto-Finalization
-When a student revisits an exam page after their timer has expired (including the 3-minute grace), the `AutoFinalizer` component automatically calls `/api/exam/finalize` to submit whatever drafts exist in Redis.
-This ensures no answers are lost even if the student's browser crashed during the exam.
+### 6.8 Publication and Leaderboard
+Publication is one database transaction. It rejects early publication, non-final attempts, missing answer rows, and incomplete grades; rebuilds `exam_results`; assigns competition ranks with `RANK()` (`1, 2, 2, 4`); increments `results_version`; and triggers notifications only on the first false→true publication. “Recalculate & Republish” repeats the transaction after corrections.
 
-### 6.9 Results Embargo
-While the global exam window is still open, students who finished early see a "Session Concluded" page explaining their results will appear after the exam officially ends.
-After the exam ends but before results are published, a "Results Pending" page appears.
-This prevents early finishers from leaking questions or scores to students still taking the exam.
-
-### 6.10 Leaderboard
-After results are published, a ranked leaderboard displays all participating students with their scores, names, and institutes. The list is paginated (100 students per page) if the participant count is large.
-The current user's row is highlighted with "(You)" appended and a distinct background color.
-Gold/silver/bronze medal icons mark the top three positions.
-The leaderboard is cached in Redis for 1 hour (`CacheTTL.LEADERBOARD = 3600`) to avoid repeated heavy queries.
-
-### 6.11 Practice Mode
-After results are officially published, exams become available in practice mode (`?practice=true`).
-Practice mode uses separate Redis keys (`practice:exam:...`) so it doesn't interfere with real submissions.
-Practice submissions are graded in real-time by the AI and results are shown inline without saving to the leaderboard.
-Practice mode is explicitly blocked before results are published to prevent students from using AI grading to preview official rubrics.
+The signed-in leaderboard RPC returns only name, institute, score, maximum, rank, total count, and result version. Pages contain at most 100 rows and are cached by exam/version/page. Student details expose submitted text, score, safe feedback, and verified highlights only after publication—never rubric reasoning or grader source.
 
 ---
 
@@ -413,30 +378,26 @@ Displays title, publish status (Draft/Published badge), duration, date range, an
 Exam builder interface for setting title, description, time limit, start/end dates, and selecting/ordering questions from the question bank.
 
 ### 14.3 Edit Exam
-The exam builder pre-populates with the existing exam's configuration for modification.
+The restored edit page pre-populates the same exam builder. `update_exam_definition` changes the exam and ordered questions atomically, but rejects question/order/mark edits after the first official attempt starts.
 
 ### 14.4 Extend Timer
-A per-exam button that prompts the admin for extra minutes and extends both the exam's `time_limit_minutes` and `ends_at` deadline.
-All active students' Redis-stored start times are implicitly accommodated because the remaining-time calculation uses the updated time limit.
+A controlled database function extends the exam deadline and clamps each active official attempt to the new global deadline without changing its original start.
 
-### 14.5 Force Grade Expired
-Scans Redis for all active sessions on a specific exam, identifies expired ones, and force-submits their drafts via `/api/exam/finalize`.
-Useful when students abandon sessions without submitting, preventing their drafts from languishing in Redis forever.
+### 14.5 Finalize Expired Attempts
+The accurately named action queries authoritative due attempts and invokes the same idempotent finalizer used by clients and workers. It does not pretend to grade answers.
 
 ### 14.6 Submissions View
-Per-exam view of all student submissions with links to individual grading review.
+Per-exam view of finalized official submissions with grade completeness, student identity, and links to detailed review. It also provides Publish Results and Recalculate & Republish actions.
 
 ---
 
 ## 15. Admin — Grading Queue
 
-### 15.1 Submission Review Table
-Lists all practice test submissions with student name/institute, question prompt, submission date, and AI-assigned score.
-"Review" link navigates to a detailed view of the submission.
+### 15.1 Official Submission Review
+Admins may manually grade any answer, AI-grade one answer, AI-grade a selection, or enqueue all missing grades. Translation is manual-only. AI successes are marked `ai`; manual saves and overrides are marked `admin`, but the source is never returned to students.
 
 ### 15.2 Manual Override
-Admins can review AI grading results and adjust scores or feedback.
-Both AI-graded (`graded_by: "ai"`) and admin-graded (`graded_by: "admin"`) submissions are tracked.
+Manual grades are validated against the exam-question marks and written atomically. Bulk grading protects an admin grade by default; regrading requires explicit selection and confirmation. Queue status exposes progress, retries, failures, cancel, and resume controls.
 
 ---
 
@@ -493,18 +454,17 @@ Used for revenue reporting on the admin dashboard.
 ## 19. Caching Strategy (Upstash Redis)
 
 ### 19.1 Centralized Cache Keys
-All cache keys are defined in `CacheKeys` to prevent key fragmentation across the codebase.
-Pattern keys (with `*` wildcards) are available for scanning related entries.
+All cache keys are defined in `CacheKeys` to prevent fragmentation. There are no wildcard scans in an exam request path.
 
 ### 19.2 Cache Purposes
-- **Exam start times**: server-enforced timer anchors (48h TTL)
-- **Exam drafts**: in-progress answers (separate keys for real and practice mode)
-- **Leaderboard**: cached query results (1h TTL)
-- **Distributed locks**: test slot consumption race prevention (10s TTL)
+- **Attempt drafts**: one atomic Redis hash per active attempt (48h TTL)
+- **Leaderboard**: sanitized pages keyed by exam, publication version, and page (1h TTL)
+
+Attempt timing, quotas, grading jobs, grades, and results are durable PostgreSQL state rather than cache state.
 
 ### 19.3 In-Memory Fallback
 When `UPSTASH_REDIS_REST_URL` is not configured, a Map-based mock provides identical API surface.
-The fallback supports `get`, `set` (with `nx` and `ex` options), `del`, `exists`, `expire`, `ttl`, and `keys` (with glob patterns).
+The fallback supports the strings and hashes used by the application, including `get`, `set`, `hgetall`, `hset`, `del`, `exists`, `expire`, and `ttl`.
 This ensures the app runs without Redis in local development.
 
 ---
@@ -513,19 +473,27 @@ This ensures the app runs without Redis in local development.
 
 ### 20.1 Frontend
 Next.js with App Router, React Server Components for data fetching, client components for interactivity.
-TanStack Query for client-side data management with server-side prefetching + hydration.
+Server aggregates and same-origin APIs keep browser data traffic bounded; unsafe exam/test links disable automatic prefetch.
 Recharts for data visualization (area charts, sparklines).
 Lucide React for icons throughout the interface.
 
 ### 20.2 Backend
 Supabase for authentication, PostgreSQL database, and Row Level Security.
-Upstash Redis for caching, distributed locks, and ephemeral state (exam drafts).
-OpenAI GPT-5.2 for both OCR (Vision API) and AI grading (Responses API with Structured Outputs).
+Upstash Redis for ephemeral attempt drafts and versioned leaderboard pages.
+OpenAI GPT-5.6-Luna for both OCR and AI grading through the Responses API with Structured Outputs.
 Firebase Cloud Messaging for push notifications.
 
 ### 20.3 Deployment
-Hosted on Netlify with serverless functions.
-Environment variables managed via `.env.local` for development and Netlify dashboard for production.
+Railway hosts three services from the same repository, each selecting its own checked-in config path:
+
+- **Web** — `/railway.web.json`, `npm run build`, then `npm run start`; `/api/health` is the health check.
+- **Grading worker** — `/railway.worker.json`, `npm run worker:grading`; its signed `/wake` endpoint drains bounded grading batches and `/health` reports liveness.
+- **Five-minute safety cron** — `/railway.cron.json`, `npm run worker:once`; it finalizes abandoned due attempts, recovers missed queue work, and exits.
+
+Supabase remains the durable database/auth provider and Upstash remains Redis. Shared sealed/reference variables supply Supabase, Upstash, OpenAI, and `GRADING_WORKER_SECRET`; the web service points `GRADING_WORKER_URL` at the worker. Schema migrations run before application rollout, and the staging environment uses separate Supabase/Upstash resources and seeded accounts.
+
+### 20.4 Request Budget
+Persistent authenticated navigation and every exam/test start link disable automatic prefetch. The shell obtains profile, subscription, and notification state once from the authenticated layout. Notifications refresh on focus/navigation and at most every five minutes while visible; `last_active_at` is throttled to 15 minutes. Dashboard and question-bank views use aggregate RPCs. The production acceptance budget is at most 20 application/data requests per page load, excluding chunks, fonts, and images.
 
 ---
 
@@ -576,46 +544,53 @@ Used consistently across both student and admin interfaces.
 ## 23. Testing
 
 ### 23.1 Unit Tests
-Jest-based test suite covering plan configuration (prices, features, upgrade math), type shape validation (compile-time and runtime checks), and label completeness.
-The `plans-and-types.test.ts` file verifies that all three plans have correct pricing, test quotas, and feature flags.
+Jest runs in the Node environment used by Next.js routes and Railway workers, with Next's web primitives installed for `Request`/`Response`. The suite covers plan configuration, contracts, Redis fallback behavior, bKash, security properties, and the grading engine.
 
 ### 23.2 Grading Tests
 A dedicated `grade.test.ts` validates the grading engine's tool-calling loop, structured output parsing, and highlight validation logic.
 
 ### 23.3 Integration Tests
-`flow.test.ts` in the exam API directory tests the end-to-end exam submission flow.
+`flow.test.ts` verifies that retired per-question mutations cannot start or alter an exam and that acknowledged drafts use one attempt document. `supabase/tests/exam_reliability.sql` is an executable, rollback-only database contract test for attempt start/finalize, blank zeros, early/incomplete publication rejection, rank ties, republish versioning, practice refunds/retry, repeated practice, and standalone idempotency.
 
 ### 23.4 Redis Tests
 `redis.test.ts` validates the in-memory fallback's correctness against the expected Redis API surface.
+
+### 23.5 Release Gates
+`npm run check` runs TypeScript, ESLint, Jest, and the production Next build. Before release, the SQL contract test runs against dedicated staging Supabase, followed by seeded Playwright exam/practice/admin flows with mocked OpenAI. A smaller production smoke test verifies health, login, exam metadata, and request count without starting a real attempt.
 
 ---
 
 ## 24. Security Measures
 
 ### 24.1 Admin Verification
-Every admin server action calls `verifyAdmin()` which checks the current user's `is_admin` flag.
-The admin layout performs this check at the page level; individual mutations double-check to prevent CSRF or direct API abuse.
+The admin layout and every mutation perform their own authoritative user lookup and `is_admin` check. Service-role database functions are revoked from `anon` and `authenticated` roles.
 
 ### 24.2 Row Level Security
 Supabase RLS policies restrict data access at the database level.
 The service role key is used only in server-side contexts (webhooks, admin actions) and never exposed to the client.
+Attempt, grading-job, usage-ledger, and leaderboard policies expose only the authenticated user's permitted rows; the public leaderboard contract is a sanitized signed-in RPC.
 
 ### 24.3 Anti-Cheat: Server-Enforced Exam Timing
-The exam timer is anchored to a Redis-stored server timestamp, making client-side clock manipulation ineffective.
-The 3-minute grace period accommodates legitimate network delays without opening a significant cheating window.
+The exam timer is anchored to PostgreSQL `started_at`/`expires_at`, making client-clock manipulation ineffective. Questions are unavailable on GET and appear only after the explicit transactional start. The three-minute grace permits network completion but never unlocks editing.
 
 ### 24.4 Anti-Cheat: Practice Mode Lockout
 Practice mode on past exams is only available after `results_published = true`.
 This prevents students from using AI-graded practice runs to preview questions or deduce rubrics before the official grading is complete.
 
-### 24.5 Anti-Cheat: Grading Prompt Injection
+### 24.5 Writer and Recovery Security
+Only the SHA-256 writer-token hash is durable. Takeover rotates it, and stale writers receive `WRITER_REVOKED`. Local recovery contains only unacknowledged changes, encrypted with AES-GCM; the key remains in tab-scoped session storage and recovery is cleared after acknowledgement or completion.
+
+### 24.6 Anti-Cheat: Grading Prompt Injection
 The per-request UUID nonce in submission tags prevents pre-crafted injection payloads.
 The system prompt explicitly tells the model to note manipulation attempts rather than comply with them.
 
-### 24.6 File Upload Validation
+### 24.7 File Upload Validation
 OCR endpoint validates file type (JPEG, PNG, WebP, GIF only) and size (max 10MB).
 Rejects unsupported types with specific error messages.
 
-### 24.7 Webhook Signature Verification
+### 24.8 Credential Handling
+The Firebase Admin JSON filename is ignored and removed from Git tracking while the physical local path remains available. Production uses Railway sealed environment values. Any exposed key must be revoked before the repository history is rewritten and force-pushed.
+
+### 24.9 Webhook Signature Verification
 The push notification webhook endpoint supports `x-supabase-signature` header checking.
 A `SUPABASE_WEBHOOK_SECRET` environment variable secures server-to-server communication.

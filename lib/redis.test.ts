@@ -27,7 +27,7 @@ describe('Redis Cache Client', () => {
 
   it('should correctly build cache keys', () => {
     expect(CacheKeys.leaderboard('exam123')).toBe('leaderboard:exam123:v0:p1');
-    expect(CacheKeys.examDraft('exam1', 'user1', 'q1')).toBe('exam:exam1:submission:user1:q1');
+    expect(CacheKeys.attemptDrafts('attempt1')).toBe('attempt:attempt1:drafts');
   });
 
   it('should expose correct Cache TTL constants', () => {

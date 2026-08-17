@@ -38,6 +38,7 @@ type AnswerState = {
 type PracticeSelection = {
   availableSlots: number;
   selectable: Array<{ examQuestionId: string; marks: number; prompt: string }>;
+  currentJob?: { jobId: string; status: string } | null;
 };
 
 type JobItem = {
@@ -92,7 +93,7 @@ export default function ExamTakerClient({
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [locked, setLocked] = useState(false);
+  const [locked, setLocked] = useState(attempt.status !== "active");
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
   const [selection, setSelection] = useState<PracticeSelection | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -100,6 +101,7 @@ export default function ExamTakerClient({
   const [jobItems, setJobItems] = useState<JobItem[] | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const expiryTriggered = useRef(false);
+  const completionInFlight = useRef(false);
 
   useEffect(() => {
     answersRef.current = answers;
@@ -107,6 +109,7 @@ export default function ExamTakerClient({
 
   useEffect(() => {
     let cancelled = false;
+    if (attempt.status !== "active") return;
     void loadEncryptedRecovery(attempt.id).then((recovered) => {
       if (cancelled || !Object.keys(recovered).length) return;
       setAnswers((current) => {
@@ -126,7 +129,7 @@ export default function ExamTakerClient({
     return () => {
       cancelled = true;
     };
-  }, [attempt.id]);
+  }, [attempt.id, attempt.status]);
 
   useEffect(() => {
     if (locked) return;
@@ -223,7 +226,8 @@ export default function ExamTakerClient({
   }, []);
 
   const completeAttempt = useCallback(async () => {
-    if (isSubmitting) return;
+    if (completionInFlight.current) return;
+    completionInFlight.current = true;
     setLocked(true);
     setIsSubmitting(true);
     try {
@@ -241,6 +245,10 @@ export default function ExamTakerClient({
       if (isPractice) {
         setSelection(data as PracticeSelection);
         setSelectedIds(new Set());
+        if (data.currentJob) {
+          setJobId(data.currentJob.jobId);
+          setJobStatus(data.currentJob.status);
+        }
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
         clearEncryptedRecovery(attempt.id);
@@ -250,14 +258,19 @@ export default function ExamTakerClient({
       setReadOnlyReason(error instanceof Error ? error.message : "Submission failed");
       if (Date.now() < new Date(attempt.expires_at).getTime()) setLocked(false);
     } finally {
+      completionInFlight.current = false;
       setIsSubmitting(false);
     }
-  }, [attempt.expires_at, attempt.id, exam.id, isPractice, isSubmitting, router, writerToken]);
+  }, [attempt.expires_at, attempt.id, exam.id, isPractice, router, writerToken]);
 
   const completeRef = useRef(completeAttempt);
   useEffect(() => {
     completeRef.current = completeAttempt;
   }, [completeAttempt]);
+
+  useEffect(() => {
+    if (isPractice && attempt.status !== "active") void completeRef.current();
+  }, [attempt.status, isPractice]);
 
   useEffect(() => {
     const expiresAt = new Date(attempt.expires_at).getTime();
@@ -357,19 +370,28 @@ export default function ExamTakerClient({
   }
 
   useEffect(() => {
-    if (!jobId || ["completed", "failed", "cancelled"].includes(jobStatus ?? "")) return;
+    if (!jobId) return;
     let cancelled = false;
     const poll = async () => {
       const response = await fetch(`/api/grading-jobs/${jobId}`, { cache: "no-store" });
       const data = await response.json();
       if (cancelled || !response.ok) return;
       setJobStatus(data.job.status);
-      setJobItems(data.items);
+      setJobItems((current) => {
+        const merged = new Map((current ?? []).map((item) => [item.exam_question_id, item]));
+        for (const item of data.items as JobItem[]) merged.set(item.exam_question_id, item);
+        return [...merged.values()];
+      });
       if (["completed", "failed", "cancelled"].includes(data.job.status)) {
         clearEncryptedRecovery(attempt.id);
       }
     };
     void poll();
+    if (["completed", "failed", "cancelled"].includes(jobStatus ?? "")) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const timer = window.setInterval(poll, 2_500);
     return () => {
       cancelled = true;
@@ -377,7 +399,20 @@ export default function ExamTakerClient({
     };
   }, [attempt.id, jobId, jobStatus]);
 
-  if (selection && jobStatus && ["completed", "failed", "cancelled"].includes(jobStatus)) {
+  useEffect(() => {
+    if (jobStatus !== "failed" || !jobItems) return;
+    const failedIds = jobItems
+      .filter((item) => item.status === "failed")
+      .map((item) => item.exam_question_id);
+    setSelectedIds(new Set(failedIds));
+    setReadOnlyReason(
+      failedIds.length
+        ? `${failedIds.length} answer${failedIds.length === 1 ? "" : "s"} could not be graded. Your slots were refunded; retry when ready.`
+        : "Grading did not complete. No slot was charged for failed answers.",
+    );
+  }, [jobItems, jobStatus]);
+
+  if (selection && jobStatus === "completed") {
     const resultMap = new Map((jobItems ?? []).map((item) => [item.exam_question_id, item.result]));
     const scoredQuestions = examQuestions.filter((question) => question.questions.category !== "translation");
     const total = scoredQuestions.reduce((sum, question) => sum + (resultMap.get(question.id)?.internal.total ?? 0), 0);
@@ -479,7 +514,9 @@ export default function ExamTakerClient({
               disabled={isSubmitting || selectedIds.size > limit}
               className="w-full rounded-xl bg-brand-600 px-6 py-3 font-bold text-white disabled:opacity-50"
             >
-              {isSubmitting ? "Starting grading…" : `Grade ${selectedIds.size} Selected Answer${selectedIds.size === 1 ? "" : "s"}`}
+              {isSubmitting
+                ? "Starting grading…"
+                : `${jobStatus === "failed" ? "Retry" : "Grade"} ${selectedIds.size} ${jobStatus === "failed" ? "Failed" : "Selected"} Answer${selectedIds.size === 1 ? "" : "s"}`}
             </button>
           )}
           {readOnlyReason && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{readOnlyReason}</p>}

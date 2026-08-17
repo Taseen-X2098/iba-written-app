@@ -102,20 +102,27 @@ function createMemoryFallback(): Redis {
       }
       return remaining;
     },
-    keys: async (pattern: string) => {
-      const matched = [];
-      const regexStr = pattern.replace(/\*/g, '.*');
-      const regex = new RegExp(`^${regexStr}$`);
-      for (const [key, entry] of store.entries()) {
-        if (entry.expiresAt && Date.now() > entry.expiresAt) {
-          store.delete(key);
-          continue;
-        }
-        if (regex.test(key)) {
-          matched.push(key);
-        }
+    hgetall: async (key: string) => {
+      const entry = store.get(key);
+      if (!entry) return null;
+      if (entry.expiresAt && Date.now() > entry.expiresAt) {
+        store.delete(key);
+        return null;
       }
-      return matched;
+      return JSON.parse(entry.value) as Record<string, unknown>;
+    },
+    hset: async (key: string, fields: Record<string, unknown>) => {
+      const existing = store.get(key);
+      const current = existing && (!existing.expiresAt || Date.now() <= existing.expiresAt)
+        ? JSON.parse(existing.value) as Record<string, unknown>
+        : {};
+      let added = 0;
+      for (const [field, value] of Object.entries(fields)) {
+        if (!(field in current)) added += 1;
+        current[field] = value;
+      }
+      store.set(key, { value: JSON.stringify(current), expiresAt: existing?.expiresAt ?? null });
+      return added;
     },
   } as unknown as Redis;
 }
@@ -129,17 +136,6 @@ export const CacheKeys = {
   /** All acknowledged drafts for a durable attempt, stored as one document. */
   attemptDrafts: (attemptId: string) => `attempt:${attemptId}:drafts`,
 
-  /** Practice grading results retained for reloads. */
-  attemptResults: (attemptId: string) => `attempt:${attemptId}:results`,
-
-  /** In-progress exam answer */
-  examDraft: (examId: string, userId: string, questionId: string) =>
-    `exam:${examId}:submission:${userId}:${questionId}`,
-
-  /** In-progress practice exam answer */
-  practiceExamDraft: (examId: string, userId: string, questionId: string) =>
-    `practice:exam:${examId}:submission:${userId}:${questionId}`,
-
   /** In-progress single test answer */
   testDraft: (userId: string, questionId: string) =>
     `test:draft:${userId}:${questionId}`,
@@ -148,13 +144,6 @@ export const CacheKeys = {
   leaderboard: (examId: string, version = 0, page = 1) =>
     `leaderboard:${examId}:v${version}:p${page}`,
 
-  /** All draft keys for a user in an exam (pattern for scanning) */
-  examDraftPattern: (examId: string, userId: string) =>
-    `exam:${examId}:submission:${userId}:*`,
-
-  /** All draft keys for a user in a practice exam (pattern for scanning) */
-  practiceExamDraftPattern: (examId: string, userId: string) =>
-    `practice:exam:${examId}:submission:${userId}:*`,
 } as const;
 
 // ─── TTL Constants ──────────────────────────────────────────────────────────

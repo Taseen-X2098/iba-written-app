@@ -33,10 +33,17 @@ DECLARE
   v_subscription subscriptions;
   v_profile profiles;
 BEGIN
+  -- Serialize duplicate HTTP retries before checking the idempotency row.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(p_user_id::text || ':' || p_idempotency_key::text, 0)
+  );
   SELECT * INTO v_existing FROM standalone_usage_charges
   WHERE user_id = p_user_id AND idempotency_key = p_idempotency_key
   FOR UPDATE;
-  IF FOUND THEN RETURN v_existing; END IF;
+  IF FOUND THEN
+    IF v_existing.question_id <> p_question_id THEN RAISE EXCEPTION 'IDEMPOTENCY_CONFLICT'; END IF;
+    RETURN v_existing;
+  END IF;
 
   SELECT * INTO v_subscription FROM subscriptions
   WHERE user_id = p_user_id AND is_active = true AND expires_at > now()
@@ -130,4 +137,3 @@ REVOKE ALL ON FUNCTION public.complete_standalone_grade(uuid, uuid, uuid, text, 
 GRANT EXECUTE ON FUNCTION public.reserve_standalone_usage(uuid, uuid, uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.release_standalone_usage(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.complete_standalone_grade(uuid, uuid, uuid, text, text, integer, jsonb) TO service_role;
-

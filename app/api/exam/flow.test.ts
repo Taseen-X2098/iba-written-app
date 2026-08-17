@@ -42,9 +42,9 @@ describe("authoritative exam attempt contract", () => {
       },
     };
 
-    await redis.set(key, draftDocument);
+    await redis.hset(key, draftDocument);
 
-    await expect(redis.get(key)).resolves.toEqual(draftDocument);
+    await expect(redis.hgetall(key)).resolves.toEqual(draftDocument);
     expect(key).toBe("attempt:attempt-123:drafts");
   });
 

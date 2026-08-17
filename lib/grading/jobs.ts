@@ -3,12 +3,11 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { OpenAI } from "openai";
 import { createAdminClient } from "@/lib/supabase/server";
-import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
+import { getRedis, CacheKeys } from "@/lib/redis";
 import { ApiError } from "@/lib/api/errors";
-import { requireAttemptWriter } from "@/lib/exams/attempts";
+import { getAttemptDrafts, requireAttemptWriter } from "@/lib/exams/attempts";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
-import type { AttemptDrafts, GradingResultJSON } from "@/lib/types";
 
 type ClaimedItem = {
   id: string;
@@ -55,7 +54,16 @@ export async function createPracticeGradingJob(input: {
   const selectedIds = [...new Set(input.examQuestionIds)];
   const admin = await createAdminClient();
   const redis = getRedis();
-  const drafts = (await redis.get<AttemptDrafts>(CacheKeys.attemptDrafts(attempt.id))) ?? {};
+  const { data: liveJobs } = await admin
+    .from("grading_jobs")
+    .select("*")
+    .eq("attempt_id", attempt.id)
+    .in("status", ["queued", "running"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (liveJobs?.[0]) return { jobId: liveJobs[0].id, status: liveJobs[0].status };
+
+  const drafts = await getAttemptDrafts(attempt.id);
   const { data: questions, error: questionError } = await admin
     .from("exam_questions")
     .select("id, questions(category)")
@@ -75,7 +83,6 @@ export async function createPracticeGradingJob(input: {
       .from("exam_attempts")
       .update({ status: "finalized", finalized_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", attempt.id);
-    await redis.set(CacheKeys.attemptResults(attempt.id), {}, { ex: CacheTTL.ATTEMPT });
     await redis.del(CacheKeys.attemptDrafts(attempt.id));
     return { jobId: null, status: "completed" as const };
   }
@@ -104,6 +111,16 @@ export async function createPracticeGradingJob(input: {
     .select("*")
     .single();
   if (jobError) {
+    if (jobError.code === "23505") {
+      const { data: concurrent } = await admin
+        .from("grading_jobs")
+        .select("id, status")
+        .eq("attempt_id", attempt.id)
+        .in("status", ["queued", "running"])
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (concurrent?.[0]) return { jobId: concurrent[0].id, status: concurrent[0].status };
+    }
     await Promise.all(validIds.map((id) => admin.rpc("finish_usage_charge", {
       p_attempt_id: attempt.id,
       p_exam_question_id: id,
@@ -211,7 +228,17 @@ async function markItemFailure(item: ClaimedItem, error: unknown, practiceAttemp
       p_success: false,
     });
   }
-  await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
+  const { data: refreshedData } = await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
+  const refreshed = Array.isArray(refreshedData) ? refreshedData[0] : refreshedData;
+  if (practiceAttemptId && refreshed?.status === "failed") {
+    // Failed reservations have been released; retain the snapshot and let the
+    // student retry only the failed answers as a fresh idempotent job.
+    await admin
+      .from("exam_attempts")
+      .update({ status: "awaiting_selection", updated_at: new Date().toISOString() })
+      .eq("id", practiceAttemptId)
+      .eq("status", "grading");
+  }
 }
 
 async function processItem(item: ClaimedItem) {
@@ -245,8 +272,7 @@ async function processItem(item: ClaimedItem) {
     let submissionText = "";
     if (job.kind === "practice_exam") {
       if (!attemptId) throw new Error("Practice job has no attempt");
-      const redis = getRedis();
-      const drafts = (await redis.get<AttemptDrafts>(CacheKeys.attemptDrafts(attemptId))) ?? {};
+      const drafts = await getAttemptDrafts(attemptId);
       submissionText = drafts[item.exam_question_id]?.editedText?.trim() ?? "";
     } else {
       if (!item.exam_submission_id) throw new Error("Official grading item has no submission");
@@ -272,11 +298,6 @@ async function processItem(item: ClaimedItem) {
     const result = await grade(client, submissionText, category, eq.marks);
 
     if (job.kind === "practice_exam") {
-      const redis = getRedis();
-      const key = CacheKeys.attemptResults(attemptId!);
-      const results = (await redis.get<Record<string, GradingResultJSON>>(key)) ?? {};
-      results[item.exam_question_id] = result;
-      await redis.set(key, results, { ex: CacheTTL.ATTEMPT });
       await admin.rpc("finish_usage_charge", {
         p_attempt_id: attemptId,
         p_exam_question_id: item.exam_question_id,
@@ -298,12 +319,18 @@ async function processItem(item: ClaimedItem) {
       .eq("id", item.id);
     const { data: refreshed } = await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
     const refreshedJob = Array.isArray(refreshed) ? refreshed[0] : refreshed;
-    if (job.kind === "practice_exam" && refreshedJob && ["completed", "failed"].includes(refreshedJob.status)) {
+    if (job.kind === "practice_exam" && refreshedJob?.status === "completed") {
       await admin
         .from("exam_attempts")
         .update({ status: "finalized", finalized_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", attemptId!);
       await getRedis().del(CacheKeys.attemptDrafts(attemptId!));
+    } else if (job.kind === "practice_exam" && refreshedJob?.status === "failed") {
+      await admin
+        .from("exam_attempts")
+        .update({ status: "awaiting_selection", updated_at: new Date().toISOString() })
+        .eq("id", attemptId!)
+        .eq("status", "grading");
     }
   } catch (error) {
     await markItemFailure(item, error, attemptId);

@@ -38,6 +38,10 @@ CREATE TABLE exam_attempts (
 CREATE UNIQUE INDEX exam_attempts_one_official
   ON exam_attempts(exam_id, user_id)
   WHERE mode = 'official';
+CREATE UNIQUE INDEX exam_attempts_one_live_practice
+  ON exam_attempts(exam_id, user_id)
+  WHERE mode = 'practice'
+    AND status IN ('active', 'locked', 'awaiting_selection', 'grading');
 CREATE INDEX exam_attempts_due
   ON exam_attempts(status, expires_at)
   WHERE status IN ('active', 'locked');
@@ -47,6 +51,14 @@ CREATE INDEX exam_attempts_user
 ALTER TABLE exam_submissions
   ADD COLUMN IF NOT EXISTS attempt_id uuid REFERENCES exam_attempts(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS exam_submissions_attempt ON exam_submissions(attempt_id);
+-- The legacy constraint prevented a second practice run from preserving its
+-- own answers. Attempts are now the uniqueness boundary.
+DROP INDEX IF EXISTS idx_exam_submissions_unique;
+CREATE UNIQUE INDEX exam_submissions_attempt_question
+  ON exam_submissions(attempt_id, question_id)
+  WHERE attempt_id IS NOT NULL;
+CREATE INDEX exam_submissions_exam_user_question
+  ON exam_submissions(exam_id, user_id, question_id);
 
 CREATE TABLE grading_jobs (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -67,6 +79,9 @@ CREATE TABLE grading_jobs (
 );
 
 CREATE INDEX grading_jobs_status ON grading_jobs(status, created_at);
+CREATE UNIQUE INDEX grading_jobs_one_live_practice
+  ON grading_jobs(attempt_id)
+  WHERE kind = 'practice_exam' AND status IN ('queued', 'running');
 
 CREATE TABLE grading_job_items (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -170,12 +185,127 @@ BEGIN
     RETURN v_attempt;
   END IF;
 
-  INSERT INTO exam_attempts (
-    exam_id, user_id, mode, status, started_at, expires_at, writer_token_hash
-  ) VALUES (
-    p_exam_id, p_user_id, p_mode, 'active', now(), p_expires_at, p_writer_token_hash
-  ) RETURNING * INTO v_attempt;
+  BEGIN
+    INSERT INTO exam_attempts (
+      exam_id, user_id, mode, status, started_at, expires_at, writer_token_hash
+    ) VALUES (
+      p_exam_id, p_user_id, p_mode, 'active', now(), p_expires_at, p_writer_token_hash
+    ) RETURNING * INTO v_attempt;
+  EXCEPTION WHEN unique_violation THEN
+    -- A concurrent start won the partial unique index. Return its attempt so
+    -- the application can respond with ATTEMPT_ACTIVE instead of a 500.
+    SELECT * INTO v_attempt
+    FROM exam_attempts
+    WHERE exam_id = p_exam_id AND user_id = p_user_id AND mode = p_mode
+      AND (p_mode = 'official' OR status IN ('active', 'locked', 'awaiting_selection', 'grading'))
+    ORDER BY created_at DESC
+    LIMIT 1;
+  END;
 
+  RETURN v_attempt;
+END;
+$$;
+
+-- Finalization locks the attempt, snapshots every answer, creates explicit
+-- zero grades for blanks, and marks the attempt finalized in one transaction.
+CREATE OR REPLACE FUNCTION public.finalize_exam_attempt(
+  p_attempt_id uuid,
+  p_user_id uuid,
+  p_writer_token_hash text,
+  p_drafts jsonb
+)
+RETURNS exam_attempts
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_attempt exam_attempts;
+BEGIN
+  SELECT * INTO v_attempt FROM exam_attempts WHERE id = p_attempt_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'ATTEMPT_NOT_ACTIVE'; END IF;
+  IF v_attempt.mode <> 'official' THEN RAISE EXCEPTION 'INVALID_ATTEMPT_MODE'; END IF;
+  IF p_user_id IS NOT NULL AND v_attempt.user_id <> p_user_id THEN RAISE EXCEPTION 'FORBIDDEN'; END IF;
+  IF p_writer_token_hash IS NOT NULL AND v_attempt.writer_token_hash <> p_writer_token_hash THEN
+    RAISE EXCEPTION 'WRITER_REVOKED';
+  END IF;
+  IF v_attempt.status = 'finalized' THEN RETURN v_attempt; END IF;
+  IF v_attempt.status NOT IN ('active', 'locked') THEN RAISE EXCEPTION 'ATTEMPT_NOT_ACTIVE'; END IF;
+  IF p_user_id IS NOT NULL AND now() > v_attempt.expires_at + interval '3 minutes' THEN
+    RAISE EXCEPTION 'ATTEMPT_EXPIRED';
+  END IF;
+
+  INSERT INTO exam_submissions(
+    exam_id, user_id, question_id, attempt_id, ocr_text, edited_text,
+    started_at, submitted_at, grading_result, graded_by
+  )
+  SELECT
+    v_attempt.exam_id,
+    v_attempt.user_id,
+    eq.id,
+    v_attempt.id,
+    coalesce(p_drafts -> eq.id::text ->> 'ocrText', ''),
+    coalesce(p_drafts -> eq.id::text ->> 'editedText', ''),
+    v_attempt.started_at,
+    now(),
+    CASE WHEN btrim(coalesce(p_drafts -> eq.id::text ->> 'editedText', '')) = '' THEN
+      jsonb_build_object(
+        'internal', jsonb_build_object('total', 0, 'max', eq.marks, 'criteria', '[]'::jsonb),
+        'studentFeedback', jsonb_build_object(
+          'score', '0/' || eq.marks::text,
+          'summary', 'No answer was submitted for this question.',
+          'highlights', '[]'::jsonb
+        )
+      )
+    ELSE NULL END,
+    CASE WHEN btrim(coalesce(p_drafts -> eq.id::text ->> 'editedText', '')) = ''
+      THEN 'admin'::graded_by_type ELSE NULL END
+  FROM exam_questions eq
+  WHERE eq.exam_id = v_attempt.exam_id
+  ON CONFLICT (attempt_id, question_id) WHERE attempt_id IS NOT NULL
+  DO UPDATE SET
+    ocr_text = EXCLUDED.ocr_text,
+    edited_text = EXCLUDED.edited_text,
+    submitted_at = EXCLUDED.submitted_at,
+    grading_result = EXCLUDED.grading_result,
+    graded_by = EXCLUDED.graded_by;
+
+  UPDATE exam_attempts
+  SET status = 'finalized',
+      submitted_at = coalesce(submitted_at, now()),
+      finalized_at = coalesce(finalized_at, now()),
+      updated_at = now()
+  WHERE id = v_attempt.id
+  RETURNING * INTO v_attempt;
+  RETURN v_attempt;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.lock_practice_attempt(
+  p_attempt_id uuid,
+  p_user_id uuid,
+  p_writer_token_hash text
+)
+RETURNS exam_attempts
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_attempt exam_attempts;
+BEGIN
+  SELECT * INTO v_attempt FROM exam_attempts WHERE id = p_attempt_id FOR UPDATE;
+  IF NOT FOUND OR v_attempt.user_id <> p_user_id OR v_attempt.mode <> 'practice' THEN
+    RAISE EXCEPTION 'ATTEMPT_NOT_ACTIVE';
+  END IF;
+  IF v_attempt.writer_token_hash <> p_writer_token_hash THEN RAISE EXCEPTION 'WRITER_REVOKED'; END IF;
+  IF v_attempt.status = 'active' THEN
+    UPDATE exam_attempts
+    SET status = 'awaiting_selection', submitted_at = now(), updated_at = now()
+    WHERE id = p_attempt_id RETURNING * INTO v_attempt;
+  ELSIF v_attempt.status NOT IN ('awaiting_selection', 'grading') THEN
+    RAISE EXCEPTION 'ATTEMPT_NOT_ACTIVE';
+  END IF;
   RETURN v_attempt;
 END;
 $$;
@@ -226,8 +356,27 @@ DECLARE
   v_question_id uuid;
   v_subscription subscriptions;
   v_profile profiles;
+  v_attempt exam_attempts;
+  v_charge usage_charges;
+  v_source usage_source;
+  v_subscription_id uuid;
   v_reserved integer := 0;
 BEGIN
+  SELECT * INTO v_attempt FROM exam_attempts
+  WHERE id = p_attempt_id AND user_id = p_user_id AND mode = 'practice'
+  FOR UPDATE;
+  IF NOT FOUND OR v_attempt.status <> 'awaiting_selection' THEN
+    RAISE EXCEPTION 'ATTEMPT_NOT_ACTIVE';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM unnest(p_exam_question_ids) selected(id)
+    LEFT JOIN exam_questions eq ON eq.id = selected.id AND eq.exam_id = v_attempt.exam_id
+    LEFT JOIN questions q ON q.id = eq.question_id
+    WHERE eq.id IS NULL OR q.category = 'translation'
+  ) THEN
+    RAISE EXCEPTION 'INVALID_QUESTION_SELECTION';
+  END IF;
+
   SELECT * INTO v_subscription
   FROM subscriptions
   WHERE user_id = p_user_id
@@ -240,13 +389,13 @@ BEGIN
   SELECT * INTO v_profile FROM profiles WHERE id = p_user_id FOR UPDATE;
 
   FOREACH v_question_id IN ARRAY p_exam_question_ids LOOP
-    IF EXISTS (
-      SELECT 1 FROM usage_charges
-      WHERE user_id = p_user_id
-        AND attempt_id = p_attempt_id
-        AND exam_question_id = v_question_id
-        AND status IN ('reserved', 'consumed')
-    ) THEN
+    v_charge := NULL;
+    v_source := NULL;
+    v_subscription_id := NULL;
+    SELECT * INTO v_charge FROM usage_charges
+    WHERE user_id = p_user_id AND attempt_id = p_attempt_id AND exam_question_id = v_question_id
+    FOR UPDATE;
+    IF FOUND AND v_charge.status IN ('reserved', 'consumed') THEN
       v_reserved := v_reserved + 1;
       CONTINUE;
     END IF;
@@ -255,24 +404,33 @@ BEGIN
       v_subscription.extra_tests_purchased := v_subscription.extra_tests_purchased - 1;
       UPDATE subscriptions SET extra_tests_purchased = v_subscription.extra_tests_purchased
       WHERE id = v_subscription.id;
-      INSERT INTO usage_charges(user_id, attempt_id, exam_question_id, source, subscription_id)
-      VALUES (p_user_id, p_attempt_id, v_question_id, 'extra', v_subscription.id);
+      v_source := 'extra';
+      v_subscription_id := v_subscription.id;
     ELSIF v_subscription.id IS NOT NULL
       AND v_subscription.plan_type IN ('plan_1', 'plan_2')
       AND v_subscription.tests_remaining > 0 THEN
       v_subscription.tests_remaining := v_subscription.tests_remaining - 1;
       UPDATE subscriptions SET tests_remaining = v_subscription.tests_remaining
       WHERE id = v_subscription.id;
-      INSERT INTO usage_charges(user_id, attempt_id, exam_question_id, source, subscription_id)
-      VALUES (p_user_id, p_attempt_id, v_question_id, 'plan', v_subscription.id);
+      v_source := 'plan';
+      v_subscription_id := v_subscription.id;
     ELSIF v_profile.free_tests_remaining > 0 THEN
       v_profile.free_tests_remaining := v_profile.free_tests_remaining - 1;
       UPDATE profiles SET free_tests_remaining = v_profile.free_tests_remaining
       WHERE id = v_profile.id;
-      INSERT INTO usage_charges(user_id, attempt_id, exam_question_id, source)
-      VALUES (p_user_id, p_attempt_id, v_question_id, 'free');
+      v_source := 'free';
     ELSE
       RAISE EXCEPTION 'INSUFFICIENT_SLOTS';
+    END IF;
+
+    IF v_charge.id IS NOT NULL THEN
+      UPDATE usage_charges
+      SET source = v_source, subscription_id = v_subscription_id,
+          status = 'reserved', updated_at = now()
+      WHERE id = v_charge.id;
+    ELSE
+      INSERT INTO usage_charges(user_id, attempt_id, exam_question_id, source, subscription_id)
+      VALUES (p_user_id, p_attempt_id, v_question_id, v_source, v_subscription_id);
     END IF;
 
     v_reserved := v_reserved + 1;
@@ -336,6 +494,17 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  -- A worker may disappear after claiming. Recover its abandoned items before
+  -- selecting new work; attempt_count still caps retries.
+  UPDATE grading_job_items i
+  SET status = 'queued', claimed_by = NULL, claimed_at = NULL,
+      next_attempt_at = now(), last_error = 'Recovered stale worker claim', updated_at = now()
+  FROM grading_jobs j
+  WHERE j.id = i.job_id
+    AND j.status IN ('queued', 'running')
+    AND i.status = 'running'
+    AND i.claimed_at < now() - interval '5 minutes';
+
   RETURN QUERY
   WITH claimable AS (
     SELECT i.id
@@ -364,6 +533,39 @@ BEGIN
       updated_at = now()
   WHERE status = 'queued'
     AND EXISTS (SELECT 1 FROM grading_job_items i WHERE i.job_id = j.id AND i.claimed_by = p_worker_id);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.save_manual_exam_grade(
+  p_submission_id uuid,
+  p_grading_result jsonb
+)
+RETURNS exam_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_submission exam_submissions;
+  v_marks integer;
+  v_score numeric;
+BEGIN
+  SELECT s.* INTO v_submission
+  FROM exam_submissions s
+  WHERE s.id = p_submission_id
+  FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'SUBMISSION_NOT_FOUND'; END IF;
+  SELECT eq.marks INTO v_marks FROM exam_questions eq WHERE eq.id = v_submission.question_id;
+  BEGIN
+    v_score := (p_grading_result #>> '{internal,total}')::numeric;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION 'INVALID_GRADE';
+  END;
+  IF v_score IS NULL OR v_score < 0 OR v_score > v_marks THEN RAISE EXCEPTION 'INVALID_GRADE'; END IF;
+  UPDATE exam_submissions
+  SET grading_result = p_grading_result, graded_by = 'admin'
+  WHERE id = p_submission_id RETURNING * INTO v_submission;
+  RETURN v_submission;
 END;
 $$;
 
@@ -426,8 +628,12 @@ BEGIN
   END IF;
 
   IF EXISTS (
-    SELECT 1 FROM exam_submissions
-    WHERE exam_id = p_exam_id AND grading_result IS NULL
+    SELECT 1
+    FROM exam_attempts a
+    CROSS JOIN exam_questions eq
+    LEFT JOIN exam_submissions s ON s.attempt_id = a.id AND s.question_id = eq.id
+    WHERE a.exam_id = p_exam_id AND a.mode = 'official'
+      AND (s.id IS NULL OR s.grading_result IS NULL)
   ) THEN
     RAISE EXCEPTION 'GRADING_INCOMPLETE';
   END IF;
@@ -508,18 +714,23 @@ $$;
 
 REVOKE ALL ON FUNCTION public.start_exam_attempt(uuid, uuid, exam_attempt_mode, timestamptz, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.take_over_exam_attempt(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.finalize_exam_attempt(uuid, uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.lock_practice_attempt(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.reserve_practice_usage(uuid, uuid, uuid[]) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.finish_usage_charge(uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.claim_grading_items(text, integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.refresh_grading_job(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.save_manual_exam_grade(uuid, jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.publish_exam_results(uuid) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.start_exam_attempt(uuid, uuid, exam_attempt_mode, timestamptz, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.take_over_exam_attempt(uuid, uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.finalize_exam_attempt(uuid, uuid, text, jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.lock_practice_attempt(uuid, uuid, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.reserve_practice_usage(uuid, uuid, uuid[]) TO service_role;
 GRANT EXECUTE ON FUNCTION public.finish_usage_charge(uuid, uuid, boolean) TO service_role;
 GRANT EXECUTE ON FUNCTION public.claim_grading_items(text, integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.refresh_grading_job(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.save_manual_exam_grade(uuid, jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.publish_exam_results(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_published_leaderboard(uuid, integer, integer) TO authenticated;
-

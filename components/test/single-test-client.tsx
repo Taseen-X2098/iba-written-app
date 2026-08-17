@@ -194,6 +194,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     setError(null);
     setState("grading");
     
+    let receivedResponse = false;
     try {
       if (!gradingRequestIdRef.current) gradingRequestIdRef.current = crypto.randomUUID();
       const res = await fetch("/api/grade", {
@@ -207,6 +208,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
           timeTakenSeconds: secondsElapsed,
         }),
       });
+      receivedResponse = true;
       
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Grading failed");
@@ -222,7 +224,9 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       // Tell Next.js router to refresh so the user's slot count updates
       router.refresh();
     } catch (err: any) {
-      gradingRequestIdRef.current = null;
+      // If the connection died after the server committed, retain the key so
+      // the next click retrieves the existing grade without another charge.
+      if (receivedResponse) gradingRequestIdRef.current = null;
       setError(err.message);
       setState("editing"); // go back so they can try again
     }

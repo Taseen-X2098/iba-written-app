@@ -8,6 +8,10 @@
     "start": "next start",
     "worker:grading": "tsx worker/grading-worker.ts",
     "worker:once": "tsx worker/run-once.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm test -- --runInBand && npm run build",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
     "lint": "eslint",
     "test": "jest"
   },
@@ -30,6 +34,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.0",

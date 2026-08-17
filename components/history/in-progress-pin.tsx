@@ -75,6 +75,7 @@ export function InProgressPin() {
       <div className="absolute -inset-0.5 bg-gradient-to-r from-brand-400 to-brand-600 rounded-lg blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
       <Link 
         href={`/test/${inProgress.questionId}`}
+        prefetch={false}
         className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-card border-2 border-brand-500/20 rounded-lg p-6 shadow-sm"
       >
         <div>
