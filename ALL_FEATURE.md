@@ -589,7 +589,7 @@ OCR endpoint validates file type (JPEG, PNG, WebP, GIF only) and size (max 10MB)
 Rejects unsupported types with specific error messages.
 
 ### 24.8 Credential Handling
-The Firebase Admin JSON filename is ignored and removed from Git tracking while the physical local path remains available. Production uses Railway sealed environment values. Any exposed key must be revoked before the repository history is rewritten and force-pushed.
+The Firebase Admin JSON filename is ignored, absent from reachable Git history, and still available at the required physical local path. Production uses Railway sealed environment values. Replacing the Firebase key, deploying the replacement to Railway, and revoking the exposed key is a mandatory operator release gate whenever authenticated Firebase/Railway console access is unavailable to the implementation environment.
 
 ### 24.9 Webhook Signature Verification
 The push notification webhook endpoint supports `x-supabase-signature` header checking.
