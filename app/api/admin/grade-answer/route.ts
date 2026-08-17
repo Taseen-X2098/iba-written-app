@@ -1,45 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import OpenAI from "openai";
-import { grade, type ResponsesClient } from "@/lib/grading/grade";
-import { createMockClient } from "@/lib/grading/mockClient";
+import { z } from "zod";
+import { requireAdminUser } from "@/lib/auth";
+import { apiErrorResponse, ApiError } from "@/lib/api/errors";
+import { createOfficialGradingJob } from "@/lib/grading/jobs";
 
-export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+const schema = z.object({
+  submissionId: z.string().uuid(),
+  allowRegrade: z.boolean().default(false),
+});
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Very basic admin check
-  const { data: profile } = await supabase.from("profiles").select("is_admin").eq("id", user.id).single();
-  if (!profile?.is_admin) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  const { editedText, category, marks } = await req.json();
-
-  if (!editedText || !category || !marks) {
-    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-  }
-
-  const isMock = process.env.USE_MOCK_GRADER === "true";
-  const client: ResponsesClient = isMock
-    ? createMockClient({ taskType: category, marks, submission: editedText })
-    : (new OpenAI() as unknown as ResponsesClient);
-
+export async function POST(request: NextRequest) {
   try {
-    const result = await grade(client, editedText, category, marks);
-    const earned = parseFloat(result.studentFeedback.score.split("/")[0]) || 0;
-    
-    return NextResponse.json({ 
-      success: true, 
-      earned,
-      result
+    const user = await requireAdminUser();
+    const parsed = schema.safeParse(await request.json());
+    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid AI grading request", 400, parsed.error.flatten());
+    const job = await createOfficialGradingJob({
+      examId: await examIdForSubmission(parsed.data.submissionId),
+      requestedBy: user.id,
+      submissionIds: [parsed.data.submissionId],
+      scope: "selected",
+      allowRegrade: parsed.data.allowRegrade,
     });
-  } catch (e: any) {
-    console.error("AI Grading suggestion failed", e);
-    return NextResponse.json({ error: "Failed to grade answer: " + e.message }, { status: 500 });
+    return NextResponse.json({ success: true, jobId: job.id, status: job.status }, { status: 202 });
+  } catch (error) {
+    return apiErrorResponse(error);
   }
 }
+
+async function examIdForSubmission(submissionId: string) {
+  const { createAdminClient } = await import("@/lib/supabase/server");
+  const admin = await createAdminClient();
+  const { data, error } = await admin.from("exam_submissions").select("exam_id").eq("id", submissionId).single();
+  if (error || !data) throw new ApiError("VALIDATION_ERROR", "Submission not found", 404);
+  return data.exam_id;
+}
+

@@ -17,6 +17,17 @@ export type PaymentType = "subscription" | "upgrade" | "extra_tests";
 
 export type GradedBy = "ai" | "admin";
 
+export type ExamAttemptMode = "official" | "practice";
+export type ExamAttemptStatus =
+  | "active"
+  | "locked"
+  | "awaiting_selection"
+  | "grading"
+  | "finalized";
+export type GradingJobKind = "official_exam" | "practice_exam";
+export type GradingJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type GradingItemStatus = "queued" | "running" | "completed" | "failed" | "skipped" | "cancelled";
+
 export type NotificationType =
   | "exam_available"
   | "results_published"
@@ -33,6 +44,7 @@ export interface Profile {
   free_tests_remaining: number;
   tips_enabled: boolean;
   is_admin: boolean;
+  last_active_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -98,7 +110,63 @@ export interface Exam {
   ends_at: string;
   is_published: boolean;
   results_published: boolean;
+  results_version: number;
   created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamAttempt {
+  id: string;
+  exam_id: string;
+  user_id: string;
+  mode: ExamAttemptMode;
+  status: ExamAttemptStatus;
+  started_at: string;
+  expires_at: string;
+  submitted_at: string | null;
+  finalized_at: string | null;
+  writer_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttemptDraft {
+  ocrText: string;
+  editedText: string;
+  updatedAt: string;
+}
+
+export type AttemptDrafts = Record<string, AttemptDraft>;
+
+export interface AttemptQuestion {
+  id: string;
+  order_index: number;
+  marks: number;
+  questions: Question;
+}
+
+export interface AttemptStartResponse {
+  attempt: ExamAttempt;
+  writerToken: string;
+  exam: Exam;
+  questions: AttemptQuestion[];
+  drafts: AttemptDrafts;
+  resumed: boolean;
+}
+
+export interface GradingJob {
+  id: string;
+  kind: GradingJobKind;
+  exam_id: string;
+  attempt_id: string | null;
+  requested_by: string;
+  status: GradingJobStatus;
+  allow_regrade: boolean;
+  total_items: number;
+  completed_items: number;
+  failed_items: number;
+  last_error: string | null;
   created_at: string;
   updated_at: string;
 }

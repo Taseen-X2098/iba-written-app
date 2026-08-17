@@ -1,4 +1,4 @@
-import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import GradingClient from "./GradingClient";
@@ -9,16 +9,15 @@ export default async function AdminGradeSubmissionPage({
   params: Promise<{ id: string; userId: string }>;
 }) {
   const { id, userId } = await params;
-  const supabase = await createClient();
+  const adminClient = await createAdminClient();
 
   // 1. Fetch Exam
-  const { data: exam } = await supabase.from("exams").select("*").eq("id", id).single();
+  const { data: exam } = await adminClient.from("exams").select("*").eq("id", id).single();
   
   // 2. Fetch User Profile
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", userId).single();
+  const { data: profile } = await adminClient.from("profiles").select("name, institute").eq("id", userId).single();
 
   // 3. Fetch all submissions for this user & exam, joining questions (bypass RLS)
-  const adminClient = await createAdminClient();
   const { data: submissions } = await adminClient
     .from("exam_submissions")
     .select(`
@@ -32,9 +31,8 @@ export default async function AdminGradeSubmissionPage({
         marks,
         questions (
           id,
-          title,
           category,
-          passage
+          prompt
         )
       )
     `)
@@ -60,7 +58,7 @@ export default async function AdminGradeSubmissionPage({
         </p>
       </div>
 
-      <GradingClient submissions={submissions} />
+      <GradingClient examId={id} submissions={submissions} />
     </div>
   );
 }

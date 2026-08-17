@@ -1,90 +1,85 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import OpenAI from "openai";
+import { requireApiUser } from "@/lib/auth";
+import { ApiError, apiErrorResponse } from "@/lib/api/errors";
+import { createAdminClient } from "@/lib/supabase/server";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
-import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
-import { checkTestLimit, consumeTestSlot } from "@/lib/api/usage";
 
-// POST /api/grade
-// body: { questionId: string, submissionText: string, ocrText: string, timeTakenSeconds: number }
-export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+const schema = z.object({
+  questionId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+  submissionText: z.string().trim().min(1).max(100_000),
+  ocrText: z.string().max(100_000).default(""),
+  timeTakenSeconds: z.number().int().min(0).max(86_400).default(0),
+});
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { questionId, submissionText, ocrText, timeTakenSeconds } = await req.json();
-
-  if (!questionId || !submissionText) {
-    return NextResponse.json(
-      { error: "questionId and submissionText are required" },
-      { status: 400 }
-    );
-  }
-
-  // 1. Fetch Question details
-  const { data: question, error: qError } = await supabase
-    .from("questions")
-    .select("*")
-    .eq("id", questionId)
-    .single();
-
-  if (qError || !question) {
-    return NextResponse.json({ error: "Question not found" }, { status: 404 });
-  }
-
-  // 2. Check and consume usage limits
-  const hasTests = await checkTestLimit(user.id);
-  if (!hasTests) {
-    return NextResponse.json({ error: "No tests remaining. Please upgrade." }, { status: 403 });
-  }
-
-  // 3. Grade using OpenAI / Mock
-  const client: ResponsesClient =
-    process.env.USE_MOCK_GRADER === "true"
-      ? createMockClient({ taskType: question.category, marks: question.marks, submission: submissionText })
-      : (new OpenAI() as unknown as ResponsesClient);
-
+export async function POST(request: NextRequest) {
+  let chargeId: string | null = null;
   try {
-    const result = await grade(client, submissionText, question.category, question.marks);
-    
-    // 4. Consume test slot
-    const consumed = await consumeTestSlot(user.id);
-    if (!consumed) {
-      throw new Error("Failed to consume test slot");
+    const user = await requireApiUser();
+    const parsed = schema.safeParse(await request.json());
+    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid grading submission", 400, parsed.error.flatten());
+    const input = parsed.data;
+    const admin = await createAdminClient();
+    const { data: question, error: questionError } = await admin
+      .from("questions")
+      .select("id, category, marks, is_active")
+      .eq("id", input.questionId)
+      .eq("is_active", true)
+      .single();
+    if (questionError || !question) throw new ApiError("VALIDATION_ERROR", "Question not found", 404);
+    if (question.category === "translation") throw new ApiError("VALIDATION_ERROR", "Translation requires manual review", 409);
+
+    const { data: rawCharge, error: reserveError } = await admin.rpc("reserve_standalone_usage", {
+      p_user_id: user.id,
+      p_question_id: question.id,
+      p_idempotency_key: input.idempotencyKey,
+    });
+    if (reserveError) {
+      if (reserveError.message.includes("INSUFFICIENT_SLOTS")) throw new ApiError("INSUFFICIENT_SLOTS", "No test slots remain", 403);
+      throw reserveError;
+    }
+    const charge = (Array.isArray(rawCharge) ? rawCharge[0] : rawCharge) as any;
+    chargeId = charge.id;
+    if (charge.status === "consumed" && charge.submission_id) {
+      const { data: existing } = await admin.from("submissions").select("grading_result").eq("id", charge.submission_id).single();
+      return NextResponse.json({ gradingResult: existing?.grading_result, idempotent: true });
+    }
+    if (charge.status !== "reserved") {
+      throw new ApiError("VALIDATION_ERROR", "This failed grading request must be retried as a new attempt", 409);
     }
 
-    // 5. Save to database
-    // Use admin client to bypass RLS since users can no longer insert directly
-    const adminSupabase = await createAdminClient();
-    const { error: dbError } = await adminSupabase
-      .from("submissions")
-      .insert({
-        user_id: user.id,
-        question_id: question.id,
-        ocr_text: ocrText || "",
-        edited_text: submissionText || "",
-        time_taken_seconds: timeTakenSeconds || 0,
-        grading_result: result,
-      });
+    const client: ResponsesClient = process.env.USE_MOCK_GRADER === "true"
+      ? createMockClient({ taskType: question.category, marks: question.marks, submission: input.submissionText })
+      : (new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ResponsesClient);
+    const result = await grade(client, input.submissionText, question.category, question.marks);
+    const { error: completeError } = await admin.rpc("complete_standalone_grade", {
+      p_charge_id: chargeId,
+      p_user_id: user.id,
+      p_question_id: question.id,
+      p_ocr_text: input.ocrText,
+      p_edited_text: input.submissionText,
+      p_time_taken_seconds: input.timeTakenSeconds,
+      p_grading_result: result,
+    });
+    if (completeError) throw completeError;
 
-    if (dbError) {
-      console.error("Failed to save submission:", dbError);
-      const fs = require("fs");
-      fs.writeFileSync("db_error_log.txt", JSON.stringify(dbError, null, 2));
-    }
-
-    // Force Next.js to purge cache for history and progress so the user sees the new test immediately
     revalidatePath("/history");
     revalidatePath("/progress");
-
-    // Return student feedback
     return NextResponse.json({ gradingResult: result });
-  } catch (err: any) {
-    console.error("Grading failed:", err);
-    return NextResponse.json({ error: err.message || "Grading failed" }, { status: 500 });
+  } catch (error) {
+    if (chargeId) {
+      try {
+        const admin = await createAdminClient();
+        await admin.rpc("release_standalone_usage", { p_charge_id: chargeId });
+      } catch (releaseError) {
+        console.error("Failed to release grading reservation", releaseError);
+      }
+    }
+    return apiErrorResponse(error);
   }
 }
+

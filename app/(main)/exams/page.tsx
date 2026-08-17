@@ -2,44 +2,35 @@ import { createClient } from "@/lib/supabase/server";
 import { Clock, FileText, Lock, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
 import type { Exam } from "@/lib/types";
+import { getMainUserContext } from "@/lib/main-user-context";
 
 export default async function StudentExamsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  // 1. Check if user has an active plan that allows weekly exams (plan_2 or plan_3)
-  const { data: activeSub } = await supabase
-    .from("subscriptions")
-    .select("plan_type")
-    .eq("user_id", user.id)
-    .eq("is_active", true)
-    .limit(1)
-    .single();
-
-  const hasAccess = activeSub?.plan_type === "plan_2" || activeSub?.plan_type === "plan_3";
+  const context = await getMainUserContext();
+  if (!context) return null;
+  const hasAccess = context.subscription?.plan_type === "plan_2" || context.subscription?.plan_type === "plan_3";
 
   // 2. Fetch published exams
-  const { data: exams, error } = await supabase
-    .from("exams")
-    .select("*")
-    .eq("is_published", true)
-    .order("starts_at", { ascending: false });
+  const [{ data: exams, error }, { data: attempts }] = await Promise.all([
+    supabase
+      .from("exams")
+      .select("*")
+      .eq("is_published", true)
+      .order("starts_at", { ascending: false }),
+    supabase
+      .from("exam_attempts")
+      .select("exam_id, status, expires_at")
+      .eq("user_id", context.user.id)
+      .eq("mode", "official"),
+  ]);
 
   // Ignore empty object errors (common in some Supabase edge cases when returning 0 rows)
   if (error && Object.keys(error).length > 0) {
     console.error("Error fetching exams:", error);
   }
 
-  // 3. Fetch user's exam submissions to check for ongoing exams
-  const { data: userSubmissions } = await supabase
-    .from("exam_submissions")
-    .select("exam_id, started_at, submitted_at")
-    .eq("user_id", user.id);
-
-  const submissionsByExamId = (userSubmissions || []).reduce((acc: any, sub: any) => {
-    acc[sub.exam_id] = sub;
+  const attemptsByExamId = (attempts || []).reduce((acc: Record<string, any>, attempt: any) => {
+    acc[attempt.exam_id] = attempt;
     return acc;
   }, {});
 
@@ -73,6 +64,7 @@ export default async function StudentExamsPage() {
             </p>
             <Link 
               href="/subscription"
+              prefetch={false}
               className="bg-brand-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm hover:bg-brand-700 transition-colors inline-block"
             >
               Upgrade Plan
@@ -135,21 +127,16 @@ export default async function StudentExamsPage() {
                 <div className="flex items-center gap-3">
                   {status === "active" ? (
                     (() => {
-                      const submission = submissionsByExamId[exam.id];
-                      const hasSubmitted = submission && submission.submitted_at;
-                      const isOngoing = submission && !submission.submitted_at;
-                      
-                      let canContinue = false;
-                      if (isOngoing) {
-                        const startedAt = new Date(submission.started_at).getTime();
-                        const deadline = startedAt + exam.time_limit_minutes * 60 * 1000;
-                        canContinue = now < deadline;
-                      }
+                      const attempt = attemptsByExamId[exam.id];
+                      const hasSubmitted = attempt?.status === "finalized";
+                      const isOngoing = attempt && ["active", "locked"].includes(attempt.status);
+                      const canContinue = isOngoing && now < new Date(attempt.expires_at).getTime() + 3 * 60 * 1000;
 
                       if (hasSubmitted) {
                         return (
                           <Link
                             href={`/exams/${exam.id}/results`}
+                            prefetch={false}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200"
                           >
                             View Status
@@ -167,9 +154,10 @@ export default async function StudentExamsPage() {
 
                       return (
                         <Link
-                          href={hasAccess ? `/exams/${exam.id}` : "#"}
+                          href={hasAccess || isOngoing ? `/exams/${exam.id}` : "#"}
+                          prefetch={false}
                           className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                            hasAccess 
+                            hasAccess || isOngoing
                               ? canContinue 
                                 ? "bg-amber-500 text-white hover:bg-amber-600 shadow-md shadow-amber-200/50"
                                 : isOngoing 
@@ -178,7 +166,7 @@ export default async function StudentExamsPage() {
                               : "bg-muted text-muted-foreground cursor-not-allowed opacity-50"
                           }`}
                         >
-                          {hasAccess ? buttonText : "Locked"}
+                          {hasAccess || isOngoing ? buttonText : "Locked"}
                           <ChevronRight size={16} />
                         </Link>
                       );
@@ -231,20 +219,20 @@ export default async function StudentExamsPage() {
                 <div className="flex flex-col sm:flex-row items-center gap-3">
                   <Link
                     href={`/exams/${exam.id}/results`}
+                    prefetch={false}
                     className="flex-1 w-full flex items-center justify-center gap-2 bg-muted text-foreground hover:bg-border px-4 py-2.5 rounded-xl text-sm font-bold transition-colors"
                   >
                     <Trophy size={16} /> Leaderboard
                   </Link>
                   <Link
-                    href={hasAccess ? `/exams/${exam.id}?practice=true` : "#"}
+                    href={`/exams/${exam.id}?practice=true`}
+                    prefetch={false}
                     className={`flex-1 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                      hasAccess 
-                        ? "bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200" 
-                        : "bg-muted text-muted-foreground cursor-not-allowed opacity-50 border border-transparent"
+                      "bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200"
                     }`}
                   >
                     <FileText size={16} /> 
-                    {hasAccess ? "Practice Exam" : "Locked"}
+                    Practice Exam
                   </Link>
                 </div>
               </div>

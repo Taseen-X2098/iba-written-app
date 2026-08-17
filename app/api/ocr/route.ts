@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     const openai = new OpenAI({ apiKey });
 
     const response = await openai.responses.create({
-      model: "gpt-5.2",
+      model: "gpt-5.6-luna",
       input: [
         {
           role: "user",

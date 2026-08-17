@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.npm-cache/
 /.pnp
 .pnp.*
 .yarn/*
@@ -32,6 +33,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+
+# local Firebase Admin credential (rotate externally; never commit)
+/iba-written-firebase-adminsdk-fbsvc-67186451bf.json
 
 # vercel
 .vercel

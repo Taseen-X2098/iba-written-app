@@ -8,13 +8,11 @@ export function ForceGradeButton({ examId }: { examId: string }) {
   const [result, setResult] = useState<string | null>(null);
 
   const handleForceGrade = async () => {
-    if (!confirm("This will scan and force-grade all expired drafts for this exam. Proceed?")) return;
+    if (!confirm("Finalize all expired attempts from their latest acknowledged drafts? This does not AI-grade answers.")) return;
     
     setLoading(true);
     setResult(null);
     try {
-      // In a real implementation, this would hit an API that scans Redis for all active sessions
-      // for this exam, checks if they are expired, and calls /api/exam/finalize for each.
       const res = await fetch(`/api/admin/exams/force-grade`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -40,7 +38,7 @@ export function ForceGradeButton({ examId }: { examId: string }) {
         disabled={loading}
         className="text-xs flex items-center gap-1 bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 transition-colors disabled:opacity-50"
       >
-        <Play size={12} /> {loading ? "Grading..." : "Force Grade Expired"}
+        <Play size={12} /> {loading ? "Finalizing..." : "Finalize Expired"}
       </button>
       {result && <span className="text-[10px] text-muted-foreground">{result}</span>}
     </div>

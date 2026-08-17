@@ -1,7 +1,7 @@
-import { Redis } from "@upstash/redis";
+import type { Redis } from "@upstash/redis";
 
 /**
- * Upstash Redis client — serverless, works on Netlify functions.
+ * Upstash Redis client — serverless, works from Next.js and Railway workers.
  *
  * When UPSTASH_REDIS_REST_URL is not set (local dev without Redis),
  * falls back to an in-memory Map so the app doesn't crash. The fallback
@@ -15,7 +15,11 @@ function getRedis(): Redis {
   if (redis) return redis;
 
   if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-    redis = new Redis({
+    // Keep the network client lazy. Local development and Jest use the memory
+    // implementation without evaluating Upstash's ESM-only crypto dependency.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Redis: UpstashRedis } = require("@upstash/redis") as typeof import("@upstash/redis");
+    redis = new UpstashRedis({
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN,
     });
@@ -122,6 +126,12 @@ export { getRedis };
 // Centralized so nothing drifts.
 
 export const CacheKeys = {
+  /** All acknowledged drafts for a durable attempt, stored as one document. */
+  attemptDrafts: (attemptId: string) => `attempt:${attemptId}:drafts`,
+
+  /** Practice grading results retained for reloads. */
+  attemptResults: (attemptId: string) => `attempt:${attemptId}:results`,
+
   /** In-progress exam answer */
   examDraft: (examId: string, userId: string, questionId: string) =>
     `exam:${examId}:submission:${userId}:${questionId}`,
@@ -135,7 +145,8 @@ export const CacheKeys = {
     `test:draft:${userId}:${questionId}`,
 
   /** Cached leaderboard for an exam */
-  leaderboard: (examId: string) => `leaderboard:${examId}`,
+  leaderboard: (examId: string, version = 0, page = 1) =>
+    `leaderboard:${examId}:v${version}:p${page}`,
 
   /** All draft keys for a user in an exam (pattern for scanning) */
   examDraftPattern: (examId: string, userId: string) =>
@@ -151,6 +162,9 @@ export const CacheKeys = {
 export const CacheTTL = {
   /** Single test drafts expire after 48 hours to match exam start TTL */
   TEST_DRAFT: 172800, // 48 hours in seconds
+
+  /** Durable attempt drafts/results outlive the three-minute submission grace. */
+  ATTEMPT: 172800,
 
   /** Leaderboard cache: 1 hour (re-cached on first hit after invalidation) */
   LEADERBOARD: 3600,

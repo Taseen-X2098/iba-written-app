@@ -8,19 +8,36 @@ import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "@/lib/types";
 
 interface Props {
   availableQuestions: Question[];
+  initialExam?: {
+    id: string;
+    title: string;
+    description: string | null;
+    timeLimitMinutes: number;
+    startsAt: string;
+    endsAt: string;
+    isPublished: boolean;
+    questions: { q: Question; marks: number }[];
+  };
+  locked?: boolean;
 }
 
-export default function ExamBuilderClient({ availableQuestions }: Props) {
+function toLocalInput(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
+export default function ExamBuilderClient({ availableQuestions, initialExam, locked = false }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [timeLimit, setTimeLimit] = useState(30);
-  const [startsAt, setStartsAt] = useState("");
-  const [endsAt, setEndsAt] = useState("");
+  const [title, setTitle] = useState(initialExam?.title ?? "");
+  const [description, setDescription] = useState(initialExam?.description ?? "");
+  const [timeLimit, setTimeLimit] = useState(initialExam?.timeLimitMinutes ?? 30);
+  const [startsAt, setStartsAt] = useState(toLocalInput(initialExam?.startsAt));
+  const [endsAt, setEndsAt] = useState(toLocalInput(initialExam?.endsAt));
   
   // Selected questions with order and marks
-  const [selectedQuestions, setSelectedQuestions] = useState<{q: Question, marks: number}[]>([]);
+  const [selectedQuestions, setSelectedQuestions] = useState<{q: Question, marks: number}[]>(initialExam?.questions ?? []);
 
   const handleAddBlankQuestion = () => {
     const tempId = `temp_${Date.now()}_${Math.random()}`;
@@ -45,6 +62,10 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
   };
 
   const handleSave = async (publish: boolean) => {
+    if (locked) {
+      alert("This exam is locked because an official attempt has started. Use Extend Timer for deadline changes.");
+      return;
+    }
     if (!title || !startsAt || !endsAt) {
       alert("Please fill in all required exam details.");
       return;
@@ -88,8 +109,8 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
         }
       }
 
-      const res = await fetch("/api/admin/exams", {
-        method: "POST",
+      const res = await fetch(initialExam ? `/api/admin/exams/${initialExam.id}` : "/api/admin/exams", {
+        method: initialExam ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
@@ -97,7 +118,7 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
           timeLimitMinutes: timeLimit,
           startsAt: new Date(startsAt).toISOString(),
           endsAt: new Date(endsAt).toISOString(),
-          isPublished: publish,
+          isPublished: initialExam ? initialExam.isPublished : publish,
           questions: finalQuestions
         })
       });
@@ -108,7 +129,6 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
       }
 
       router.push("/admin/exams");
-      router.refresh();
     } catch (err: any) {
       alert(err.message);
       setLoading(false);
@@ -117,6 +137,11 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
 
   return (
     <div className="grid md:grid-cols-3 gap-8">
+      {locked && (
+        <div className="md:col-span-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          The exam definition is read-only because an official attempt has started. Use the exam list&apos;s Extend Timer action for deadline changes.
+        </div>
+      )}
       {/* Configuration Form */}
       <div className="md:col-span-2 space-y-6">
         <div className="bg-card border border-border rounded-xl p-6">
@@ -291,19 +316,21 @@ export default function ExamBuilderClient({ availableQuestions }: Props) {
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 space-y-3">
-          <button
-            onClick={() => handleSave(false)}
-            disabled={loading}
-            className="w-full bg-muted text-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted/80 transition-colors"
-          >
-            Save as Draft
-          </button>
+          {!initialExam && (
+            <button
+              onClick={() => handleSave(false)}
+              disabled={loading || locked}
+              className="w-full bg-muted text-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted/80 transition-colors"
+            >
+              Save as Draft
+            </button>
+          )}
           <button
             onClick={() => handleSave(true)}
-            disabled={loading}
+            disabled={loading || locked}
             className="w-full bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors flex items-center justify-center gap-2"
           >
-            <Save size={16} /> Save & Publish
+            <Save size={16} /> {initialExam ? "Save Changes" : "Save & Publish"}
           </button>
         </div>
       </div>

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { TOOLS, callFunction } from "./tools";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 
-const MODEL = "gpt-5.2";
+const MODEL = "gpt-5.6-luna";
 
 // Minimal shape of what we actually use from the OpenAI Responses API.
 // The real `openai` npm package's client satisfies this already —

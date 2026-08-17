@@ -1,504 +1,594 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Clock, Upload, Loader2, CheckCircle, AlertCircle, Image as ImageIcon, Save, Camera } from "lucide-react";
+import {
+  AlertCircle,
+  Camera,
+  CheckCircle,
+  Clock,
+  Image as ImageIcon,
+  Loader2,
+  Lock,
+  PenLine,
+  Save,
+  Upload,
+} from "lucide-react";
 import { WebcamCapture } from "@/components/ui/webcam-capture";
-import type { Exam } from "@/lib/types";
+import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
+import type {
+  AttemptDrafts,
+  AttemptQuestion,
+  Exam,
+  ExamAttempt,
+  GradingResultJSON,
+} from "@/lib/types";
+
+type AnswerState = {
+  ocrText: string;
+  editedText: string;
+  uploading: boolean;
+  saving: boolean;
+  isDirty: boolean;
+  editorOpen: boolean;
+  error?: string;
+};
+
+type PracticeSelection = {
+  availableSlots: number;
+  selectable: Array<{ examQuestionId: string; marks: number; prompt: string }>;
+};
+
+type JobItem = {
+  exam_question_id: string;
+  status: string;
+  result: GradingResultJSON | null;
+  last_error: string | null;
+};
 
 interface Props {
   exam: Exam;
-  examQuestions: any[];
-  userId: string;
-  serverStartTime: number;
-  initialDrafts: Record<string, { ocrText: string; editedText: string }>;
+  examQuestions: AttemptQuestion[];
+  attempt: ExamAttempt;
+  writerToken: string;
+  initialDrafts: AttemptDrafts;
   isPractice?: boolean;
 }
 
-export default function ExamTakerClient({ exam, examQuestions, userId, serverStartTime, initialDrafts, isPractice }: Props) {
+function emptyAnswer(draft?: { ocrText: string; editedText: string }): AnswerState {
+  return {
+    ocrText: draft?.ocrText ?? "",
+    editedText: draft?.editedText ?? "",
+    uploading: false,
+    saving: false,
+    isDirty: false,
+    editorOpen: Boolean(draft?.editedText),
+  };
+}
+
+function formatTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+export default function ExamTakerClient({
+  exam,
+  examQuestions,
+  attempt,
+  writerToken,
+  initialDrafts,
+  isPractice = false,
+}: Props) {
   const router = useRouter();
-  const [timeLeft, setTimeLeft] = useState<number>(exam.time_limit_minutes * 60);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, AnswerState>>(() =>
+    Object.fromEntries(examQuestions.map((question) => [question.id, emptyAnswer(initialDrafts[question.id])])),
+  );
+  const answersRef = useRef(answers);
+  const [timeLeft, setTimeLeft] = useState(() =>
+    Math.max(0, Math.ceil((new Date(attempt.expires_at).getTime() - Date.now()) / 1000)),
+  );
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
-  const [practiceResults, setPracticeResults] = useState<any[] | null>(null);
-  
-  // State for each question: OCR text, edited text, uploading state, isDirty
-  const [answers, setAnswers] = useState<Record<string, { ocrText: string, editedText: string, uploading: boolean, error?: string, isDirty?: boolean, saving?: boolean }>>({});
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
+  const [selection, setSelection] = useState<PracticeSelection | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobItems, setJobItems] = useState<JobItem[] | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const expiryTriggered = useRef(false);
 
   useEffect(() => {
-    // Initialize answers with drafts if they exist
-    const initial: any = {};
-    examQuestions.forEach(eq => {
-      const draft = initialDrafts[eq.id];
-      initial[eq.id] = { 
-        ocrText: draft?.ocrText || "", 
-        editedText: draft?.editedText || "", 
-        uploading: false 
-      };
+    answersRef.current = answers;
+  }, [answers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadEncryptedRecovery(attempt.id).then((recovered) => {
+      if (cancelled || !Object.keys(recovered).length) return;
+      setAnswers((current) => {
+        const next = { ...current };
+        for (const [questionId, answer] of Object.entries(recovered)) {
+          if (!next[questionId]) continue;
+          next[questionId] = {
+            ...next[questionId],
+            ...answer,
+            editorOpen: true,
+            isDirty: true,
+          };
+        }
+        return next;
+      });
     });
-    setAnswers(initial);
-
-    // Timer logic completely relies on serverStartTime
-    const interval = setInterval(() => {
-      const elapsedSecs = Math.floor((Date.now() - serverStartTime) / 1000);
-      const remaining = Math.max(0, (exam.time_limit_minutes * 60) - elapsedSecs);
-      setTimeLeft(remaining);
-
-      // Track ongoing exam in localStorage for global banner
-      if (remaining > 0) {
-        localStorage.setItem("in_progress_exam", JSON.stringify({
-          examId: exam.id,
-          title: exam.title,
-          isPractice,
-          lastUpdatedAt: Date.now()
-        }));
-        window.dispatchEvent(new Event("in_progress_exam_updated"));
-      }
-
-      if (remaining === 0) {
-        clearInterval(interval);
-        handleSubmit(); // Auto-submit when time's up
-      }
-    }, 1000);
-
     return () => {
-      clearInterval(interval);
+      cancelled = true;
+    };
+  }, [attempt.id]);
+
+  useEffect(() => {
+    if (locked) return;
+    const timeout = window.setTimeout(() => {
+      const dirty = Object.fromEntries(
+        Object.entries(answers)
+          .filter(([, answer]) => answer.isDirty)
+          .map(([id, answer]) => [id, { ocrText: answer.ocrText, editedText: answer.editedText }]),
+      );
+      void saveEncryptedRecovery(attempt.id, dirty);
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [answers, attempt.id, locked]);
+
+  const persistEntries = useCallback(
+    async (entries: Array<[string, Pick<AnswerState, "ocrText" | "editedText">]>) => {
+      if (!entries.length) return true;
+      const response = await fetch(`/api/exam-attempts/${attempt.id}/drafts`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          writerToken,
+          answers: entries.map(([examQuestionId, answer]) => ({ examQuestionId, ...answer })),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === "WRITER_REVOKED") {
+          setLocked(true);
+          setReadOnlyReason(data.error);
+        }
+        throw new Error(data.error ?? "Draft save failed");
+      }
+
+      setAnswers((current) => {
+        const next = { ...current };
+        for (const [questionId, sent] of entries) {
+          const latest = next[questionId];
+          if (!latest) continue;
+          const unchanged = latest.ocrText === sent.ocrText && latest.editedText === sent.editedText;
+          next[questionId] = { ...latest, saving: false, isDirty: unchanged ? false : latest.isDirty };
+        }
+        return next;
+      });
+      return true;
+    },
+    [attempt.id, writerToken],
+  );
+
+  const saveDrafts = useCallback(
+    async (questionIds?: string[]) => {
+      const allowed = questionIds ? new Set(questionIds) : null;
+      const entries = Object.entries(answersRef.current)
+        .filter(([id, answer]) => answer.isDirty && (!allowed || allowed.has(id)))
+        .map(([id, answer]) => [id, { ocrText: answer.ocrText, editedText: answer.editedText }] as [string, Pick<AnswerState, "ocrText" | "editedText">]);
+      if (!entries.length) return true;
+      setIsSavingAll(true);
+      setAnswers((current) => Object.fromEntries(
+        Object.entries(current).map(([id, answer]) => [
+          id,
+          entries.some(([entryId]) => entryId === id) ? { ...answer, saving: true } : answer,
+        ]),
+      ));
+      try {
+        return await persistEntries(entries);
+      } catch (error) {
+        console.error(error);
+        setAnswers((current) => Object.fromEntries(
+          Object.entries(current).map(([id, answer]) => [id, { ...answer, saving: false }]),
+        ));
+        return false;
+      } finally {
+        setIsSavingAll(false);
+      }
+    },
+    [persistEntries],
+  );
+
+  const saveRef = useRef(saveDrafts);
+  useEffect(() => {
+    saveRef.current = saveDrafts;
+  }, [saveDrafts]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void saveRef.current(), 30_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") void saveRef.current();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  };
-
-  const handleFileUpload = async (eqId: string, files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    setAnswers(prev => ({ ...prev, [eqId]: { ...prev[eqId], uploading: true, error: undefined } }));
-    
-    try {
-      let combinedText = "";
-      for (const file of fileArray) {
-        const formData = new FormData();
-        formData.append("image", file);
-        
-        const res = await fetch("/api/ocr", {
-          method: "POST",
-          body: formData,
-        });
-        
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "OCR failed");
-        
-        combinedText += (combinedText ? "\n\n" : "") + data.text;
-      }
-      
-      const newText = combinedText;
-      setAnswers(prev => ({ 
-        ...prev, 
-        [eqId]: { ...prev[eqId], ocrText: newText, editedText: newText, uploading: false, isDirty: false } 
-      }));
-
-      // Auto-save immediately after OCR completes
-      fetch("/api/exam/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          examId: exam.id,
-          examQuestionId: eqId,
-          ocrText: newText,
-          editedText: newText,
-          isPractice: isPractice
-        })
-      }).catch(err => console.error("Auto-save after OCR failed", err));
-
-    } catch (err: any) {
-      setAnswers(prev => ({ 
-        ...prev, 
-        [eqId]: { ...prev[eqId], uploading: false, error: err.message } 
-      }));
-    }
-  };
-
-  const updateText = (eqId: string, text: string) => {
-    setAnswers(prev => ({
-      ...prev,
-      [eqId]: { ...prev[eqId], editedText: text, isDirty: true }
-    }));
-  };
-
-  const manualSaveDraft = async (eqId: string, ocrText?: string, editedText?: string) => {
-    const currentAns = answers[eqId];
-    if (!currentAns) return;
-
-    setAnswers(prev => ({ ...prev, [eqId]: { ...prev[eqId], saving: true } }));
-    try {
-      await fetch("/api/exam/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          examId: exam.id,
-          examQuestionId: eqId,
-          ocrText: ocrText ?? currentAns.ocrText,
-          editedText: editedText ?? currentAns.editedText,
-          isPractice: isPractice
-        })
-      });
-      setAnswers(prev => ({ ...prev, [eqId]: { ...prev[eqId], saving: false, isDirty: false } }));
-    } catch (err) {
-      console.error("Draft save failed", err);
-      setAnswers(prev => ({ ...prev, [eqId]: { ...prev[eqId], saving: false } }));
-    }
-  };
-
-  const saveAllDrafts = async () => {
-    const dirtyEntries = Object.entries(answers).filter(([, data]) => data.isDirty);
-    if (dirtyEntries.length === 0) return;
-
-    setIsSavingAll(true);
-    try {
-      await Promise.all(
-        dirtyEntries.map(([eqId, data]) =>
-          fetch("/api/exam/draft", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              examId: exam.id,
-              examQuestionId: eqId,
-              ocrText: data.ocrText,
-              editedText: data.editedText,
-              isPractice: isPractice
-            }),
-          })
-        )
-      );
-      setAnswers(prev => {
-        const updated = { ...prev };
-        for (const [eqId] of dirtyEntries) {
-          updated[eqId] = { ...updated[eqId], isDirty: false };
-        }
-        return updated;
-      });
-    } catch (err) {
-      console.error("Save all drafts failed", err);
-    } finally {
-      setIsSavingAll(false);
-    }
-  };
-
-  const handleSubmit = async () => {
+  const completeAttempt = useCallback(async () => {
     if (isSubmitting) return;
+    setLocked(true);
     setIsSubmitting(true);
-    
     try {
-      // Flush all unsaved drafts to Redis before final submit
-      await saveAllDrafts();
-
-      // Send all answers to submission endpoint
-      const payload = {
-        examId: exam.id,
-        isPractice,
-        answers: Object.entries(answers).map(([eqId, data]) => ({
-          examQuestionId: eqId,
-          ocrText: data.ocrText,
-          editedText: data.editedText
-        }))
-      };
-
-      const res = await fetch("/api/exam/submit", {
+      await saveRef.current();
+      const response = await fetch(`/api/exam-attempts/${attempt.id}/complete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ writerToken }),
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Submission failed");
 
-      const result = await res.json();
-      if (!res.ok) {
-        if (res.status === 400 && result.error === "Exam already submitted") {
-          // Gracefully handle duplicate submission clicks
-          localStorage.removeItem("in_progress_exam");
-          window.dispatchEvent(new Event("in_progress_exam_updated"));
-          router.push(`/exams/${exam.id}/results`);
-          router.refresh();
-          return;
-        }
-        throw new Error(result.error || "Submission failed");
-      }
-
-      // Clear from localStorage since we submitted
       localStorage.removeItem("in_progress_exam");
       window.dispatchEvent(new Event("in_progress_exam_updated"));
-
-      if (isPractice && result.gradedResults) {
-        setPracticeResults(result.gradedResults);
-        setIsSubmitting(false);
-        window.scrollTo(0, 0);
-        return;
+      if (isPractice) {
+        setSelection(data as PracticeSelection);
+        setSelectedIds(new Set());
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        clearEncryptedRecovery(attempt.id);
+        router.push(`/exams/${exam.id}/results`);
       }
-
-      // Clear timer and redirect to results
-      router.push(`/exams/${exam.id}/results`);
-      router.refresh();
-      
-    } catch (err: any) {
-      alert(`Submission Error: ${err.message}`);
+    } catch (error) {
+      setReadOnlyReason(error instanceof Error ? error.message : "Submission failed");
+      if (Date.now() < new Date(attempt.expires_at).getTime()) setLocked(false);
+    } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [attempt.expires_at, attempt.id, exam.id, isPractice, isSubmitting, router, writerToken]);
 
-  if (practiceResults) {
-    const totalEarned = practiceResults.reduce((acc, curr) => acc + (curr.earned || 0), 0);
-    const maxPossible = practiceResults.reduce((acc, curr) => acc + (curr.result?.internal?.max || 0), 0);
+  const completeRef = useRef(completeAttempt);
+  useEffect(() => {
+    completeRef.current = completeAttempt;
+  }, [completeAttempt]);
 
+  useEffect(() => {
+    const expiresAt = new Date(attempt.expires_at).getTime();
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      setTimeLeft(remaining);
+      if (remaining === 0 && !expiryTriggered.current) {
+        expiryTriggered.current = true;
+        setLocked(true);
+        void completeRef.current();
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 1_000);
+    localStorage.setItem("in_progress_exam", JSON.stringify({
+      examId: exam.id,
+      attemptId: attempt.id,
+      title: exam.title,
+      isPractice,
+      expiresAt: attempt.expires_at,
+      lastUpdatedAt: Date.now(),
+    }));
+    window.dispatchEvent(new Event("in_progress_exam_updated"));
+    return () => window.clearInterval(timer);
+  }, [attempt.expires_at, attempt.id, exam.id, exam.title, isPractice]);
+
+  async function handleFileUpload(questionId: string, files: FileList | File[]) {
+    setAnswers((current) => ({
+      ...current,
+      [questionId]: { ...current[questionId], uploading: true, error: undefined },
+    }));
+    try {
+      const extracted: string[] = [];
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append("image", file);
+        const response = await fetch("/api/ocr", { method: "POST", body: formData });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "OCR failed");
+        extracted.push(data.text);
+      }
+      const editedText = extracted.join("\n\n");
+      setAnswers((current) => ({
+        ...current,
+        [questionId]: {
+          ...current[questionId],
+          ocrText: editedText,
+          editedText,
+          uploading: false,
+          editorOpen: true,
+          isDirty: true,
+        },
+      }));
+      await persistEntries([[questionId, { ocrText: editedText, editedText }]]);
+    } catch (error) {
+      setAnswers((current) => ({
+        ...current,
+        [questionId]: {
+          ...current[questionId],
+          uploading: false,
+          error: error instanceof Error ? error.message : "OCR failed",
+        },
+      }));
+    }
+  }
+
+  function updateText(questionId: string, text: string) {
+    if (locked) return;
+    setAnswers((current) => ({
+      ...current,
+      [questionId]: { ...current[questionId], editedText: text, isDirty: true },
+    }));
+  }
+
+  async function submitPracticeSelection() {
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`/api/exam-attempts/${attempt.id}/practice/grade`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ writerToken, examQuestionIds: [...selectedIds] }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Unable to start grading");
+      if (!data.jobId) {
+        setJobItems([]);
+        setJobStatus("completed");
+      } else {
+        setJobId(data.jobId);
+        setJobStatus(data.status);
+      }
+    } catch (error) {
+      setReadOnlyReason(error instanceof Error ? error.message : "Unable to start grading");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!jobId || ["completed", "failed", "cancelled"].includes(jobStatus ?? "")) return;
+    let cancelled = false;
+    const poll = async () => {
+      const response = await fetch(`/api/grading-jobs/${jobId}`, { cache: "no-store" });
+      const data = await response.json();
+      if (cancelled || !response.ok) return;
+      setJobStatus(data.job.status);
+      setJobItems(data.items);
+      if (["completed", "failed", "cancelled"].includes(data.job.status)) {
+        clearEncryptedRecovery(attempt.id);
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [attempt.id, jobId, jobStatus]);
+
+  if (selection && jobStatus && ["completed", "failed", "cancelled"].includes(jobStatus)) {
+    const resultMap = new Map((jobItems ?? []).map((item) => [item.exam_question_id, item.result]));
+    const scoredQuestions = examQuestions.filter((question) => question.questions.category !== "translation");
+    const total = scoredQuestions.reduce((sum, question) => sum + (resultMap.get(question.id)?.internal.total ?? 0), 0);
+    const maximum = scoredQuestions.reduce((sum, question) => sum + question.marks, 0);
     return (
-      <div className="max-w-4xl mx-auto py-8 px-4 animate-fade-in">
-        <div className="bg-brand-50 border border-brand-200 rounded-2xl p-8 mb-8 text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-brand-100 text-brand-600 mb-4">
-            <CheckCircle size={32} />
-          </div>
-          <h2 className="text-2xl font-black text-brand-900 mb-2">Practice Complete!</h2>
-          <p className="text-brand-800 mb-6">You scored {totalEarned} out of {maxPossible} marks.</p>
-          <button 
-            onClick={() => router.push("/exams")}
-            className="bg-brand-600 text-white font-bold px-6 py-2 rounded-xl shadow hover:bg-brand-700 transition-colors"
-          >
+      <div className="mx-auto max-w-4xl px-4 py-8">
+        <div className="mb-8 rounded-3xl border border-brand-200 bg-brand-50 p-8 text-center">
+          <CheckCircle className="mx-auto mb-3 text-brand-600" size={42} />
+          <h2 className="text-2xl font-black text-brand-900">Practice Complete</h2>
+          <p className="mt-2 text-brand-800">You scored {total} out of {maximum}. Unselected answers count as zero; translations are excluded.</p>
+          <Link href="/exams" prefetch={false} className="mt-6 inline-block rounded-xl bg-brand-600 px-6 py-2.5 font-bold text-white">
             Back to Exams
-          </button>
+          </Link>
         </div>
-
         <div className="space-y-6">
-          {practiceResults.map((pr: any, i: number) => {
-            const studentFeedback = pr.result?.studentFeedback || pr.result?.student_feedback;
-            const scoreStr = studentFeedback?.score || (pr.result?.marks ? `${pr.result.marks}/10` : "?/?");
-            const summaryText = studentFeedback?.summary || (pr.result?.marks ? "This is a mock summary from test-db." : "No summary available.");
-            const highlights = studentFeedback?.highlights || [];
-
+          {examQuestions.map((question, index) => {
+            const result = resultMap.get(question.id);
+            const translation = question.questions.category === "translation";
             return (
-            <div key={pr.eqId} className="bg-card border border-border rounded-xl p-6">
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-border">
-                <h3 className="font-bold">Question {i + 1}</h3>
-                <span className="font-bold text-brand-600 bg-brand-50 px-3 py-1 rounded-full text-sm">
-                  Score: {scoreStr}
-                </span>
-              </div>
-              <div className="mb-4">
-                <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-2">Your Answer</h4>
-                <p className="text-sm bg-muted/30 p-3 rounded-lg border border-border">{pr.editedText || "No answer"}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-2">AI Feedback</h4>
-                <p className="text-sm text-foreground mb-4">{summaryText}</p>
-                {highlights.length > 0 && (
-                  <div className="space-y-2">
-                    {highlights.map((h: any, idx: number) => (
-                      <div key={idx} className="text-xs bg-red-50 text-red-900 p-2 rounded border border-red-100">
-                        <span className="font-bold block mb-1">"{h.quote}"</span>
-                        {h.comment}
+              <article key={question.id} className="rounded-2xl border border-border bg-card p-6">
+                <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
+                  <h3 className="font-bold">Question {index + 1}</h3>
+                  <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-bold text-brand-700">
+                    {translation ? "Not AI graded" : `${result?.internal.total ?? 0}/${question.marks}`}
+                  </span>
+                </div>
+                <p className="mb-4 whitespace-pre-wrap text-sm font-medium">{question.questions.prompt}</p>
+                <div className="mb-4 rounded-xl bg-muted/30 p-4 text-sm whitespace-pre-wrap">
+                  {answers[question.id]?.editedText || "No answer"}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {translation
+                    ? "Translation is kept for self-study and excluded from quota and totals."
+                    : result?.studentFeedback.summary ?? "This answer was not selected for AI grading and counts as zero."}
+                </p>
+                {result?.studentFeedback.highlights?.length ? (
+                  <div className="mt-4 space-y-2">
+                    {result.studentFeedback.highlights.map((highlight, highlightIndex) => (
+                      <div key={highlightIndex} className="rounded-lg border border-border bg-muted/20 p-3 text-xs">
+                        <strong className="block">“{highlight.quote}”</strong>
+                        {highlight.comment}
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (selection) {
+    const limit = Math.min(selection.availableSlots, selection.selectable.length);
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <div className="rounded-3xl border border-border bg-card p-8">
+          <Lock className="mb-4 text-brand-600" size={36} />
+          <h2 className="text-2xl font-black">Choose answers to grade</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Each selected answer uses one test slot. You have {selection.availableSlots} slot{selection.availableSlots === 1 ? "" : "s"} available and may choose up to {limit}.
+          </p>
+          <div className="my-6 space-y-3">
+            {selection.selectable.map((item) => {
+              const selected = selectedIds.has(item.examQuestionId);
+              return (
+                <label key={item.examQuestionId} className="flex cursor-pointer gap-3 rounded-xl border border-border p-4">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    disabled={!selected && selectedIds.size >= limit}
+                    onChange={() => setSelectedIds((current) => {
+                      const next = new Set(current);
+                      if (next.has(item.examQuestionId)) next.delete(item.examQuestionId);
+                      else if (next.size < limit) next.add(item.examQuestionId);
+                      return next;
+                    })}
+                  />
+                  <span className="line-clamp-2 text-sm font-medium">{item.prompt}</span>
+                  <span className="ml-auto whitespace-nowrap text-xs font-bold text-muted-foreground">{item.marks} marks</span>
+                </label>
+              );
+            })}
+          </div>
+          {selection.availableSlots < selection.selectable.length && (
+            <p className="mb-4 text-sm text-amber-700">
+              Need every answer graded? <Link href="/subscription" prefetch={false} className="font-bold underline">Buy more test slots</Link>.
+            </p>
+          )}
+          {jobId && !["completed", "failed"].includes(jobStatus ?? "") ? (
+            <div className="flex items-center gap-3 rounded-xl bg-brand-50 p-4 text-brand-800">
+              <Loader2 className="animate-spin" size={20} /> Grading {jobItems?.filter((item) => item.status === "completed").length ?? 0} of {selectedIds.size} answers…
             </div>
-          )})}
+          ) : (
+            <button
+              type="button"
+              onClick={submitPracticeSelection}
+              disabled={isSubmitting || selectedIds.size > limit}
+              className="w-full rounded-xl bg-brand-600 px-6 py-3 font-bold text-white disabled:opacity-50"
+            >
+              {isSubmitting ? "Starting grading…" : `Grade ${selectedIds.size} Selected Answer${selectedIds.size === 1 ? "" : "s"}`}
+            </button>
+          )}
+          {readOnlyReason && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{readOnlyReason}</p>}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto py-8 px-4 pb-32 animate-fade-in">
-      {/* Sticky Header */}
-      <div className="sticky top-4 z-50 bg-card border border-border rounded-2xl p-4 mb-8 shadow-lg shadow-black/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <h1 className="font-bold text-foreground line-clamp-1">{isPractice ? `[Practice] ${exam.title}` : exam.title}</h1>
-          <p className="text-xs text-muted-foreground">{examQuestions.length} Questions</p>
+    <div className="mx-auto max-w-4xl px-4 py-8 pb-32">
+      <div className="sticky top-4 z-40 mb-8 flex flex-col justify-between gap-4 rounded-2xl border border-border bg-card p-4 shadow-lg sm:flex-row sm:items-center">
+        <div>
+          <h1 className="font-bold">{isPractice ? `[Practice] ${exam.title}` : exam.title}</h1>
+          <p className="text-xs text-muted-foreground">{examQuestions.length} questions · drafts save every 30 seconds when changed</p>
         </div>
-        
-        <div className={`flex items-center justify-center gap-3 px-4 py-2 rounded-xl border shrink-0 ${
-          timeLeft < 300 ? 'bg-red-50 border-red-200 text-red-600 animate-pulse' : 'bg-brand-50 border-brand-200 text-brand-700'
-        }`}>
-          <Clock size={20} />
-          <span className="font-mono font-bold text-xl tracking-wider">{formatTime(timeLeft)}</span>
+        <div className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-2 ${timeLeft < 300 ? "border-red-200 bg-red-50 text-red-700" : "border-brand-200 bg-brand-50 text-brand-700"}`}>
+          <Clock size={19} /> <span className="font-mono text-xl font-bold">{formatTime(timeLeft)}</span>
         </div>
       </div>
 
-      {/* Questions */}
+      {readOnlyReason && (
+        <div className="mb-6 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <AlertCircle className="shrink-0" size={20} /> {readOnlyReason}
+        </div>
+      )}
+
       <div className="space-y-8">
-        {examQuestions.map((eq, index) => {
-          const ans = answers[eq.id];
-          if (!ans) return null;
-
+        {examQuestions.map((question, index) => {
+          const answer = answers[question.id];
+          if (!answer) return null;
+          const maxWords = question.marks > 10 ? 250 : 150;
+          const wordCount = answer.editedText.trim() ? answer.editedText.trim().split(/\s+/).length : 0;
           return (
-            <div key={eq.id} className="bg-card border border-border rounded-2xl p-6">
-              <div className="flex justify-between items-start mb-4">
+            <section key={question.id} className="rounded-2xl border border-border bg-card p-6">
+              <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-sm">
-                    {index + 1}
-                  </div>
-                  <h3 className="font-bold text-foreground">Question {index + 1}</h3>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{index + 1}</span>
+                  <h2 className="font-bold">Question {index + 1}</h2>
                 </div>
-                <span className="text-sm font-bold text-muted-foreground">{eq.marks} Marks</span>
+                <span className="text-sm font-bold text-muted-foreground">{question.marks} marks</span>
               </div>
-              
-              <div className="prose prose-sm max-w-none text-foreground mb-6">
-                <p className="whitespace-pre-wrap font-medium">{eq.questions.prompt}</p>
-              </div>
-
-              {/* Upload or Editor */}
-              {!ans.editedText && !ans.uploading ? (
-                activeCameraId === eq.id ? (
-                  <div className="mb-8">
-                    <WebcamCapture 
-                      onCapture={(file) => {
-                        handleFileUpload(eq.id, [file]);
-                        setActiveCameraId(null);
-                      }}
-                      onCancel={() => setActiveCameraId(null)}
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <button
-                        onClick={() => setActiveCameraId(eq.id)}
-                        className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center justify-center text-center h-full"
-                      >
-                        <div className="h-10 w-10 rounded-full bg-brand-100 flex items-center justify-center mb-3">
-                          <Camera size={20} className="text-brand-600" />
-                        </div>
-                        <span className="text-sm font-semibold text-brand-600 block mb-1">
-                          Take Photo
-                        </span>
-                        <span className="text-[10px] text-muted-foreground block text-center">
-                          Use camera directly
-                        </span>
-                      </button>
-                      
-                      <label htmlFor={`upload-${eq.id}`} className="cursor-pointer rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center justify-center text-center h-full">
-                        <div className="h-10 w-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center mb-3">
-                          <ImageIcon size={20} />
-                        </div>
-                        <span className="text-sm font-semibold text-foreground block mb-1">Upload File</span>
-                        <span className="text-[10px] text-muted-foreground font-medium">
-                          Max {eq.marks > 10 ? 2 : 1} image{eq.marks > 10 ? "s" : ""}
-                        </span>
-                        <input 
-                          type="file" 
-                          accept="image/*"
-                          multiple={eq.marks > 10}
-                          className="hidden" 
-                          id={`upload-${eq.id}`}
-                          onChange={(e) => {
-                            if (e.target.files && e.target.files.length > 0) {
-                              const maxAllowed = eq.marks > 10 ? 2 : 1;
-                              if (e.target.files.length > maxAllowed) {
-                                 alert(`You can only upload up to ${maxAllowed} image(s) for this question.`);
-                                 return;
-                              }
-                              handleFileUpload(eq.id, e.target.files);
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-                    {ans.error && <p className="text-red-500 text-sm mt-3 text-center">{ans.error}</p>}
-                  </div>
-                )
-              ) : ans.uploading ? (
-                <div className="border border-border rounded-xl p-12 text-center flex flex-col items-center bg-muted/30">
-                  <Loader2 className="animate-spin text-brand-500 mb-4" size={32} />
-                  <p className="font-medium text-muted-foreground animate-pulse">Extracting text via AI...</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-green-600 flex items-center gap-1">
-                      <CheckCircle size={14} /> Text Extracted
-                    </span>
-                    <label htmlFor={`reupload-${eq.id}`} className="text-xs font-medium text-brand-600 hover:underline cursor-pointer">
-                      Re-upload Image
-                    </label>
-                    <input 
-                      type="file" 
-                      accept="image/*"
-                      multiple={eq.marks > 10}
-                      className="hidden" 
-                      id={`reupload-${eq.id}`}
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files.length > 0) {
-                          const maxAllowed = eq.marks > 10 ? 2 : 1;
-                          if (e.target.files.length > maxAllowed) {
-                             alert(`You can only upload up to ${maxAllowed} image(s) for this question.`);
-                             return;
-                          }
-                          handleFileUpload(eq.id, e.target.files);
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => manualSaveDraft(eq.id)}
-                      disabled={!ans.isDirty || ans.saving}
-                      className={`text-xs font-bold px-3 py-1 rounded-full transition-colors flex items-center gap-1 ${
-                        ans.saving ? "bg-muted text-muted-foreground" :
-                        ans.isDirty ? "bg-amber-100 text-amber-700 hover:bg-amber-200" :
-                        "bg-green-50 text-green-600"
-                      }`}
-                    >
-                      {ans.saving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle size={12} />}
-                      {ans.saving ? "Saving..." : ans.isDirty ? "Save Draft" : "Draft Saved"}
-                    </button>
-                  </div>
-                  {(() => {
-                    const maxWords = eq.marks > 10 ? 250 : 150;
-                    const maxChars = maxWords * 5;
-                    const currentWords = ans.editedText.trim() === "" ? 0 : ans.editedText.trim().split(/\s+/).length;
-                    
-                    return (
-                      <>
-                        <textarea
-                          value={ans.editedText}
-                          onChange={(e) => updateText(eq.id, e.target.value)}
-                          maxLength={maxChars}
-                          className="w-full h-48 bg-background border border-border rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none font-medium text-foreground/90 leading-relaxed"
-                          placeholder="Your answer will appear here..."
-                        />
-                        <div className="flex justify-between items-center mt-2 text-[11px] text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <AlertCircle size={12} /> Please review the extracted text and correct any spelling mistakes before submitting.
-                          </span>
-                          <span className={currentWords >= maxWords ? "text-red-500 font-medium" : ""}>
-                            {currentWords} / {maxWords} words
-                          </span>
-                        </div>
-                      </>
-                    );
-                  })()}
+              <p className="mb-5 whitespace-pre-wrap font-medium">{question.questions.prompt}</p>
+              {isPractice && question.questions.category === "translation" && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Translation is available for self-study but is not AI graded and does not use a test slot.
                 </div>
               )}
-            </div>
+
+              {answer.uploading ? (
+                <div className="flex flex-col items-center rounded-xl border border-border bg-muted/30 p-12">
+                  <Loader2 className="mb-3 animate-spin text-brand-600" size={30} />
+                  <p className="text-sm text-muted-foreground">Extracting text…</p>
+                </div>
+              ) : activeCameraId === question.id ? (
+                <WebcamCapture
+                  onCapture={(file) => {
+                    setActiveCameraId(null);
+                    void handleFileUpload(question.id, [file]);
+                  }}
+                  onCancel={() => setActiveCameraId(null)}
+                />
+              ) : !answer.editorOpen ? (
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <button type="button" disabled={locked} onClick={() => setAnswers((current) => ({ ...current, [question.id]: { ...current[question.id], editorOpen: true, isDirty: true } }))} className="rounded-xl border-2 border-dashed border-border p-6 disabled:opacity-50">
+                    <PenLine className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Type Answer</span>
+                  </button>
+                  <button type="button" disabled={locked} onClick={() => setActiveCameraId(question.id)} className="rounded-xl border-2 border-dashed border-border p-6 disabled:opacity-50">
+                    <Camera className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Take Photo</span>
+                  </button>
+                  <label className={`rounded-xl border-2 border-dashed border-border p-6 text-center ${locked ? "opacity-50" : "cursor-pointer"}`}>
+                    <ImageIcon className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Upload Image</span>
+                    <input type="file" accept="image/*" multiple={question.questions.max_images > 1} disabled={locked} className="hidden" onChange={(event) => {
+                      if (event.target.files?.length) void handleFileUpload(question.id, event.target.files);
+                    }} />
+                  </label>
+                </div>
+              ) : (
+                <div>
+                  <textarea
+                    value={answer.editedText}
+                    onChange={(event) => updateText(question.id, event.target.value)}
+                    disabled={locked}
+                    maxLength={maxWords * 8}
+                    className="h-52 w-full resize-none rounded-xl border border-border bg-background p-4 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-70"
+                    placeholder="Type or review your answer here…"
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span>{answer.error ?? (answer.isDirty ? "Unsaved changes" : "Saved on server")}</span>
+                    <span className={wordCount > maxWords ? "font-bold text-red-600" : ""}>{wordCount} / {maxWords} words</span>
+                  </div>
+                  <button type="button" disabled={locked || !answer.isDirty || answer.saving} onClick={() => void saveDrafts([question.id])} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs font-bold disabled:opacity-50">
+                    {answer.saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                    {answer.saving ? "Saving…" : "Save this answer"}
+                  </button>
+                </div>
+              )}
+            </section>
           );
         })}
       </div>
 
-      {/* Fixed Bottom Action Bar */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-md border-t border-border z-50">
-        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-          <button
-            onClick={saveAllDrafts}
-            disabled={isSavingAll || !Object.values(answers).some(a => a.isDirty)}
-            className="border border-border text-foreground px-5 py-3 rounded-xl font-bold hover:bg-muted transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
-          >
-            {isSavingAll ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-            {isSavingAll ? "Saving..." : "Save Changes"}
+      <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/90 p-4 backdrop-blur-md">
+        <div className="mx-auto flex max-w-4xl flex-col justify-between gap-3 sm:flex-row">
+          <button type="button" disabled={locked || isSavingAll || !Object.values(answers).some((answer) => answer.isDirty)} onClick={() => void saveDrafts()} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 font-bold disabled:opacity-50">
+            {isSavingAll ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} Save Changes
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isSubmitting}
-            className="bg-brand-600 text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-brand-200 hover:bg-brand-700 transition-all flex items-center justify-center gap-2 disabled:opacity-70 w-full sm:w-auto"
-          >
-            {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-            {isSubmitting ? "Submitting Exam..." : "Submit Exam"}
+          <button type="button" disabled={locked || isSubmitting} onClick={() => void completeAttempt()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-8 py-3 font-bold text-white disabled:opacity-50">
+            {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+            {isSubmitting ? "Finalizing…" : isPractice ? "Finish Practice" : "Submit Exam"}
           </button>
         </div>
       </div>

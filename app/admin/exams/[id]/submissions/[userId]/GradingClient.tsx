@@ -1,188 +1,183 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, Bot, Save, CheckCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Bot, CheckCircle, Loader2, Save, Sparkles } from "lucide-react";
 
-export default function GradingClient({ submissions }: { submissions: any[] }) {
-  const [grades, setGrades] = useState<Record<string, any>>(
-    submissions.reduce((acc, sub) => {
-      acc[sub.id] = {
-        score: sub.grading_result ? (parseFloat(sub.grading_result.studentFeedback?.score?.split("/")[0]) || 0) : "",
-        feedback: sub.grading_result?.studentFeedback?.summary || "",
-        highlights: sub.grading_result?.studentFeedback?.highlights || [],
-        saving: false,
-        aiLoading: false,
-        saved: !!sub.grading_result
-      };
-      return acc;
-    }, {})
+type GradeState = {
+  score: string | number;
+  feedback: string;
+  highlights: Array<{ quote: string; comment: string; type: "strength" | "improvement" }>;
+  saving: boolean;
+  saved: boolean;
+};
+
+export default function GradingClient({ examId, submissions }: { examId: string; submissions: any[] }) {
+  const router = useRouter();
+  const [grades, setGrades] = useState<Record<string, GradeState>>(() =>
+    Object.fromEntries(submissions.map((submission) => [submission.id, {
+      score: submission.grading_result?.internal?.total ?? "",
+      feedback: submission.grading_result?.studentFeedback?.summary ?? "",
+      highlights: submission.grading_result?.studentFeedback?.highlights ?? [],
+      saving: false,
+      saved: Boolean(submission.grading_result),
+    }])),
   );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [jobProgress, setJobProgress] = useState({ completed: 0, total: 0, failed: 0 });
+  const [jobError, setJobError] = useState<string | null>(null);
 
-  const handleGradeWithAI = async (sub: any) => {
-    setGrades(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], aiLoading: true } }));
-    try {
-      const eq = sub.exam_questions;
-      const res = await fetch("/api/admin/grade-answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          editedText: sub.edited_text,
-          category: eq.questions.category,
-          marks: eq.marks
-        }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-
-      setGrades(prev => ({
-        ...prev,
-        [sub.id]: {
-          ...prev[sub.id],
-          score: data.earned,
-          feedback: data.result.studentFeedback.summary,
-          highlights: data.result.studentFeedback.highlights,
-          aiLoading: false,
-          saved: false // Needs saving
-        }
-      }));
-    } catch (err: any) {
-      alert("AI Grading Error: " + err.message);
-      setGrades(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], aiLoading: false } }));
-    }
-  };
-
-  const handleSaveGrade = async (sub: any) => {
-    const current = grades[sub.id];
-    if (current.score === "") {
-      alert("Please enter a score");
+  async function startJob(body: { submissionIds?: string[]; scope: "selected" | "missing"; allowRegrade: boolean }) {
+    setJobError(null);
+    const response = await fetch("/api/admin/grading-jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ examId, ...body }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setJobError(data.error ?? "Unable to create grading job");
       return;
     }
+    setJobId(data.job.id);
+    setJobStatus(data.job.status);
+    setJobProgress({ completed: 0, total: data.job.total_items, failed: 0 });
+  }
 
-    setGrades(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], saving: true } }));
-    
-    // We update the submission directly in the DB from the client for simplicity, 
-    // but typically we'd use an API route. Since admins have RLS bypass via admin API,
-    // wait, we need an API route because RLS doesn't allow admins to update exam_submissions directly without policies.
-    // Let's create/use an API route for saving individual grades.
-    try {
-      const res = await fetch("/api/admin/save-grade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          submissionId: sub.id,
-          score: current.score,
-          maxMarks: sub.exam_questions.marks,
-          feedback: current.feedback,
-          highlights: current.highlights
-        }),
+  async function gradeSelected() {
+    if (!selected.size) return;
+    const selectedRows = submissions.filter((submission) => selected.has(submission.id));
+    const regrading = selectedRows.some((submission) => submission.grading_result);
+    if (regrading && !window.confirm("Regrade the selected answers with AI? Existing grades will be replaced, including explicitly selected admin grades.")) return;
+    await startJob({ submissionIds: [...selected], scope: "selected", allowRegrade: regrading });
+  }
+
+  useEffect(() => {
+    if (!jobId || ["completed", "failed", "cancelled"].includes(jobStatus ?? "")) return;
+    let cancelled = false;
+    const poll = async () => {
+      const response = await fetch(`/api/grading-jobs/${jobId}`, { cache: "no-store" });
+      const data = await response.json();
+      if (cancelled || !response.ok) return;
+      setJobStatus(data.job.status);
+      setJobProgress({
+        completed: data.job.completed_items,
+        total: data.job.total_items,
+        failed: data.job.failed_items,
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      if (["completed", "failed", "cancelled"].includes(data.job.status)) {
+        setSelected(new Set());
+        router.refresh();
+      }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [jobId, jobStatus, router]);
 
-      setGrades(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], saving: false, saved: true } }));
-    } catch (err: any) {
-      alert("Save Error: " + err.message);
-      setGrades(prev => ({ ...prev, [sub.id]: { ...prev[sub.id], saving: false } }));
+  async function saveManual(submission: any) {
+    const state = grades[submission.id];
+    const score = Number(state.score);
+    if (!Number.isFinite(score) || !state.feedback.trim()) {
+      setJobError("A valid score and student-facing feedback are required.");
+      return;
     }
-  };
+    setGrades((current) => ({ ...current, [submission.id]: { ...current[submission.id], saving: true } }));
+    const response = await fetch("/api/admin/save-grade", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        submissionId: submission.id,
+        score,
+        summary: state.feedback,
+        highlights: state.highlights,
+      }),
+    });
+    const data = await response.json();
+    setGrades((current) => ({
+      ...current,
+      [submission.id]: { ...current[submission.id], saving: false, saved: response.ok },
+    }));
+    if (!response.ok) setJobError(data.error ?? "Unable to save grade");
+  }
+
+  const jobRunning = Boolean(jobId && !["completed", "failed", "cancelled"].includes(jobStatus ?? ""));
 
   return (
     <div className="space-y-8 pb-24">
-      {submissions.map((sub, index) => {
-        const eq = sub.exam_questions;
-        const q = eq.questions;
-        const state = grades[sub.id];
+      <div className="sticky top-4 z-30 flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-md sm:flex-row sm:items-center">
+        <button type="button" disabled={!selected.size || jobRunning} onClick={gradeSelected} className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+          <Bot size={16} /> Grade Selected ({selected.size})
+        </button>
+        <button type="button" disabled={jobRunning} onClick={() => startJob({ scope: "missing", allowRegrade: false })} className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-bold text-brand-700 disabled:opacity-50">
+          <Sparkles size={16} /> Grade All Missing
+        </button>
+        {jobRunning && (
+          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="animate-spin" size={16} /> {jobProgress.completed}/{jobProgress.total} complete{jobProgress.failed ? ` · ${jobProgress.failed} failed` : ""}
+          </span>
+        )}
+      </div>
+      {jobError && <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{jobError}</p>}
 
+      {submissions.map((submission, index) => {
+        const examQuestion = submission.exam_questions;
+        const question = examQuestion.questions;
+        const state = grades[submission.id];
+        const translation = question.category === "translation";
         return (
-          <div key={sub.id} className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-            <div className="bg-muted/50 p-6 border-b border-border">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-sm font-bold text-brand-600 mb-1">Question {index + 1} ({eq.marks} Marks)</h3>
-                  <div className="text-foreground font-medium" dangerouslySetInnerHTML={{ __html: q.title }} />
-                </div>
-                <span className="text-xs bg-brand-100 text-brand-700 px-2 py-1 rounded-md font-bold uppercase">{q.category}</span>
+          <article key={submission.id} className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <header className="flex items-start gap-3 border-b border-border bg-muted/40 p-6">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={selected.has(submission.id)}
+                disabled={translation || !submission.edited_text || jobRunning}
+                onChange={() => setSelected((current) => {
+                  const next = new Set(current);
+                  if (next.has(submission.id)) next.delete(submission.id); else next.add(submission.id);
+                  return next;
+                })}
+              />
+              <div className="flex-1">
+                <p className="mb-1 text-xs font-bold uppercase tracking-wider text-brand-600">Question {index + 1} · {examQuestion.marks} marks</p>
+                <p className="whitespace-pre-wrap font-medium">{question.prompt}</p>
               </div>
-            </div>
-
-            <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Student Answer */}
+              <span className="rounded-md bg-brand-100 px-2 py-1 text-xs font-bold uppercase text-brand-700">{question.category.replaceAll("_", " ")}</span>
+            </header>
+            <div className="grid gap-8 p-6 lg:grid-cols-2">
               <div>
-                <h4 className="text-sm font-bold text-muted-foreground mb-3 uppercase tracking-wider">Student Answer</h4>
-                {sub.edited_text ? (
-                  <div className="bg-brand-50/50 p-4 rounded-xl text-foreground text-sm border border-brand-100 min-h-[150px] whitespace-pre-wrap">
-                    {sub.edited_text}
-                  </div>
-                ) : (
-                  <div className="bg-muted p-4 rounded-xl text-muted-foreground text-sm italic min-h-[150px] flex items-center justify-center">
-                    No answer provided.
-                  </div>
-                )}
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Student answer</h3>
+                <div className="min-h-40 whitespace-pre-wrap rounded-xl border border-brand-100 bg-brand-50/40 p-4 text-sm">
+                  {submission.edited_text || <span className="italic text-muted-foreground">No answer provided.</span>}
+                </div>
               </div>
-
-              {/* Grading Form */}
-              <div className="bg-muted/30 p-6 rounded-xl border border-border flex flex-col h-full">
-                <div className="flex justify-between items-center mb-4">
-                  <h4 className="text-sm font-bold text-foreground uppercase tracking-wider">Grade</h4>
-                  <button
-                    onClick={() => handleGradeWithAI(sub)}
-                    disabled={state.aiLoading || !sub.edited_text}
-                    className="flex items-center gap-1.5 bg-brand-100 text-brand-700 hover:bg-brand-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
-                  >
-                    {state.aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Bot size={14} />}
-                    {state.aiLoading ? "Analyzing..." : "Ask AI"}
-                  </button>
+              <div className="rounded-xl border border-border bg-muted/20 p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider">Final grade</h3>
+                  <span className="text-xs text-muted-foreground">{submission.graded_by ? `Saved by ${submission.graded_by}` : "Pending"}</span>
                 </div>
-
-                <div className="flex items-center gap-3 mb-4">
-                  <input 
-                    type="number"
-                    min="0"
-                    max={eq.marks}
-                    step="0.5"
-                    value={state.score}
-                    onChange={(e) => setGrades(prev => ({...prev, [sub.id]: {...prev[sub.id], score: e.target.value, saved: false}}))}
-                    className="w-24 px-3 py-2 border border-border rounded-lg bg-background text-foreground text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="Score"
-                  />
-                  <span className="text-muted-foreground font-bold text-lg">/ {eq.marks}</span>
+                {translation && <p className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Translation answers require manual grading.</p>}
+                <div className="mb-4 flex items-center gap-3">
+                  <input type="number" min={0} max={examQuestion.marks} step={0.5} value={state.score} onChange={(event) => setGrades((current) => ({ ...current, [submission.id]: { ...current[submission.id], score: event.target.value, saved: false } }))} className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-center text-lg font-bold" />
+                  <span className="font-bold text-muted-foreground">/ {examQuestion.marks}</span>
                 </div>
-
-                <div className="flex-grow mb-4">
-                  <label className="text-xs font-bold text-muted-foreground block mb-2">Feedback (Optional)</label>
-                  <textarea
-                    value={state.feedback}
-                    onChange={(e) => setGrades(prev => ({...prev, [sub.id]: {...prev[sub.id], feedback: e.target.value, saved: false}}))}
-                    className="w-full h-full min-h-[100px] px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-                    placeholder="Add feedback for the student..."
-                  />
-                </div>
-
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => handleSaveGrade(sub)}
-                    disabled={state.saving}
-                    className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                      state.saved 
-                        ? "bg-green-100 text-green-700 border border-green-200" 
-                        : "bg-brand-600 text-white hover:bg-brand-700 shadow-md"
-                    }`}
-                  >
-                    {state.saving ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : state.saved ? (
-                      <CheckCircle size={16} />
-                    ) : (
-                      <Save size={16} />
-                    )}
-                    {state.saving ? "Saving..." : state.saved ? "Saved" : "Save Grade"}
-                  </button>
-                </div>
+                <textarea value={state.feedback} onChange={(event) => setGrades((current) => ({ ...current, [submission.id]: { ...current[submission.id], feedback: event.target.value, saved: false } }))} className="h-28 w-full resize-none rounded-lg border border-border bg-background p-3 text-sm" placeholder="Required feedback shown to the student" />
+                <button type="button" disabled={state.saving} onClick={() => saveManual(submission)} className={`mt-4 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold ${state.saved ? "bg-green-100 text-green-700" : "bg-brand-600 text-white"}`}>
+                  {state.saving ? <Loader2 className="animate-spin" size={16} /> : state.saved ? <CheckCircle size={16} /> : <Save size={16} />}
+                  {state.saving ? "Saving…" : state.saved ? "Saved" : "Save Manual Grade"}
+                </button>
               </div>
             </div>
-          </div>
+          </article>
         );
       })}
     </div>
   );
 }
+

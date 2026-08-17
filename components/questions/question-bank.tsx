@@ -269,6 +269,7 @@ export default function QuestionBankClient({
             <Link
               href={`/test/${q.id}`}
               key={q.id}
+              prefetch={false}
               className="block group rounded-xl border border-border bg-card p-5 hover:border-brand-300 hover:shadow-md hover:shadow-brand-100 transition-all"
             >
               <div className="flex items-start justify-between gap-4 mb-3">

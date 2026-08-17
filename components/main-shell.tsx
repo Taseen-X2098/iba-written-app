@@ -48,13 +48,23 @@ const SIDENAV_LINKS = [
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
-export default function MainShell({ children }: { children: React.ReactNode }) {
+export default function MainShell({
+  children,
+  initialProfile,
+  initialSubscription,
+  initialUnreadCount,
+}: {
+  children: React.ReactNode;
+  initialProfile: Profile;
+  initialSubscription: Subscription | null;
+  initialUnreadCount: number;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidenavOpen, setSidenavOpen] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const profile = initialProfile;
+  const subscription = initialSubscription;
+  const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
 
   const [hasActiveTimer, setHasActiveTimer] = useState(false);
   const [activeTestState, setActiveTestState] = useState<{ type: "test" | "exam", id: string, title: string, isPractice?: boolean } | null>(null);
@@ -62,9 +72,12 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
   const popupCheckedRef = React.useRef(false);
 
   useEffect(() => {
-    loadUserData();
-    // Poll for notifications every 60s
-    const interval = setInterval(loadNotifications, 60000);
+    const refreshNotifications = () => {
+      if (document.visibilityState === "visible") void loadNotifications();
+    };
+    // Refresh on focus and at most every five minutes while visible.
+    const interval = setInterval(refreshNotifications, 300000);
+    window.addEventListener("focus", refreshNotifications);
     
     // Check for active timer
     const checkTimer = () => {
@@ -74,7 +87,10 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
         const savedExam = localStorage.getItem("in_progress_exam");
         if (savedExam) {
           const parsed = JSON.parse(savedExam);
-          if (parsed && parsed.lastUpdatedAt && Date.now() - parsed.lastUpdatedAt <= 3600000) {
+          const examStillActive = parsed?.expiresAt
+            ? Date.now() <= new Date(parsed.expiresAt).getTime() + 3 * 60 * 1000
+            : parsed?.lastUpdatedAt && Date.now() - parsed.lastUpdatedAt <= 3600000;
+          if (parsed && examStillActive) {
             setActiveTestState({
               type: "exam",
               id: parsed.examId,
@@ -130,63 +146,22 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
     
     return () => {
       clearInterval(interval);
+      window.removeEventListener("focus", refreshNotifications);
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("in_progress_test_updated", checkTimer);
       window.removeEventListener("in_progress_exam_updated", checkTimer);
     };
   }, []);
 
-  async function loadUserData() {
-    const supabase = createClient();
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // Load profile
-    const { data: profileData, error: profileError } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-      
-    if (profileError) {
-      console.error("Failed to load profile:", profileError);
-    }
-    
-    if (profileData) setProfile(profileData);
-
-    // Load active subscription
-    const { data: subData } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("is_active", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-    if (subData) setSubscription(subData);
-
-    // Update last_active_at
-    await supabase
-      .from("profiles")
-      .update({ last_active_at: new Date().toISOString() })
-      .eq("id", user.id);
-
-    await loadNotifications();
-  }
-
   async function loadNotifications() {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { count } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .eq("is_read", false);
-
-    setUnreadCount(count ?? 0);
+    try {
+      const response = await fetch("/api/notifications/unread-count", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setUnreadCount(data.count ?? 0);
+    } catch {
+      // Keep the last known count while offline.
+    }
   }
 
   async function registerFCMToken() {
@@ -246,7 +221,6 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
-    router.refresh();
   }
 
   function isActiveTab(href: string) {
@@ -294,6 +268,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={link.href}
                 href={link.href}
+                prefetch={false}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all relative
                   ${
                     active
@@ -325,6 +300,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
                 href={activeTestState.type === "exam" 
                   ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
                   : `/test/${activeTestState.id}`}
+                prefetch={false}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-bold bg-brand-600 text-white shadow-md shadow-brand-200 hover:bg-brand-700 transition-colors relative overflow-hidden group"
               >
                 <span className="absolute inset-0 w-1/4 bg-white/20 skew-x-[45deg] -translate-x-full group-hover:animate-shine"></span>
@@ -445,6 +421,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={link.href}
                 href={link.href}
+                prefetch={false}
                 onClick={() => setSidenavOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
                   ${
@@ -468,6 +445,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
                 href={activeTestState.type === "exam" 
                   ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
                   : `/test/${activeTestState.id}`}
+                prefetch={false}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-bold bg-brand-600 text-white shadow-md shadow-brand-200 hover:bg-brand-700 transition-colors relative overflow-hidden group"
               >
                 <span className="absolute inset-0 w-1/4 bg-white/20 skew-x-[45deg] -translate-x-full group-hover:animate-shine"></span>
@@ -553,6 +531,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-1">
               <Link
                 href="/subscription"
+                prefetch={false}
                 className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-brand-600"
               >
                 <Crown size={18} />
@@ -578,6 +557,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             <Link
               href="/subscription"
+              prefetch={false}
               className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-brand-600"
               title="Subscription"
             >
@@ -613,6 +593,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
               href={activeTestState.type === "exam" 
                 ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
                 : `/test/${activeTestState.id}`}
+              prefetch={false}
               className="ml-4 shrink-0 bg-white/20 hover:bg-white/30 transition-colors px-3 py-1 rounded text-xs font-bold whitespace-nowrap flex items-center gap-1"
             >
               Return <ChevronRight size={14} />
@@ -632,6 +613,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={tab.href}
                   href={tab.href}
+                  prefetch={false}
                   className={`flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-all min-w-0
                     ${
                       active
@@ -679,6 +661,7 @@ export default function MainShell({ children }: { children: React.ReactNode }) {
                 href={activeTestState.type === "exam" 
                   ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
                   : `/test/${activeTestState.id}`}
+                prefetch={false}
                 onClick={() => setShowReminderPopup(false)}
                 className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-bold text-white text-center hover:bg-brand-700 shadow-md shadow-brand-200 transition-all flex items-center justify-center gap-2"
               >
@@ -728,6 +711,7 @@ function UsageBar({ info }: { info: UsageInfo }) {
       {info.showUpgrade && (
         <Link
           href={info.total <= 3 ? "/subscription" : "/subscription/extra"}
+          prefetch={false}
           className="flex items-center justify-center gap-1.5 w-full rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white
                      hover:bg-brand-700 transition-colors"
         >

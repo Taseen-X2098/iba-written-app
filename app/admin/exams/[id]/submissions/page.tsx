@@ -24,7 +24,7 @@ export default async function AdminExamSubmissionsPage({
       grading_result,
       graded_by,
       submitted_at,
-      profiles(name, email)
+      profiles(name, institute)
     `)
     .eq("exam_id", id);
 
@@ -97,7 +97,7 @@ export default async function AdminExamSubmissionsPage({
                 <tr key={student.userId} className="hover:bg-muted/30 transition-colors">
                   <td className="px-6 py-4">
                     <p className="font-bold text-foreground">{student.profile?.name || "Unknown User"}</p>
-                    <p className="text-muted-foreground text-xs">{student.profile?.email}</p>
+                    <p className="text-muted-foreground text-xs">{student.profile?.institute}</p>
                   </td>
                   <td className="px-6 py-4">
                     {student.isSubmitted ? (

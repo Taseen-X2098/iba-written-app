@@ -26,13 +26,13 @@ describe('Redis Cache Client', () => {
   });
 
   it('should correctly build cache keys', () => {
-    expect(CacheKeys.leaderboard('exam123')).toBe('leaderboard:exam123');
+    expect(CacheKeys.leaderboard('exam123')).toBe('leaderboard:exam123:v0:p1');
     expect(CacheKeys.examDraft('exam1', 'user1', 'q1')).toBe('exam:exam1:submission:user1:q1');
   });
 
   it('should expose correct Cache TTL constants', () => {
     expect(CacheTTL.LEADERBOARD).toBe(3600);
-    expect(CacheTTL.TEST_DRAFT).toBe(86400);
+    expect(CacheTTL.TEST_DRAFT).toBe(172800);
   });
 
   it('should support del in memory fallback', async () => {

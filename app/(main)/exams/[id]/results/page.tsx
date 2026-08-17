@@ -1,205 +1,130 @@
-import { createClient } from "@/lib/supabase/server";
-import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
-import { redirect } from "next/navigation";
-import { Trophy, Medal, Star, Clock } from "lucide-react";
 import Link from "next/link";
+import { Clock, Medal, Trophy } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { requirePageUser } from "@/lib/auth";
+import { getPublishedExamResults } from "@/lib/exams/results";
 
 export default async function ExamResultsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
+  const user = await requirePageUser();
   const { id } = await params;
+  const { page: rawPage } = await searchParams;
+  const page = Number(rawPage ?? "1");
+  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  // 1. Fetch Exam Details
-  const { data: exam } = await supabase.from("exams").select("*").eq("id", id).single();
-  if (!exam) redirect("/exams");
-
-  const now = Date.now();
-  const endsAt = new Date(exam.ends_at).getTime();
-  const isExamOngoing = now < endsAt;
-
-  if (isExamOngoing) {
-    return (
-      <div className="max-w-4xl mx-auto py-16 px-4 text-center animate-fade-in">
-        <div className="bg-brand-50 border border-brand-200 rounded-3xl p-12 max-w-lg mx-auto">
-          <Clock size={48} className="mx-auto mb-4 text-brand-500" />
-          <h1 className="text-2xl font-bold text-brand-900 mb-2">Exam Session Concluded</h1>
-          <p className="text-brand-800">
-            You have successfully completed this exam. The global timer is still ongoing for other students. Your results and the leaderboard will be revealed after the exam officially ends on <br/><br/>
-            <strong>{new Date(exam.ends_at).toLocaleString()}</strong>
-          </p>
-          <div className="mt-8">
-            <Link href="/exams" className="bg-brand-600 text-white font-bold px-8 py-3 rounded-xl shadow-md hover:bg-brand-700 transition-colors inline-block">
-              Back to Dashboard
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isExamOngoing && !exam.results_published) {
-    return (
-      <div className="max-w-4xl mx-auto py-16 px-4 text-center animate-fade-in">
-        <div className="bg-brand-50 border border-brand-200 rounded-3xl p-12 max-w-lg mx-auto">
-          <Clock size={48} className="mx-auto mb-4 text-brand-500" />
-          <h1 className="text-2xl font-bold text-brand-900 mb-2">Results Pending</h1>
-          <p className="text-brand-800">
-            The exam has concluded, but grading is currently in progress. Your results and the leaderboard will be published shortly.
-          </p>
-          <div className="mt-8">
-            <Link href="/exams" className="bg-brand-600 text-white font-bold px-8 py-3 rounded-xl shadow-md hover:bg-brand-700 transition-colors inline-block">
-              Back to Dashboard
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 2. Fetch User's Result
-  const { data: myResult } = await supabase
-    .from("exam_results")
-    .select("*")
-    .eq("exam_id", id)
-    .eq("user_id", user.id)
+  const { data: exam } = await supabase
+    .from("exams")
+    .select("id, title, ends_at, results_published")
+    .eq("id", id)
     .single();
 
-  // 3. Leaderboard Caching (Check-Fetch-Store)
-  const redis = getRedis();
-  const cacheKey = CacheKeys.leaderboard(id);
-  let leaderboard: any[] = [];
-  
-  const cached = await redis.get(cacheKey);
-  if (cached && Array.isArray(cached)) {
-    leaderboard = cached;
-  } else {
-    // Fetch from DB
-    const { data: topResults, error } = await supabase
-      .from("exam_results")
-      .select(`
-        id, 
-        user_id, 
-        total_score, 
-        max_score,
-        profiles ( name, institute )
-      `)
-      .eq("exam_id", id)
-      .order("total_score", { ascending: false })
-      .limit(50);
-      
-    if (!error && topResults) {
-      leaderboard = topResults;
-      // Background async update to redis
-      redis.set(cacheKey, leaderboard, { ex: CacheTTL.LEADERBOARD }).catch(console.error);
-    }
+  if (!exam) return <StatusCard title="Exam not found" message="This exam is no longer available." />;
+  if (!exam.results_published) {
+    const ongoing = Date.now() < new Date(exam.ends_at).getTime();
+    return (
+      <StatusCard
+        title={ongoing ? "Submission received" : "Results pending"}
+        message={ongoing
+          ? `The exam remains open for other students until ${new Date(exam.ends_at).toLocaleString()}. Results stay private until publication.`
+          : "Grading is in progress. The leaderboard will appear after every answer has a final grade and an admin publishes the results."}
+      />
+    );
   }
 
-  // Find my rank if not in top 50 (simplification for UI)
-  const myRank = leaderboard.findIndex(r => r.user_id === user.id) + 1;
-
+  const results = await getPublishedExamResults(id, user.id, safePage);
   return (
-    <div className="max-w-4xl mx-auto py-8 px-4 animate-fade-in">
-      <div className="text-center mb-10">
-        <h1 className="text-2xl font-bold text-foreground">{exam.title} - Results</h1>
-        <p className="text-muted-foreground mt-2">See how you performed compared to your peers.</p>
-      </div>
+    <div className="mx-auto max-w-5xl px-4 py-8">
+      <header className="mb-10 text-center">
+        <h1 className="text-2xl font-black">{results.exam.title} — Results</h1>
+        <p className="mt-2 text-muted-foreground">Final scores, shared competition ranks, and your detailed feedback.</p>
+      </header>
 
-      {myResult ? (
-        <div className="bg-brand-600 text-white rounded-3xl p-8 mb-12 shadow-xl shadow-brand-200/50 relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-            <Trophy size={120} />
-          </div>
-          
+      {results.myResult ? (
+        <section className="relative mb-10 flex flex-col items-center justify-between gap-6 overflow-hidden rounded-3xl bg-brand-600 p-8 text-white shadow-xl md:flex-row">
+          <Trophy className="absolute right-6 top-3 opacity-10" size={120} />
           <div>
-            <h2 className="text-xl font-bold mb-1 opacity-90">Your Score</h2>
-            <div className="flex items-baseline gap-2">
-              <span className="text-5xl font-black">{myResult.total_score}</span>
-              <span className="text-xl font-medium opacity-80">/ {myResult.max_score}</span>
-            </div>
+            <p className="font-bold opacity-80">Your score</p>
+            <p className="text-5xl font-black">{results.myResult.totalScore}<span className="text-xl opacity-75"> / {results.myResult.maxScore}</span></p>
           </div>
-          
-          <div className="flex gap-4">
-            <div className="bg-white/10 rounded-2xl p-4 min-w-[120px] text-center backdrop-blur-sm">
-              <p className="text-sm font-medium opacity-80 mb-1">Rank</p>
-              <p className="text-2xl font-bold">{myRank > 0 ? `#${myRank}` : 'N/A'}</p>
-            </div>
-            <div className="bg-white/10 rounded-2xl p-4 min-w-[120px] text-center backdrop-blur-sm">
-              <p className="text-sm font-medium opacity-80 mb-1">Status</p>
-              <p className="text-xl font-bold">{myResult.total_score >= myResult.max_score * 0.5 ? 'Passed' : 'Failed'}</p>
-            </div>
+          <div className="rounded-2xl bg-white/10 px-8 py-4 text-center">
+            <p className="text-sm opacity-80">Competition rank</p>
+            <p className="text-3xl font-black">#{results.myResult.rank ?? "—"}</p>
           </div>
-        </div>
+        </section>
       ) : (
-        <div className="bg-card border border-border rounded-xl p-8 text-center mb-12">
-          <Clock size={32} className="mx-auto mb-3 text-muted-foreground" />
-          <h2 className="text-lg font-bold text-foreground">You didn&apos;t take this exam</h2>
-          <Link href="/exams" className="text-brand-600 hover:underline mt-2 inline-block text-sm font-medium">
-            View available exams
-          </Link>
-        </div>
+        <section className="mb-10 rounded-2xl border border-border bg-card p-8 text-center text-muted-foreground">You did not take this exam.</section>
       )}
 
-      {/* Leaderboard */}
-      <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-2">
-        <Medal className="text-yellow-500" /> Top Performers Leaderboard
-      </h3>
-      
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-muted/50 border-b border-border">
-            <tr>
-              <th className="px-6 py-4 font-medium text-muted-foreground w-20">Rank</th>
-              <th className="px-6 py-4 font-medium text-muted-foreground">Student</th>
-              <th className="px-6 py-4 font-medium text-muted-foreground text-right">Score</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {leaderboard.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-6 py-12 text-center text-muted-foreground">
-                  No results published yet.
-                </td>
-              </tr>
-            ) : (
-              leaderboard.map((row: any, index: number) => {
-                const isMe = row.user_id === user.id;
+      <section className="mb-12">
+        <h2 className="mb-5 flex items-center gap-2 text-xl font-black"><Medal className="text-yellow-500" /> Leaderboard</h2>
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-border bg-muted/40">
+              <tr><th className="px-5 py-4">Rank</th><th className="px-5 py-4">Student</th><th className="px-5 py-4 text-right">Score</th></tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {results.leaderboard.map((row) => {
+                const mine = row.user_id === user.id;
                 return (
-                  <tr key={row.id} className={`${isMe ? 'bg-brand-50/50' : 'hover:bg-muted/30'} transition-colors`}>
-                    <td className="px-6 py-4">
-                      {index === 0 ? <Medal size={20} className="text-yellow-500" /> : 
-                       index === 1 ? <Medal size={20} className="text-gray-400" /> : 
-                       index === 2 ? <Medal size={20} className="text-amber-600" /> : 
-                       <span className="font-medium text-muted-foreground pl-2">{index + 1}</span>}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-bold ${isMe ? 'text-brand-700' : 'text-foreground'}`}>
-                          {row.profiles.name} {isMe && "(You)"}
-                        </span>
-                      </div>
-                      <span className="text-xs text-muted-foreground">{row.profiles.institute}</span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className="font-bold text-foreground text-lg">{row.total_score}</span>
-                      <span className="text-muted-foreground text-xs font-medium ml-1">/ {row.max_score}</span>
-                    </td>
+                  <tr key={row.user_id} className={mine ? "bg-brand-50/60" : ""}>
+                    <td className="px-5 py-4 font-black">#{row.rank}</td>
+                    <td className="px-5 py-4"><p className="font-bold">{row.student_name}{mine ? " (You)" : ""}</p><p className="text-xs text-muted-foreground">{row.institute}</p></td>
+                    <td className="px-5 py-4 text-right font-black">{row.total_score}<span className="text-xs text-muted-foreground"> / {row.max_score}</span></td>
                   </tr>
                 );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-      
-      <p className="text-center text-xs text-muted-foreground mt-4">
-        Leaderboard updates every hour.
-      </p>
+              })}
+              {!results.leaderboard.length && <tr><td colSpan={3} className="p-10 text-center text-muted-foreground">No ranked results.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {results.totalPages > 1 && (
+          <nav className="mt-5 flex items-center justify-center gap-4">
+            {results.page > 1 ? <Link prefetch={false} href={`/exams/${id}/results?page=${results.page - 1}`} className="rounded-lg border border-border px-4 py-2 font-bold">Previous</Link> : <span />}
+            <span className="text-sm text-muted-foreground">Page {results.page} of {results.totalPages}</span>
+            {results.page < results.totalPages ? <Link prefetch={false} href={`/exams/${id}/results?page=${results.page + 1}`} className="rounded-lg border border-border px-4 py-2 font-bold">Next</Link> : <span />}
+          </nav>
+        )}
+      </section>
+
+      {results.details.length > 0 && (
+        <section>
+          <h2 className="mb-5 text-xl font-black">Your answers and feedback</h2>
+          <div className="space-y-6">
+            {results.details.map((detail, index) => (
+              <article key={detail.id} className="rounded-2xl border border-border bg-card p-6">
+                <div className="mb-4 flex items-start justify-between gap-3 border-b border-border pb-4">
+                  <div><p className="mb-1 text-xs font-bold uppercase tracking-wider text-brand-600">Question {index + 1}</p><p className="whitespace-pre-wrap font-medium">{detail.prompt}</p></div>
+                  <span className="whitespace-nowrap rounded-full bg-brand-50 px-3 py-1 text-sm font-black text-brand-700">{detail.score}</span>
+                </div>
+                <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Your answer</h3>
+                <div className="mb-5 whitespace-pre-wrap rounded-xl bg-muted/30 p-4 text-sm">{detail.answer || "No answer"}</div>
+                <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Feedback</h3>
+                <p className="text-sm">{detail.summary}</p>
+                {detail.highlights.length > 0 && <div className="mt-4 space-y-2">{detail.highlights.map((highlight, highlightIndex) => <div key={highlightIndex} className="rounded-lg border border-border bg-muted/20 p-3 text-xs"><strong className="block">“{highlight.quote}”</strong>{highlight.comment}</div>)}</div>}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
+
+function StatusCard({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="mx-auto max-w-xl px-4 py-16 text-center">
+      <div className="rounded-3xl border border-brand-200 bg-brand-50 p-10">
+        <Clock className="mx-auto mb-4 text-brand-600" size={44} />
+        <h1 className="text-2xl font-black text-brand-900">{title}</h1>
+        <p className="mt-3 text-sm leading-6 text-brand-800">{message}</p>
+        <Link href="/exams" prefetch={false} className="mt-7 inline-block rounded-xl bg-brand-600 px-6 py-3 font-bold text-white">Back to Exams</Link>
+      </div>
+    </div>
+  );
+}
+

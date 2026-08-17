@@ -60,6 +60,7 @@ export default function DashboardClient({ profile, tip, stats, trend }: Dashboar
 
         <Link
           href="/questions"
+          prefetch={false}
           className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white
                      hover:bg-brand-700 transition-all active:scale-[0.97] shadow-md shadow-brand-200 relative z-10"
         >
@@ -96,6 +97,7 @@ export default function DashboardClient({ profile, tip, stats, trend }: Dashboar
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Link
             href="/exams"
+            prefetch={false}
             className="group rounded-xl border border-border bg-card p-4 hover:border-brand-200 hover:shadow-sm transition-all"
           >
             <div className="h-10 w-10 rounded-lg bg-brand-50 flex items-center justify-center mb-3">
@@ -115,6 +117,7 @@ export default function DashboardClient({ profile, tip, stats, trend }: Dashboar
 
           <Link
             href="/questions"
+            prefetch={false}
             className="group rounded-xl border border-border bg-card p-4 hover:border-brand-200 hover:shadow-sm transition-all"
           >
             <div className="h-10 w-10 rounded-lg bg-brand-50 flex items-center justify-center mb-3">

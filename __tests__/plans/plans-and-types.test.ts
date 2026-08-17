@@ -110,6 +110,7 @@ describe("Type shape validation", () => {
       ends_at: new Date().toISOString(),
       is_published: true,
       results_published: false,
+      results_version: 0,
       created_by: "admin-id",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -128,6 +129,7 @@ describe("Type shape validation", () => {
       free_tests_remaining: 3,
       tips_enabled: true,
       is_admin: false,
+      last_active_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

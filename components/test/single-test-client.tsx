@@ -33,6 +33,8 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   // Timer state
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const secondsRef = useRef(0);
+  const gradingRequestIdRef = useRef<string | null>(null);
   
   // File upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -72,23 +74,31 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     }
   }, [question.id]);
 
-  // Save to localStorage
   useEffect(() => {
-    if (state === "running" || state === "paused") {
+    secondsRef.current = secondsElapsed;
+  }, [secondsElapsed]);
+
+  // Persist timer checkpoints without writing localStorage or waking the shell
+  // on every one-second tick.
+  useEffect(() => {
+    const persist = () => {
+      if (state !== "running" && state !== "paused") return;
       const payload = {
         questionId: question.id,
         prompt: question.prompt,
         category: question.category,
         marks: question.marks,
-        secondsElapsed,
+        secondsElapsed: secondsRef.current,
         state,
         lastUpdatedAt: Date.now()
       };
-      console.log("Saving in-progress test to localStorage:", payload);
       localStorage.setItem("in_progress_test", JSON.stringify(payload));
       window.dispatchEvent(new Event("in_progress_test_updated"));
-    }
-  }, [state, secondsElapsed, question]);
+    };
+    persist();
+    const checkpoint = window.setInterval(persist, 15_000);
+    return () => window.clearInterval(checkpoint);
+  }, [state, question]);
 
   // Timer logic
   useEffect(() => {
@@ -185,11 +195,13 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     setState("grading");
     
     try {
+      if (!gradingRequestIdRef.current) gradingRequestIdRef.current = crypto.randomUUID();
       const res = await fetch("/api/grade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           questionId: question.id,
+          idempotencyKey: gradingRequestIdRef.current,
           submissionText: editedText,
           ocrText,
           timeTakenSeconds: secondsElapsed,
@@ -200,6 +212,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       if (!res.ok) throw new Error(data.error || "Grading failed");
       
       setGradingResult(data.gradingResult);
+      gradingRequestIdRef.current = null;
       setState("feedback");
       
       // Clear localStorage on success
@@ -209,6 +222,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       // Tell Next.js router to refresh so the user's slot count updates
       router.refresh();
     } catch (err: any) {
+      gradingRequestIdRef.current = null;
       setError(err.message);
       setState("editing"); // go back so they can try again
     }
@@ -320,7 +334,27 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                   />
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Direct Type Button */}
+                  <button
+                    onClick={() => {
+                      setOcrText("");
+                      setEditedText("");
+                      setState("editing");
+                    }}
+                    className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 hover:bg-muted/50 transition-colors flex flex-col items-center justify-center h-full text-center w-full"
+                  >
+                    <div className="h-10 w-10 rounded-full bg-brand-100 flex items-center justify-center mb-3">
+                      <PenLine size={20} className="text-brand-600" />
+                    </div>
+                    <span className="text-sm font-semibold text-brand-600 block mb-1">
+                      Type Answer
+                    </span>
+                    <span className="text-[10px] text-muted-foreground block text-center">
+                      Type directly
+                    </span>
+                  </button>
+
                   {/* Camera Button */}
                   <button
                     onClick={() => setShowCamera(true)}
@@ -526,4 +560,3 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     </div>
   );
 }
-

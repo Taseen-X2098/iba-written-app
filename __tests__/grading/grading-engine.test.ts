@@ -87,7 +87,7 @@ describe("createMockClient", () => {
       submission: "Some text here for testing purposes.",
     });
     const result = await client.responses.create({
-      model: "gpt-5.2",
+      model: "gpt-5.6-luna",
       instructions: "",
       tools: [],
       input: [],
