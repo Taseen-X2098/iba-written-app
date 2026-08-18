@@ -14,7 +14,7 @@ create type question_category as enum (
   'essay', 'quote_analysis', 'creative_writing', 'personal_reflection',
   'translation', 'basic_paragraph', 'comprehension', 'precis', 'grammar'
 );
-create type difficulty_level as enum ('easy', 'medium', 'hard', 'very_hard');
+create type difficulty_level as enum ('easy', 'medium', 'hard');
 create type graded_by_type as enum ('ai', 'admin');
 create type notification_type as enum (
   'exam_available', 'results_published', 'subscription_expiring', 'inactivity_reminder'
