@@ -137,6 +137,11 @@ html, body {
   50% { opacity: 0.6; }
 }
 
+@keyframes route-loading {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(410%); }
+}
+
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
 }
@@ -151,6 +156,17 @@ html, body {
 
 .animate-pulse-soft {
   animation: pulse-soft 2s ease-in-out infinite;
+}
+
+.route-loading-bar {
+  animation: route-loading 1.15s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-loading-bar {
+    width: 100%;
+    animation: pulse-soft 1.5s ease-in-out infinite;
+  }
 }
 
 /* ─── Usage Bar Gradient ────────────────────────────────────────────────── */

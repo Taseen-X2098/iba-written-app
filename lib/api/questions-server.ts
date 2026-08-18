@@ -16,8 +16,9 @@ export async function fetchQuestionsServer(
   });
   if (error) throw new Error(error.message);
   const rows = data ?? [];
-  const count = Number(rows[0]?.total_count ?? 0);
-  const questions = rows.map(({ total_count: _count, ...question }: any) => question);
-  const nextPage = params.page * params.limit < count ? params.page + 1 : null;
-  return { data: questions, count, nextPage } as FetchQuestionsResponse;
+  const pageSize = Math.max(1, Math.min(params.limit, 50));
+  const hasNextPage = rows.length > pageSize;
+  const questions = rows.slice(0, pageSize);
+  const nextPage = hasNextPage ? params.page + 1 : null;
+  return { data: questions, nextPage } as FetchQuestionsResponse;
 }

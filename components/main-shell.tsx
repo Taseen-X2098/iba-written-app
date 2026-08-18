@@ -166,41 +166,39 @@ export default function MainShell({
 
   async function registerFCMToken() {
     try {
-      if (!messaging) return;
       if (typeof window === "undefined" || !("Notification" in window)) return;
       
       const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-        const token = await getToken(messaging, { 
-          vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY, // User must provide this in .env.local
-          serviceWorkerRegistration: registration
-        });
-        
-        if (token) {
-          const supabase = createClient();
+      // Reflect the browser's decision immediately. Token registration can take
+      // longer or fail independently, but the permission banner is no longer relevant.
+      setNotificationPermission(permission);
+
+      if (permission !== "granted" || !messaging) return;
+
+      const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      const token = await getToken(messaging, {
+        vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY, // User must provide this in .env.local
+        serviceWorkerRegistration: registration
+      });
+
+      if (token) {
+        const supabase = createClient();
+
+        // Get current tokens to prevent duplicates
+        const { data } = await supabase
+          .from('profiles')
+          .select('fcm_tokens')
+          .eq('id', profile?.id || "")
+          .single();
           
-          // Get current tokens to prevent duplicates
-          const { data } = await supabase
+        const currentTokens = data?.fcm_tokens || [];
+
+        if (!currentTokens.includes(token)) {
+          await supabase
             .from('profiles')
-            .select('fcm_tokens')
-            .eq('id', profile?.id || "")
-            .single();
-            
-          const currentTokens = data?.fcm_tokens || [];
-          
-          if (!currentTokens.includes(token)) {
-            await supabase
-              .from('profiles')
-              .update({ fcm_tokens: [...currentTokens, token] })
-              .eq('id', profile?.id || "");
-          }
+            .update({ fcm_tokens: [...currentTokens, token] })
+            .eq('id', profile?.id || "");
         }
-        
-        // Hide the banner if permission was just granted
-        setNotificationPermission(permission);
-      } else {
-        setNotificationPermission(permission);
       }
     } catch (error) {
       console.error('Error registering FCM token:', error);

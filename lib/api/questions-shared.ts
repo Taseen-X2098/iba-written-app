@@ -13,7 +13,5 @@ export interface FetchQuestionsParams {
 
 export interface FetchQuestionsResponse {
   data: Question[];
-  count: number;
   nextPage: number | null;
 }
-

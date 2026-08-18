@@ -142,7 +142,6 @@ export default function QuestionBankClient({
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const questions = data?.pages.flatMap((page) => page.data) ?? [];
-  const totalCount = data?.pages[0]?.count ?? 0;
 
   return (
     <div className="px-4 py-6 lg:px-8 max-w-4xl mx-auto animate-fade-in">
@@ -153,7 +152,7 @@ export default function QuestionBankClient({
         <div>
           <h2 className="text-xl font-bold text-foreground">Question Bank</h2>
           <p className="text-sm text-muted-foreground">
-            Practice over {totalCount > 0 ? totalCount : "many"} questions by topic.
+            Practice more than 500 questions by topic.
           </p>
         </div>
       </div>
