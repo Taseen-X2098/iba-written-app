@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Check, AlertCircle, Plus, Loader2, Sparkles, TrendingUp, ChevronDown } from "lucide-react";
+import { Crown, Check, AlertCircle, Plus, Sparkles, TrendingUp, ChevronDown } from "lucide-react";
 import type { Subscription } from "@/lib/types";
 import { getUsageInfo } from "@/lib/utils/subscription";
-import { useRouter } from "next/navigation";
 
 interface Props {
   activeSubscription: Subscription | null;
@@ -66,39 +65,12 @@ export default function SubscriptionClient({
   slotsPaymentFormUrl,
   mentorshipFormUrl,
 }: Props) {
-  const router = useRouter();
-  const [loading, setLoading] = useState<string | null>(null);
   const [extraSlots, setExtraSlots] = useState<number>(10);
 
   // We construct a temporary Profile just to pass the free tests count 
   // since the new universal utility accepts profile and subscription.
   const profileMock = { free_tests_remaining: freeTestsRemaining } as any;
   const usage = getUsageInfo(profileMock, activeSubscription);
-
-  const handleCheckout = async (purchaseType: "plan" | "extra_slots", planId?: string) => {
-    setLoading(purchaseType === "plan" ? (planId as string) : "extra");
-    
-    try {
-      const res = await fetch("/api/bkash/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          purchaseType,
-          planId,
-          slots: purchaseType === "extra_slots" ? extraSlots : undefined,
-        }),
-      });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to initialize checkout");
-      
-      // Redirect to bKash portal
-      window.location.href = data.bkashURL;
-    } catch (err: any) {
-      alert(`Checkout Error: ${err.message}`);
-      setLoading(null);
-    }
-  };
 
   const calculateUpgradeCost = (newPlanPrice: number) => {
     if (!activeSubscription || activeSubscription.plan_type === "plan_3") return newPlanPrice; // not upgrading from 1->2

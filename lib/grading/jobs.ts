@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { OpenAI } from "openai";
-import { createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys } from "@/lib/redis";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError } from "@/lib/api/api-error";
 import { getAttemptDrafts, requireAttemptWriter } from "@/lib/exams/attempts";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";

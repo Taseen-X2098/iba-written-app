@@ -1,6 +1,6 @@
-import { createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys } from "@/lib/redis";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError } from "@/lib/api/api-error";
 import {
   getAttempt,
   getAttemptDrafts,

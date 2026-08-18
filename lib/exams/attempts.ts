@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError } from "@/lib/api/api-error";
 import type {
   AttemptDrafts,
   AttemptQuestion,
