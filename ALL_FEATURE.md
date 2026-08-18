@@ -225,7 +225,7 @@ The countdown is always derived from `expires_at`. At zero the editor locks imme
 All acknowledged answers live in one Redis hash at `attempt:{attemptId}:drafts`; atomic `HSET` batches avoid per-question keys and `KEYS` scans. Dirty answers flush every 30 seconds, after OCR, on manual save, and when the page becomes hidden. Only unacknowledged edits are kept locally, AES-GCM encrypted with a key held in tab-scoped session storage. Failed acknowledgements stay dirty.
 
 ### 6.5 Atomic Completion and Abandonment
-`finalize_exam_attempt` locks the official attempt, snapshots the latest acknowledged drafts, inserts every exam answer, assigns explicit zero grades to blanks, and marks finalization in one transaction. Duplicate calls return the completed state. The Railway worker finalizes expired abandoned attempts; connected clients, reloads, cron, and admin actions are idempotent fallbacks.
+`finalize_exam_attempt` locks the official attempt, snapshots the latest acknowledged drafts, inserts every exam answer, assigns explicit zero grades to blanks, and marks finalization in one transaction. Duplicate calls return the completed state. Connected clients finalize their own attempts, while admins can explicitly finalize one expired attempt or all expired attempts for an exam from the admin panel.
 
 ### 6.6 Practice Exam Completion
 Practice opens only after results publication and every run starts after explicit confirmation. Finishing locks the answer snapshot before quota selection. Each non-empty selected, non-translation answer costs one slot. Translation is excluded from AI grading, quota, total, and denominator; unselected or blank non-translation answers score zero. Terminal failures refund reservations and failed answers can be retried without recharging successful work.
@@ -484,11 +484,10 @@ OpenAI GPT-5.6-Luna for both OCR and AI grading through the Responses API with S
 Firebase Cloud Messaging for push notifications.
 
 ### 20.3 Deployment
-Railway hosts three services from the same repository, each selecting its own checked-in config path:
+Railway hosts two services from the same repository, each selecting its own checked-in config path:
 
 - **Web** — `/railway.web.json`, `npm run build`, then `npm run start`; `/api/health` is the health check.
 - **Grading worker** — `/railway.worker.json`, `npm run worker:grading`; its signed `/wake` endpoint drains bounded grading batches and `/health` reports liveness.
-- **Five-minute safety cron** — `/railway.cron.json`, `npm run worker:once`; it finalizes abandoned due attempts, recovers missed queue work, and exits.
 
 Supabase remains the durable database/auth provider and Upstash remains Redis. Shared sealed/reference variables supply Supabase, Upstash, OpenAI, and `GRADING_WORKER_SECRET`; the web service points `GRADING_WORKER_URL` at the worker. Schema migrations run before application rollout, and the staging environment uses separate Supabase/Upstash resources and seeded accounts.
 

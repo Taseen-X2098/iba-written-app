@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";

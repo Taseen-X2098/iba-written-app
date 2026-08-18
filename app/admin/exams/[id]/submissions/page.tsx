@@ -2,6 +2,8 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { ArrowLeft, Users, CheckCircle, Clock } from "lucide-react";
 import PublishResultsButton from "./PublishResultsButton";
+import { ForceGradeButton } from "../../ForceGradeButton";
+import { listExpiredOfficialAttempts } from "@/lib/exams/finalize";
 
 export default async function AdminExamSubmissionsPage({
   params,
@@ -17,16 +19,25 @@ export default async function AdminExamSubmissionsPage({
 
   // 2. Fetch all submissions for this exam (bypass RLS for admin)
   const adminClient = await createAdminClient();
-  const { data: submissions } = await adminClient
-    .from("exam_submissions")
-    .select(`
-      user_id,
-      grading_result,
-      graded_by,
-      submitted_at,
-      profiles(name, institute)
-    `)
-    .eq("exam_id", id);
+  const [{ data: submissions }, pendingAttempts] = await Promise.all([
+    adminClient
+      .from("exam_submissions")
+      .select(`
+        user_id,
+        grading_result,
+        graded_by,
+        submitted_at,
+        profiles(name, institute)
+      `)
+      .eq("exam_id", id),
+    listExpiredOfficialAttempts(id),
+  ]);
+
+  const pendingUserIds = [...new Set(pendingAttempts.map((attempt) => attempt.user_id))];
+  const { data: pendingProfiles } = pendingUserIds.length
+    ? await adminClient.from("profiles").select("id, name, institute").in("id", pendingUserIds)
+    : { data: [] };
+  const pendingProfilesById = new Map((pendingProfiles ?? []).map((profile) => [profile.id, profile]));
 
   // Group by user
   const userSubmissions = (submissions || []).reduce((acc: any, sub: any) => {
@@ -46,8 +57,23 @@ export default async function AdminExamSubmissionsPage({
     return acc;
   }, {});
 
+  for (const attempt of pendingAttempts) {
+    if (!userSubmissions[attempt.user_id]) {
+      userSubmissions[attempt.user_id] = {
+        userId: attempt.user_id,
+        profile: pendingProfilesById.get(attempt.user_id),
+        totalQuestions: 0,
+        gradedQuestions: 0,
+        isSubmitted: false,
+      };
+    }
+    userSubmissions[attempt.user_id].attemptStatus = attempt.status;
+    userSubmissions[attempt.user_id].attemptExpiresAt = attempt.expires_at;
+    userSubmissions[attempt.user_id].canFinalize = true;
+  }
+
   const students = Object.values(userSubmissions);
-  const totalGraded = students.filter((s: any) => s.gradedQuestions === s.totalQuestions).length;
+  const totalGraded = students.filter((s: any) => s.totalQuestions > 0 && s.gradedQuestions === s.totalQuestions).length;
   const allGraded = students.length > 0 && totalGraded === students.length;
 
   return (
@@ -67,6 +93,7 @@ export default async function AdminExamSubmissionsPage({
         </div>
         
         <div className="flex items-center gap-3">
+          <ForceGradeButton examId={id} />
           {exam.results_published && (
             <div className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
               <CheckCircle size={16} /> Published
@@ -100,7 +127,11 @@ export default async function AdminExamSubmissionsPage({
                     <p className="text-muted-foreground text-xs">{student.profile?.institute}</p>
                   </td>
                   <td className="px-6 py-4">
-                    {student.isSubmitted ? (
+                    {student.canFinalize ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-red-100 text-red-700">
+                        Expired — Finalize
+                      </span>
+                    ) : student.isSubmitted ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-green-100 text-green-700">
                         Submitted
                       </span>
@@ -112,23 +143,32 @@ export default async function AdminExamSubmissionsPage({
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      {student.gradedQuestions === student.totalQuestions ? (
+                      {student.totalQuestions === 0 ? (
+                        <Clock size={16} className="text-red-500" />
+                      ) : student.gradedQuestions === student.totalQuestions ? (
                         <CheckCircle size={16} className="text-green-500" />
                       ) : (
                         <Clock size={16} className="text-amber-500" />
                       )}
                       <span className="font-medium">
-                        {student.gradedQuestions} / {student.totalQuestions} Graded
+                        {student.totalQuestions === 0
+                          ? "Awaiting finalization"
+                          : `${student.gradedQuestions} / ${student.totalQuestions} Graded`}
                       </span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <Link 
-                      href={`/admin/exams/${id}/submissions/${student.userId}`}
-                      className="bg-brand-50 text-brand-700 hover:bg-brand-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors inline-block"
-                    >
-                      {student.gradedQuestions === student.totalQuestions ? "Review Grades" : "Grade Submission"}
-                    </Link>
+                    <div className="flex justify-end gap-2">
+                      {student.canFinalize && <ForceGradeButton examId={id} targetUserId={student.userId} />}
+                      {student.totalQuestions > 0 && (
+                        <Link
+                          href={`/admin/exams/${id}/submissions/${student.userId}`}
+                          className="bg-brand-50 text-brand-700 hover:bg-brand-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors inline-block"
+                        >
+                          {student.gradedQuestions === student.totalQuestions ? "Review Grades" : "Grade Submission"}
+                        </Link>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

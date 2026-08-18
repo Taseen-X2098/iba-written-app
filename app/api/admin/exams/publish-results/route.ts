@@ -4,7 +4,6 @@ import { z } from "zod";
 import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/server";
-import { finalizeDueAttempts } from "@/lib/exams/finalize";
 
 const schema = z.object({ examId: z.string().uuid() });
 
@@ -14,9 +13,6 @@ export async function POST(request: NextRequest) {
     const parsed = schema.safeParse(await request.json());
     if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "A valid exam is required", 400);
 
-    // Once the global window ends every official attempt is due because start
-    // clamps personal expiry to the global deadline.
-    await finalizeDueAttempts(5_000);
     const admin = await createAdminClient();
     const { data: version, error } = await admin.rpc("publish_exam_results", {
       p_exam_id: parsed.data.examId,
@@ -36,4 +32,3 @@ export async function POST(request: NextRequest) {
     return apiErrorResponse(error);
   }
 }
-

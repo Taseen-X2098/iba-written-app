@@ -1,5 +1,3 @@
-import "server-only";
-
 import { randomUUID } from "node:crypto";
 import { OpenAI } from "openai";
 import { createAdminClient } from "@/lib/supabase/server";

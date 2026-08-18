@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createAdminClient } from "@/lib/supabase/server";
 import { getRedis, CacheKeys } from "@/lib/redis";
 import { ApiError } from "@/lib/api/errors";
@@ -102,26 +100,15 @@ export async function lockPracticeAttempt(input: {
   };
 }
 
-export async function finalizeDueAttempts(limit = 50) {
+export async function listExpiredOfficialAttempts(examId: string) {
   const admin = await createAdminClient();
-  const { data: attempts, error } = await admin
+  const { data, error } = await admin
     .from("exam_attempts")
-    .select("id")
+    .select("user_id, status, expires_at")
+    .eq("exam_id", examId)
     .eq("mode", "official")
     .in("status", ["active", "locked"])
-    .lte("expires_at", new Date().toISOString())
-    .order("expires_at")
-    .limit(limit);
+    .lte("expires_at", new Date().toISOString());
   if (error) throw error;
-
-  let finalized = 0;
-  for (const attempt of attempts ?? []) {
-    try {
-      await finalizeOfficialAttempt({ attemptId: attempt.id, requireExpired: true });
-      finalized += 1;
-    } catch (error) {
-      console.error(`Failed to finalize due attempt ${attempt.id}`, error);
-    }
-  }
-  return finalized;
+  return data ?? [];
 }
