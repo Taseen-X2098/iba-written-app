@@ -92,6 +92,12 @@ function startProcess(name, args, env, { required = false } = {}) {
   return child;
 }
 
+if (sharedEnv.Z_AI_MOCK !== "true" && !sharedEnv.Z_AI_API_KEY) {
+  console.warn(
+    "[dev-stack] Neither Z_AI_MOCK=true nor Z_AI_API_KEY is configured; OCR requests will fail.",
+  );
+}
+
 startProcess(
   "Next.js web server",
   [path.join("node_modules", "next", "dist", "bin", "next"), "dev"],
@@ -109,6 +115,11 @@ if (useMockRailway) {
   if (sharedEnv.USE_MOCK_GRADER !== "true" && !sharedEnv.OPENAI_API_KEY) {
     console.warn(
       "[dev-stack] Neither USE_MOCK_GRADER=true nor OPENAI_API_KEY is configured; grading jobs will fail.",
+    );
+  }
+  if (sharedEnv.USE_MOCK_GRADER !== "true" && !sharedEnv.OPENAI_VECTOR_IBA_WRITTEN) {
+    console.warn(
+      "[dev-stack] Real grading requires OPENAI_VECTOR_IBA_WRITTEN to point to the rubric vector store.",
     );
   }
 

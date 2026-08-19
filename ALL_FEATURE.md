@@ -69,7 +69,7 @@ The color thresholds are: green (>60%), yellow (>40%), orange (>20%), red (≤20
 An upgrade prompt appears when usage drops below 40% for paid plans or below 1 test for free users.
 
 ### 2.5 Atomic Test Slot Consumption
-PostgreSQL usage ledgers reserve slots under row locks in the order extra purchased → plan → free. Standalone grading uses an idempotency key; practice exams record one charge per selected answer. A successful grade consumes its reservation, a terminal failure refunds it, and retries cannot double-charge. Quota and submission completion occur through service-role-only database functions.
+PostgreSQL usage ledgers reserve slots under row locks in the order extra purchased → plan → free. Standalone grading uses an idempotency key; post-publication practice exams record one charge per selected answer. A successful grade consumes its reservation, a terminal failure refunds it, and retries cannot double-charge. Official weekly-exam grading never reserves or consumes test slots. Quota and submission completion occur through service-role-only database functions.
 
 ### 2.6 Subscription Page
 Displays all three plans with feature lists, pricing, and a "Popular" badge on Plan 2.
@@ -96,6 +96,7 @@ These are used for filtering in the question bank and influence the mark allocat
 
 ### 3.3 Question Data Model
 Each question stores: category, marks, difficulty, source (optional attribution), prompt text, space hint (e.g., "2 pages"), max images (how many photos a student can upload), an active/inactive toggle, and the creating admin's ID.
+The seeded 500-question writing bank contains 200 argumentative essays, 50 basic paragraphs, 100 quote analyses, 80 creative-writing prompts, and 70 personal reflections. The opinion-writing prompts are explicitly classified by rubric intent rather than inferred from marks.
 
 ### 3.4 Question Bank Browsing
 One authenticated application endpoint calls `get_question_bank_page`, which performs filtering, completion anti-joins, counting, ordering, and pagination in PostgreSQL. The browser no longer loads every exam-question ID and every prior submission ID before requesting a page.
@@ -147,9 +148,9 @@ The captured image is converted to a JPEG File object and fed into the same uplo
 Camera permissions are requested on demand with a descriptive error if denied.
 
 ### 4.7 OCR (Optical Character Recognition)
-Uploaded images are sent to `/api/ocr` which uses OpenAI Vision (GPT-5.6-Luna) to extract handwritten text.
-The prompt instructs the model to return only raw text with preserved paragraph breaks — no commentary, labels, or formatting.
-A mock mode (`Z_AI_MOCK=true`) returns realistic dummy text with a 2-second simulated delay for development.
+Uploaded JPEG or PNG images are sent to `/api/ocr`, which uses Z.ai's GLM-OCR layout-parsing endpoint to extract handwritten text.
+A mock mode (`Z_AI_MOCK=true`) returns deterministic sample text without contacting Z.ai; every other value selects the real API and requires `Z_AI_API_KEY`.
+Both paths require an authorized question context and at least one remaining test slot, but OCR itself does not consume a slot. Identical images are cached; short burst and generous daily limits apply only as user-level bulk-abuse safeguards, with no retry ceiling on an individual answer.
 Extracted text is presented in an editable textarea so students can correct any OCR errors before grading.
 
 ### 4.8 Text Editing
@@ -171,8 +172,8 @@ A confirmation dialog prevents accidental clicks.
 
 ### 5.1 Model & Architecture
 Grading uses OpenAI's GPT-5.6-Luna via the Responses API with Structured Outputs.
-The model is forced to call a `get_rubric` tool before scoring — it cannot grade from memory or improvise criteria.
-If the model makes tool calls, the results are fed back in a second API call for the final graded output.
+Mock grading is forced through the local `get_rubric` function. Real grading is forced to call hosted `file_search` against the rubric vector store configured by `OPENAI_VECTOR_IBA_WRITTEN`, so it cannot grade from memory or improvise criteria.
+Tool output is retained in the Responses API conversation before the final structured grade is produced.
 
 ### 5.2 Rubric System
 A comprehensive `rubrics.json` file contains mark schemes for every combination of task type and total marks.
@@ -207,6 +208,12 @@ Ethical dilemma prompts are graded on argument quality regardless of which posit
 ### 5.8 Mock Grader
 A deterministic mock grading client (`mockClient.ts`) returns realistic grading results without calling OpenAI.
 Activated via `USE_MOCK_GRADER=true` for development and testing.
+
+### 5.9 Canonical Final Marks
+The server treats the model's score as an intermediate value, applies the internal 85% calibration, and always floors the result to the nearest 0.5. It rewrites the numeric total, score string, and criterion awards before persistence. An internal normalization-version marker makes the operation idempotent, so migration reruns and database triggers cannot apply the factor twice. Database backfills and write triggers keep standalone submissions, official submissions, practice-job results, published totals, and regrades consistent. Manual administrator marks are floored to 0.5 but do not receive the AI-only calibration.
+
+### 5.10 Personalized Learner Profiles
+Every successful grade produces a compact coaching summary and 1-4 evidence-backed observations from a fixed writing-skill taxonomy. PostgreSQL stores one summary per student, normalized skill state by category, and source-linked learning events. Regrading the same answer replaces its events and rebuilds the skill state, preventing stale evidence. The profile informs future feedback only when enough history supports a pattern; it never changes the already-fixed score. Profile enrichment is best-effort after durable grading, so a profile outage cannot refund or duplicate a consumed test slot.
 
 ---
 
@@ -480,7 +487,7 @@ Lucide React for icons throughout the interface.
 ### 20.2 Backend
 Supabase for authentication, PostgreSQL database, and Row Level Security.
 Upstash Redis for ephemeral attempt drafts and versioned leaderboard pages.
-OpenAI GPT-5.6-Luna for both OCR and AI grading through the Responses API with Structured Outputs.
+Z.ai GLM-OCR for handwriting extraction, and OpenAI GPT-5.6-Luna for grading through the Responses API with Structured Outputs and hosted rubric file search.
 Firebase Cloud Messaging for push notifications.
 
 ### 20.3 Deployment
@@ -584,7 +591,7 @@ The per-request UUID nonce in submission tags prevents pre-crafted injection pay
 The system prompt explicitly tells the model to note manipulation attempts rather than comply with them.
 
 ### 24.7 File Upload Validation
-OCR endpoint validates file type (JPEG, PNG, WebP, GIF only) and size (max 10MB).
+OCR endpoint validates file type (JPEG or PNG only) and size (max 10MB).
 Rejects unsupported types with specific error messages.
 
 ### 24.8 Credential Handling

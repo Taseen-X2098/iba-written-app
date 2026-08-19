@@ -15,7 +15,7 @@ The application uses:
   - `web`: the Next.js application and public API.
   - `grading-worker`: the private background grading service.
 - Upstash Redis for drafts, caches, and locks.
-- OpenAI for OCR and AI grading.
+- Z.ai GLM-OCR for handwriting extraction and OpenAI for AI grading.
 - Firebase Cloud Messaging (FCM) for optional browser push notifications.
 - Google Forms for the current plan, test-slot, and mentorship purchase requests.
 
@@ -75,7 +75,7 @@ The server-only key bypasses Row Level Security. It must never be placed in a
 ### 3.1 Apply database migrations
 
 All SQL files in `supabase/migrations` must be applied in numeric order, from
-`001_schema.sql` through `015_atomic_exam_definition.sql`. The migrations create
+`001_schema.sql` through `020_structured_learner_profiles.sql`. The migrations create
 the schema, RLS policies, triggers, RPCs, grading queues, and production question
 bank.
 
@@ -96,8 +96,10 @@ production, and do not use `--include-seed` on a production database.
 After migrations, verify that these representative objects exist:
 
 - Tables: `profiles`, `questions`, `exams`, `notifications`, `exam_attempts`,
-  `grading_jobs`, and `grading_job_items`.
-- Function: `public.is_admin()`.
+  `grading_jobs`, `grading_job_items`, `student_profile_summaries`,
+  `student_skill_state`, and `student_learning_events`.
+- Functions: `public.is_admin()` and
+  `public.record_student_learning_profile_update(...)`.
 - Trigger: `on_auth_user_created`.
 - RLS enabled on application tables.
 
@@ -213,6 +215,7 @@ limits. Both Railway services need:
 
 ```dotenv
 OPENAI_API_KEY=
+OPENAI_VECTOR_IBA_WRITTEN=
 USE_MOCK_GRADER=false
 ```
 
@@ -220,10 +223,11 @@ The web service also needs:
 
 ```dotenv
 Z_AI_MOCK=false
+Z_AI_API_KEY=
 ```
 
-Despite the historical variable name, production OCR currently uses OpenAI.
-`Z_AI_API_KEY` is not read by the current application.
+Z.ai authenticates this endpoint with one bearer API key; it does not require a
+separate API ID. Keep `Z_AI_API_KEY` on the web service only.
 
 ## 6. Configure Firebase Cloud Messaging
 
@@ -456,8 +460,10 @@ UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 
 OPENAI_API_KEY=
+OPENAI_VECTOR_IBA_WRITTEN=
 USE_MOCK_GRADER=false
 Z_AI_MOCK=false
+Z_AI_API_KEY=
 
 GRADING_WORKER_URL=http://${{grading-worker.RAILWAY_PRIVATE_DOMAIN}}:8080
 GRADING_WORKER_SECRET=
@@ -497,6 +503,7 @@ UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 
 OPENAI_API_KEY=
+OPENAI_VECTOR_IBA_WRITTEN=
 USE_MOCK_GRADER=false
 
 GRADING_WORKER_SECRET=
@@ -661,11 +668,13 @@ Confirm:
 ```dotenv
 USE_MOCK_GRADER=false
 Z_AI_MOCK=false
+Z_AI_API_KEY=VALID_Z_AI_KEY
 OPENAI_API_KEY=VALID_PRODUCTION_KEY
+OPENAI_VECTOR_IBA_WRITTEN=vs_VALID_RUBRIC_STORE_ID
 ```
 
-Verify the OpenAI project has billing, quota, and access to the model configured
-in the application.
+Verify the Z.ai account has API quota and the OpenAI project has billing, quota,
+and access to the configured grading model and rubric vector store.
 
 ## 15. Secret rotation and operational rules
 
