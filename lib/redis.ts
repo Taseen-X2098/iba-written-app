@@ -102,6 +102,17 @@ function createMemoryFallback(): Redis {
       }
       return remaining;
     },
+    incr: async (key: string) => {
+      const entry = store.get(key);
+      const active = entry && (!entry.expiresAt || Date.now() <= entry.expiresAt);
+      const current = active ? Number(JSON.parse(entry.value)) || 0 : 0;
+      const next = current + 1;
+      store.set(key, {
+        value: JSON.stringify(next),
+        expiresAt: active ? entry.expiresAt : null,
+      });
+      return next;
+    },
     hgetall: async (key: string) => {
       const entry = store.get(key);
       if (!entry) return null;

@@ -166,6 +166,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     try {
       const formData = new FormData();
       formData.append("image", selectedFile);
+      formData.append("questionId", question.id);
       
       setState("ocr_processing");
       const res = await fetch("/api/ocr", {

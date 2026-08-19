@@ -51,6 +51,13 @@ describe('Redis Cache Client', () => {
     expect(count).toBe(1);
   });
 
+  it('should support atomic-style increments in the memory fallback', async () => {
+    const redis = getRedis();
+    await redis.del('ocr-rate-test');
+    await expect(redis.incr('ocr-rate-test')).resolves.toBe(1);
+    await expect(redis.incr('ocr-rate-test')).resolves.toBe(2);
+  });
+
   it('should handle ttl and expire in memory fallback', async () => {
     const redis = getRedis();
     await redis.set('to-expire', '123');

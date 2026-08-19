@@ -1,109 +1,175 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import OpenAI from "openai";
 
-export async function POST(req: Request) {
+import { ApiError, apiErrorResponse } from "@/lib/api/errors";
+import { requireApiUser } from "@/lib/auth";
+import { getAvailableTestSlots } from "@/lib/exams/attempts";
+import { resolveOcrContext } from "@/lib/ocr/context";
+import {
+  enforceOcrDailyProviderLimit,
+  enforceOcrRateLimit,
+} from "@/lib/ocr/rate-limit";
+import { completeOcrRequest, reserveOcrRequest } from "@/lib/ocr/usage";
+import { extractTextWithZai, ZaiOcrError } from "@/lib/ocr/zai";
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
+const MOCK_OCR_TEXT =
+  "The quick brown fox jumps over the lazy dog. This is sample OCR text extracted from the uploaded image.";
+
+export async function POST(request: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await requireApiUser();
+    const availableSlots = await getAvailableTestSlots(user.id);
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (availableSlots < 1) {
+      throw new ApiError(
+        "INSUFFICIENT_SLOTS",
+        "OCR is available only while you have at least one test slot remaining.",
+        403,
+      );
     }
 
-    const formData = await req.formData();
-    const image = formData.get("image") as File;
+    const formData = await request.formData();
+    const image = formData.get("image");
 
-    if (!image) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
+    if (!(image instanceof File)) {
+      throw new ApiError("VALIDATION_ERROR", "No image file was uploaded.", 400);
     }
 
-    // Validate file type
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-    if (!allowedTypes.includes(image.type)) {
-      return NextResponse.json({ error: "Unsupported image type. Use JPEG, PNG, WebP, or GIF." }, { status: 400 });
+    if (!ALLOWED_IMAGE_TYPES.has(image.type)) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "Unsupported image type. Upload a JPEG or PNG image.",
+        415,
+      );
     }
 
-    // Limit file size to 10MB
-    const MAX_SIZE = 10 * 1024 * 1024;
-    if (image.size > MAX_SIZE) {
-      return NextResponse.json({ error: "Image too large. Maximum size is 10MB." }, { status: 400 });
+    if (image.size < 1 || image.size > MAX_FILE_SIZE_BYTES) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "The image must be between 1 byte and 10 MB.",
+        413,
+      );
     }
 
     const isMock = process.env.Z_AI_MOCK === "true";
+    const apiKey = process.env.Z_AI_API_KEY?.trim();
 
-    if (isMock) {
-      // Simulate network delay for OCR processing
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      return NextResponse.json({
-        text: "The main argument presented by the author revolves around the impact of artificial intelligence on modern education. While some argue that AI will replace teachers, the author posits that it will instead serve as a powerful tool to augment teaching methodologies. By automating administrative tasks, educators can focus more on personalized student engagement. Furthermore, AI-driven analytics can identify learning gaps faster than traditional testing.",
-      });
-    }
-
-    // ─── Real OCR via OpenAI Vision ──────────────────────────────────────
-    // Uses GPT-5.6-luna (cheapest & fastest) to extract handwritten text.
-    // If you get a Z.AI API key later, swap this block for a direct fetch
-    // to their endpoint. The response shape stays the same: { text: string }.
-
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "OCR service not configured. Set OPENAI_API_KEY or enable Z_AI_MOCK." },
-        { status: 503 }
+    if (!isMock && !apiKey) {
+      throw new ApiError(
+        "SERVICE_UNAVAILABLE",
+        "Z.ai OCR is not configured. Set Z_AI_API_KEY or enable Z_AI_MOCK.",
+        503,
       );
     }
 
-    // Convert image to base64 data URL
-    const arrayBuffer = await image.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-    const dataUrl = `data:${image.type};base64,${base64}`;
+    const context = await resolveOcrContext(formData, user.id);
+    await enforceOcrRateLimit(user.id);
 
-    const openai = new OpenAI({ apiKey });
+    const imageBytes = Buffer.from(await image.arrayBuffer());
+    const imageSha256 = createHash("sha256").update(imageBytes).digest("hex");
+    const reservationToken = randomUUID();
 
-    const response = await openai.responses.create({
-      model: "gpt-5.6-luna",
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: "Extract all handwritten text from this image. Return ONLY the extracted text, preserving paragraph breaks. Do not add any commentary, headings, labels, or formatting — just the raw text as written.",
-            },
-            {
-              type: "input_image",
-              image_url: dataUrl,
-            },
-          ],
-        },
-      ],
-    } as any);
+    const reservation = await reserveOcrRequest({
+      userId: user.id,
+      ...context,
+      imageSha256,
+      requestToken: reservationToken,
+    });
+    if (reservation.status === "succeeded" && reservation.extracted_text) {
+      return NextResponse.json({ text: reservation.extracted_text, cached: true });
+    }
 
-    const extractedText = response.output_text?.trim();
-
-    if (!extractedText) {
-      return NextResponse.json(
-        { error: "Could not extract text from the image. Please try a clearer photo." },
-        { status: 422 }
+    if (reservation.request_token !== reservationToken) {
+      throw new ApiError(
+        "CONFLICT",
+        "This image is already being processed. Please try again shortly.",
+        409,
       );
     }
 
-    return NextResponse.json({ text: extractedText });
+    let text: string;
 
-  } catch (error: any) {
-    console.error("OCR API Error:", error);
+    try {
+      await enforceOcrDailyProviderLimit(user.id);
+      if (isMock) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        text = MOCK_OCR_TEXT;
+      } else {
+        const providerUserId = `user_${createHash("sha256")
+          .update(user.id)
+          .digest("hex")
+          .slice(0, 32)}`;
+        const dataUrl = `data:${image.type};base64,${imageBytes.toString("base64")}`;
 
-    // Surface helpful messages for common OpenAI errors
-    if (error?.status === 401) {
-      return NextResponse.json({ error: "Invalid API key for OCR service." }, { status: 503 });
+        text = await extractTextWithZai({
+          apiKey: apiKey!,
+          dataUrl,
+          requestId: reservation.id,
+          providerUserId,
+        });
+      }
+    } catch (error) {
+      await completeOcrRequest({
+        requestId: reservation.id,
+        userId: user.id,
+        requestToken: reservationToken,
+        success: false,
+      }).catch(() => undefined);
+      throw error;
     }
-    if (error?.status === 429) {
-      return NextResponse.json({ error: "OCR rate limit reached. Please wait a moment and try again." }, { status: 429 });
+
+    await completeOcrRequest({
+      requestId: reservation.id,
+      userId: user.id,
+      requestToken: reservationToken,
+      success: true,
+      extractedText: text,
+    });
+
+    return NextResponse.json({ text, cached: false });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return apiErrorResponse(error);
     }
 
-    return NextResponse.json(
-      { error: "Failed to process image" },
-      { status: 500 }
+    if (error instanceof ZaiOcrError) {
+      if (error.status === 401 || error.status === 403) {
+        return apiErrorResponse(
+          new ApiError(
+            "SERVICE_UNAVAILABLE",
+            "Z.ai rejected the configured API key.",
+            503,
+          ),
+        );
+      }
+
+      if (error.status === 429) {
+        return apiErrorResponse(
+          new ApiError("RATE_LIMITED", "Z.ai is temporarily rate limited.", 429),
+        );
+      }
+
+      if (error.status === 422) {
+        return apiErrorResponse(
+          new ApiError(
+            "VALIDATION_ERROR",
+            "Z.ai could not extract readable text from this image.",
+            422,
+          ),
+        );
+      }
+
+      return apiErrorResponse(
+        new ApiError("INTERNAL_ERROR", "Z.ai OCR is temporarily unavailable.", 502),
+      );
+    }
+
+    console.error("OCR error:", error);
+    return apiErrorResponse(
+      new ApiError("INTERNAL_ERROR", "Failed to extract text from the image.", 500),
     );
   }
 }

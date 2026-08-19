@@ -307,6 +307,9 @@ export default function ExamTakerClient({
       for (const file of Array.from(files)) {
         const formData = new FormData();
         formData.append("image", file);
+        formData.append("attemptId", attempt.id);
+        formData.append("examQuestionId", questionId);
+        formData.append("writerToken", writerToken);
         const response = await fetch("/api/ocr", { method: "POST", body: formData });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? "OCR failed");
