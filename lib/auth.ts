@@ -36,3 +36,21 @@ export async function requireAdminUser() {
   return user;
 }
 
+export const canAccessQuestion = cache(async (questionId: string) => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("can_access_practice_question", {
+    p_question_id: questionId,
+  });
+  if (error) throw error;
+  return data === true;
+});
+
+export async function requireQuestionAccess(questionId: string) {
+  if (!(await canAccessQuestion(questionId))) {
+    throw new ApiError(
+      "PLAN_REQUIRED",
+      "This question is not included in the free trial. Choose a plan to unlock the full question bank",
+      403,
+    );
+  }
+}

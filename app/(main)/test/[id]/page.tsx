@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { checkTestLimit } from "@/lib/api/usage";
+import { canAccessQuestion } from "@/lib/auth";
 import SingleTestClient from "@/components/test/single-test-client";
 import type { Question } from "@/lib/types";
 
@@ -16,6 +17,10 @@ export default async function SingleTestPage({
 
   if (!user) {
     redirect("/login");
+  }
+
+  if (!(await canAccessQuestion(id))) {
+    redirect("/subscription");
   }
 
   // Fetch the question

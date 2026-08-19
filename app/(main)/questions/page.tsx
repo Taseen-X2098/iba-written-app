@@ -1,5 +1,6 @@
 import { dehydrate, HydrationBoundary, QueryClient } from "@tanstack/react-query";
 import { fetchQuestionsServer } from "@/lib/api/questions-server";
+import { getMainUserContext } from "@/lib/main-user-context";
 import QuestionBankClient from "@/components/questions/question-bank";
 
 export default async function QuestionsPage({
@@ -7,6 +8,10 @@ export default async function QuestionsPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
+  const context = await getMainUserContext();
+  if (!context) return null;
+  const isFreeTier = !context.profile.is_admin && !context.subscription;
+
   const params = await searchParams;
   
   const search = typeof params.search === "string" ? params.search : undefined;
@@ -41,6 +46,7 @@ export default async function QuestionsPage({
         initialDifficulty={difficulty}
         initialSortBy={sortBy}
         initialCompletionStatus={completionStatus}
+        isFreeTier={isFreeTier}
       />
     </HydrationBoundary>
   );

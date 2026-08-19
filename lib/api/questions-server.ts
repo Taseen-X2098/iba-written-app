@@ -2,7 +2,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import type { FetchQuestionsParams, FetchQuestionsResponse } from "./questions-shared";
 
 export async function fetchQuestionsServer(
-  params: FetchQuestionsParams
+  params: FetchQuestionsParams,
 ): Promise<FetchQuestionsResponse> {
   const supabase = await createServerClient();
   const { data, error } = await supabase.rpc("get_question_bank_page", {

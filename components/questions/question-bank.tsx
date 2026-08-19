@@ -14,6 +14,7 @@ interface Props {
   initialDifficulty: string;
   initialSortBy: string;
   initialCompletionStatus?: string;
+  isFreeTier: boolean;
 }
 
 export default function QuestionBankClient({
@@ -22,6 +23,7 @@ export default function QuestionBankClient({
   initialDifficulty,
   initialSortBy,
   initialCompletionStatus = "not_done",
+  isFreeTier,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -152,7 +154,9 @@ export default function QuestionBankClient({
         <div>
           <h2 className="text-xl font-bold text-foreground">Question Bank</h2>
           <p className="text-sm text-muted-foreground">
-            Practice more than 500 questions by topic.
+            {isFreeTier
+              ? "15 free questions across five topics · 3 AI evaluations included."
+              : "Practice more than 500 questions by topic."}
           </p>
         </div>
       </div>

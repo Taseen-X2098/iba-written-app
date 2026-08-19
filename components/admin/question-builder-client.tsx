@@ -16,7 +16,7 @@ export default function QuestionBuilderClient({
   
   const [form, setForm] = useState({
     prompt: initialData?.prompt || "",
-    category: (initialData?.category || "essay") as QuestionCategory,
+    category: (initialData?.category || "argumentative_essay") as QuestionCategory,
     difficulty: (initialData?.difficulty || "medium") as Difficulty,
     marks: initialData?.marks || 10,
     source: initialData?.source || "",
