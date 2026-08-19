@@ -3,7 +3,11 @@
  * Tests: mock client, rubric lookup, highlight validation, structured output parsing,
  * prompt injection defense, edge cases.
  */
-import { grade, type ResponsesClient, type GradingResult } from "@/lib/grading/grade";
+import {
+  grade,
+  type ResponsesClient,
+  type ResponsesCreateParams,
+} from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
 import { getRubric, callFunction, TASK_TYPES } from "@/lib/grading/tools";
 import { SYSTEM_PROMPT } from "@/lib/grading/systemPrompt";
@@ -153,6 +157,59 @@ describe("createMockClient", () => {
 // ─── Full Grading Pipeline Tests ─────────────────────────────────────────────
 
 describe("grade() with mock client", () => {
+  it("forces file_search against the configured vector store for real grading", async () => {
+    let capturedParams: ResponsesCreateParams | undefined;
+    const fileSearchClient: ResponsesClient = {
+      responses: {
+        create: async (params) => {
+          capturedParams = params;
+          return {
+            output: [{ type: "file_search_call", id: "fs_test", status: "completed" }],
+            output_text: JSON.stringify({
+              internal: { total: 4, max: 5, criteria: [] },
+              student_feedback: { score: "4/5", summary: "Good work.", highlights: [] },
+            }),
+          };
+        },
+      },
+    };
+
+    await grade(fileSearchClient, "A relevant response.", "basic_paragraph", 5, {
+      rubricSource: { type: "file_search", vectorStoreId: "vs_test123" },
+    });
+
+    expect(capturedParams?.tools).toEqual([
+      {
+        type: "file_search",
+        vector_store_ids: ["vs_test123"],
+        max_num_results: 5,
+      },
+    ]);
+    expect(capturedParams?.tool_choice).toEqual({ type: "file_search" });
+    expect(capturedParams?.instructions).toContain("call file_search");
+    expect(capturedParams?.instructions).not.toContain("call get_rubric");
+  });
+
+  it("rejects a real grading response that skipped file search", async () => {
+    const noSearchClient: ResponsesClient = {
+      responses: {
+        create: async () => ({
+          output: [],
+          output_text: JSON.stringify({
+            internal: { total: 4, max: 5, criteria: [] },
+            student_feedback: { score: "4/5", summary: "Good work.", highlights: [] },
+          }),
+        }),
+      },
+    };
+
+    await expect(
+      grade(noSearchClient, "A relevant response.", "basic_paragraph", 5, {
+        rubricSource: { type: "file_search", vectorStoreId: "vs_test123" },
+      })
+    ).rejects.toThrow("did not use the required rubric file search");
+  });
+
   it("returns a properly shaped GradingResult", async () => {
     const client = createMockClient({
       taskType: "argumentative_essay",

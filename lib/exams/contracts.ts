@@ -41,7 +41,7 @@ export const adminGradingJobSchema = z.object({
 
 export const manualGradeSchema = z.object({
   submissionId: uuidSchema,
-  score: z.number().min(0),
+  score: z.number().finite().min(0),
   summary: z.string().trim().min(1).max(10_000),
   highlights: z
     .array(
@@ -63,4 +63,3 @@ export function parseBody<T>(schema: z.ZodType<T>, value: unknown): T {
   }
   return result.data;
 }
-

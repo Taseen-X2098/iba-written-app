@@ -243,6 +243,7 @@ export interface GradingResultJSON {
   internal: {
     total: number;
     max: number;
+    normalizationVersion?: number;
     criteria: GradingCriterion[];
   };
   studentFeedback: {

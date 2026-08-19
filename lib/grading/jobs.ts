@@ -6,6 +6,8 @@ import { ApiError } from "@/lib/api/api-error";
 import { getAttemptDrafts, requireAttemptWriter } from "@/lib/exams/attempts";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
+import { rubricSourceForGrader } from "@/lib/grading/config";
+import { prepareLearnerProfilePlan, recordLearnerProfileUpdate } from "@/lib/learning/profile";
 
 type ClaimedItem = {
   id: string;
@@ -268,6 +270,7 @@ async function processItem(item: ClaimedItem) {
     }
 
     let submissionText = "";
+    let studentUserId = job.requested_by as string;
     if (job.kind === "practice_exam") {
       if (!attemptId) throw new Error("Practice job has no attempt");
       const drafts = await getAttemptDrafts(attemptId);
@@ -276,7 +279,7 @@ async function processItem(item: ClaimedItem) {
       if (!item.exam_submission_id) throw new Error("Official grading item has no submission");
       const { data: submission, error: submissionError } = await admin
         .from("exam_submissions")
-        .select("edited_text, graded_by")
+        .select("user_id, edited_text, graded_by")
         .eq("id", item.exam_submission_id)
         .single();
       if (submissionError || !submission) throw submissionError ?? new Error("Submission not found");
@@ -285,15 +288,28 @@ async function processItem(item: ClaimedItem) {
         await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
         return;
       }
+      studentUserId = submission.user_id;
       submissionText = submission.edited_text?.trim() ?? "";
     }
 
     if (!submissionText) throw new Error("Cannot AI-grade a blank answer");
     const isMock = process.env.USE_MOCK_GRADER === "true";
+    const rubricSource = rubricSourceForGrader(isMock);
     const client: ResponsesClient = isMock
       ? createMockClient({ taskType: category, marks: eq.marks, submission: submissionText })
       : (new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ResponsesClient);
-    const result = await grade(client, submissionText, category, eq.marks);
+    const rawResult = await grade(client, submissionText, category, eq.marks, {
+      rubricSource,
+    });
+    const profilePlan = await prepareLearnerProfilePlan({
+      client,
+      useMock: isMock,
+      userId: studentUserId,
+      category,
+      submission: submissionText,
+      result: rawResult,
+    });
+    const result = profilePlan.result;
 
     if (job.kind === "practice_exam") {
       await admin.rpc("finish_usage_charge", {
@@ -315,6 +331,17 @@ async function processItem(item: ClaimedItem) {
       .from("grading_job_items")
       .update({ status: "completed", result, last_error: null, updated_at: new Date().toISOString() })
       .eq("id", item.id);
+    try {
+      await recordLearnerProfileUpdate({
+        userId: studentUserId,
+        sourceKind: job.kind === "practice_exam" ? "practice_exam" : "official_exam",
+        sourceId: job.kind === "practice_exam" ? item.id : item.exam_submission_id!,
+        category,
+        plan: profilePlan,
+      });
+    } catch (profileError) {
+      console.error("Unable to record learner profile after exam grade", profileError);
+    }
     const { data: refreshed } = await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
     const refreshedJob = Array.isArray(refreshed) ? refreshed[0] : refreshed;
     if (job.kind === "practice_exam" && refreshedJob?.status === "completed") {

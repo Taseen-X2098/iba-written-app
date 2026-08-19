@@ -45,9 +45,11 @@ describe('AI Grading Utility', () => {
 
     const result = await grade(client, submission, 'essay', 10);
 
-    expect(result.internal.total).toBe(8);
-    expect(result.internal.criteria[0].marksAwarded).toBe(4);
-    expect(result.studentFeedback.score).toBe('8/10');
+    expect(result.internal.total).toBe(6.5);
+    expect(result.internal.normalizationVersion).toBe(1);
+    expect(result.internal).not.toHaveProperty('modelTotal');
+    expect(result.internal.criteria[0].marksAwarded).toBe(3.25);
+    expect(result.studentFeedback.score).toBe('6.5/10');
     // The highlight should be preserved because the quote is exactly in the submission
     expect(result.studentFeedback.highlights.length).toBe(1);
     expect(result.studentFeedback.highlights[0].quote).toBe('This is a verbatim sentence.');
@@ -126,8 +128,8 @@ describe('AI Grading Utility', () => {
 
     const client = createMockClient(mockResponse);
     const result = await grade(client, 'text', 'essay', 10);
-    // The utility just passes the string through to the UI
-    expect(result.studentFeedback.score).toBe('7.5/10');
+    expect(result.internal.total).toBe(5.5);
+    expect(result.studentFeedback.score).toBe('5.5/10');
   });
 
   it('should preserve multiple valid highlights', async () => {

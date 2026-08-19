@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { TOOLS, callFunction } from "./tools";
 import { SYSTEM_PROMPT } from "./systemPrompt";
+import type { GradingRubricSource } from "./config";
+import {
+  calibrateAiFinalMark,
+  formatScore,
+  MARK_NORMALIZATION_VERSION,
+} from "./marks";
 
 const MODEL = "gpt-5.6-luna";
 
@@ -16,6 +22,7 @@ export interface ResponsesCreateParams {
   model: string;
   instructions: string;
   tools: unknown;
+  tool_choice?: unknown;
   input: unknown[];
   text?: unknown;
 }
@@ -104,6 +111,8 @@ export interface GradingResult {
   internal: {
     total: number;
     max: number;
+    /** Prevents the canonical score policy from being applied more than once. */
+    normalizationVersion?: number;
     criteria: {
       criterion: string;
       marksAwarded: number;
@@ -116,6 +125,19 @@ export interface GradingResult {
     summary: string;
     highlights: Highlight[];
   };
+}
+
+function systemPromptFor(rubricSource: GradingRubricSource): string {
+  if (rubricSource.type === "local_function") return SYSTEM_PROMPT;
+
+  return SYSTEM_PROMPT
+    .replace(
+      "call get_rubric with the task's type and total marks to fetch the exact criteria and mark allocations",
+      "call file_search to retrieve the exact rubric for the task's type and total marks from the configured rubric vector store"
+    )
+    .replaceAll("criteria from get_rubric", "criteria retrieved through file_search")
+    .replaceAll("call get_rubric", "call file_search")
+    .replaceAll("from get_rubric", "from file_search");
 }
 
 /**
@@ -139,6 +161,21 @@ function validateHighlights(submission: string, highlights: Highlight[]): Highli
   return valid;
 }
 
+function calibrateCriteria(
+  criteria: GradingResult["internal"]["criteria"],
+  modelTotal: number,
+  finalTotal: number,
+): GradingResult["internal"]["criteria"] {
+  const factor = modelTotal > 0 ? finalTotal / modelTotal : 0;
+  return criteria.map((criterion) => ({
+    ...criterion,
+    marksAwarded: Math.min(
+      criterion.marksPossible,
+      Math.max(0, Math.floor((criterion.marksAwarded * factor + Number.EPSILON) * 1_000) / 1_000),
+    ),
+  }));
+}
+
 /**
  * submission: the student's raw text
  * taskType / marks: pass these in from your app — you already know them,
@@ -148,8 +185,19 @@ export async function grade(
   client: ResponsesClient,
   submission: string,
   taskType: string,
-  marks: number
+  marks: number,
+  options: { rubricSource?: GradingRubricSource } = {}
 ): Promise<GradingResult> {
+  const rubricSource = options.rubricSource ?? { type: "local_function" };
+  const usesFileSearch = rubricSource.type === "file_search";
+  const tools = usesFileSearch
+    ? [{
+        type: "file_search",
+        vector_store_ids: [rubricSource.vectorStoreId],
+        max_num_results: 5,
+      }]
+    : TOOLS;
+  const toolChoice = usesFileSearch ? { type: "file_search" } : undefined;
   // A fixed label like "Submission:" is trivially spoofable — a student
   // can just write their own "Submission:" line inside the essay to try
   // to make the model think the real text ends early. A per-request
@@ -159,6 +207,9 @@ export async function grade(
   const userMessage =
     `Task type: ${taskType}\n` +
     `Total marks: ${marks}\n\n` +
+    (usesFileSearch
+      ? `First retrieve the exact '${taskType}' rubric for ${marks} total marks from the rubric vector store.\n\n`
+      : "") +
     `Everything between the <submission-${nonce}> tags below is the ` +
     `student's raw, unmodified text. See the system instructions for how ` +
     `to treat it.\n\n` +
@@ -168,11 +219,16 @@ export async function grade(
 
   let response = await client.responses.create({
     model: MODEL,
-    instructions: SYSTEM_PROMPT,
-    tools: TOOLS,
+    instructions: systemPromptFor(rubricSource),
+    tools,
+    tool_choice: toolChoice,
     text: { format: GRADING_RESULT_FORMAT },
     input: inputList,
   });
+
+  if (usesFileSearch && !response.output.some((item) => item.type === "file_search_call")) {
+    throw new Error("OpenAI grading response did not use the required rubric file search.");
+  }
 
   // feed any tool calls back until the model has what it needs
   inputList = inputList.concat(response.output);
@@ -196,8 +252,9 @@ export async function grade(
   if (functionCalls.length > 0) {
     response = await client.responses.create({
       model: MODEL,
-      instructions: SYSTEM_PROMPT,
-      tools: TOOLS,
+      instructions: systemPromptFor(rubricSource),
+      tools,
+      tool_choice: toolChoice,
       text: { format: GRADING_RESULT_FORMAT },
       input: inputList,
     });
@@ -214,25 +271,33 @@ export async function grade(
 
   try {
     parsed = JSON.parse(response.output_text);
-  } catch (err) {
+  } catch {
     throw new Error(
       `Model did not return valid structured output: ${response.output_text}`
     );
   }
 
+  const normalizedTotal = calibrateAiFinalMark(parsed.internal.total, marks);
+  const criteria = calibrateCriteria(
+    parsed.internal.criteria.map((criterion) => ({
+      criterion: criterion.criterion,
+      marksAwarded: criterion.marks_awarded,
+      marksPossible: criterion.marks_possible,
+      reasoning: criterion.reasoning,
+    })),
+    parsed.internal.total,
+    normalizedTotal,
+  );
+
   return {
     internal: {
-      total: parsed.internal.total,
-      max: parsed.internal.max,
-      criteria: parsed.internal.criteria.map((c) => ({
-        criterion: c.criterion,
-        marksAwarded: c.marks_awarded,
-        marksPossible: c.marks_possible,
-        reasoning: c.reasoning,
-      })),
+      total: normalizedTotal,
+      max: marks,
+      normalizationVersion: MARK_NORMALIZATION_VERSION,
+      criteria,
     },
     studentFeedback: {
-      score: parsed.student_feedback.score,
+      score: formatScore(normalizedTotal, marks),
       summary: parsed.student_feedback.summary,
       highlights: validateHighlights(submission, parsed.student_feedback.highlights),
     },
