@@ -12,6 +12,7 @@
     "check": "npm run typecheck && npm run lint && npm test -- --runInBand && npm run build",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test --grep @smoke",
+    "eval:grading": "node --require ./scripts/tsx-userinfo-shim.js --import tsx ./scripts/run-grading-eval.ts",
     "lint": "eslint",
     "test": "jest"
   },

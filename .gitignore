@@ -17,6 +17,7 @@
 /playwright/.auth/
 /test-results/
 /playwright-report/
+/evaluation/grading/latest-report.json
 
 # next.js
 /.next/
