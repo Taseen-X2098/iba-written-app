@@ -103,6 +103,9 @@ describe("POST /api/ocr", () => {
       cached: false,
     }));
     expect(mockedExtract).not.toHaveBeenCalled();
+    expect(mockedReserve).toHaveBeenCalledWith(expect.objectContaining({
+      contextKey: `standalone:${QUESTION_ID}:0:processor:mock:v1`,
+    }));
     expect(mockedComplete).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
   });
 
@@ -143,6 +146,9 @@ describe("POST /api/ocr", () => {
       apiKey: "zai-real-key",
       dataUrl: expect.stringMatching(/^data:image\/png;base64,/),
       providerUserId: expect.stringMatching(/^user_[0-9a-f]{32}$/),
+    }));
+    expect(mockedReserve).toHaveBeenCalledWith(expect.objectContaining({
+      contextKey: `standalone:${QUESTION_ID}:0:processor:zai:glm-ocr:v1`,
     }));
   });
 

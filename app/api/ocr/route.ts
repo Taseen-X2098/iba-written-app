@@ -15,6 +15,7 @@ import { extractTextWithZai, ZaiOcrError } from "@/lib/ocr/zai";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
+const OCR_CACHE_VERSION = "v1";
 const MOCK_OCR_TEXT =
   "The quick brown fox jumps over the lazy dog. This is sample OCR text extracted from the uploaded image.";
 
@@ -71,10 +72,17 @@ export async function POST(request: Request) {
     const imageBytes = Buffer.from(await image.arrayBuffer());
     const imageSha256 = createHash("sha256").update(imageBytes).digest("hex");
     const reservationToken = randomUUID();
+    // A mock response must never satisfy a later real-provider request for the
+    // same image. Keep processor identity in the cache namespace so changing
+    // modes or OCR models cannot replay output produced by a different path.
+    const processorCacheKey = isMock
+      ? `mock:${OCR_CACHE_VERSION}`
+      : `zai:glm-ocr:${OCR_CACHE_VERSION}`;
 
     const reservation = await reserveOcrRequest({
       userId: user.id,
       ...context,
+      contextKey: `${context.contextKey}:processor:${processorCacheKey}`,
       imageSha256,
       requestToken: reservationToken,
     });
