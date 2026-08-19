@@ -37,7 +37,7 @@ describe("POST /api/grade word-limit enforcement", () => {
       body: JSON.stringify({
         questionId: QUESTION_ID,
         idempotencyKey: "30000000-0000-4000-8000-000000000003",
-        submissionText: "word ".repeat(121),
+        submissionText: "word ".repeat(141),
         ocrText: "",
         timeTakenSeconds: 60,
       }),
@@ -46,7 +46,7 @@ describe("POST /api/grade word-limit enforcement", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual(expect.objectContaining({
       code: "VALIDATION_ERROR",
-      details: { wordCount: 121, wordLimit: 120 },
+      details: { wordCount: 141, wordLimit: 140 },
     }));
     expect(rpc).not.toHaveBeenCalled();
   });

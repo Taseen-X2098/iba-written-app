@@ -6,14 +6,14 @@ import {
 
 describe("answer word limits", () => {
   it("uses the same limits displayed by the clients", () => {
-    expect(wordLimitForMarks(5)).toBe(60);
-    expect(wordLimitForMarks(6)).toBe(90);
-    expect(wordLimitForMarks(8)).toBe(90);
-    expect(wordLimitForMarks(9)).toBe(120);
-    expect(wordLimitForMarks(10)).toBe(120);
-    expect(wordLimitForMarks(11)).toBe(140);
-    expect(wordLimitForMarks(12)).toBe(140);
-    expect(wordLimitForMarks(13)).toBe(150);
+    expect(wordLimitForMarks(5)).toBe(80);
+    expect(wordLimitForMarks(6)).toBe(110);
+    expect(wordLimitForMarks(8)).toBe(110);
+    expect(wordLimitForMarks(9)).toBe(140);
+    expect(wordLimitForMarks(10)).toBe(140);
+    expect(wordLimitForMarks(11)).toBe(150);
+    expect(wordLimitForMarks(12)).toBe(150);
+    expect(wordLimitForMarks(13)).toBe(160);
     expect(wordLimitForMarks(14)).toBe(180);
     expect(wordLimitForMarks(15)).toBe(180);
   });
@@ -24,10 +24,10 @@ describe("answer word limits", () => {
   });
 
   it("reports only answers that exceed their question limit", () => {
-    expect(getWordLimitViolation("word ".repeat(120), 10)).toBeNull();
-    expect(getWordLimitViolation("word ".repeat(121), 10)).toEqual({
-      wordCount: 121,
-      wordLimit: 120,
+    expect(getWordLimitViolation("word ".repeat(140), 10)).toBeNull();
+    expect(getWordLimitViolation("word ".repeat(141), 10)).toEqual({
+      wordCount: 141,
+      wordLimit: 140,
     });
   });
 });

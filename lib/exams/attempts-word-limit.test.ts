@@ -21,7 +21,7 @@ describe("exam attempt word-limit enforcement", () => {
     await expect(assertAttemptDraftWordLimits("attempt-1", "exam-1", {
       "exam-question-1": {
         ocrText: "",
-        editedText: "word ".repeat(121),
+        editedText: "word ".repeat(141),
         updatedAt: "2026-08-20T00:00:00.000Z",
       },
     })).rejects.toEqual(expect.objectContaining({
@@ -31,8 +31,8 @@ describe("exam attempt word-limit enforcement", () => {
         violations: [{
           examQuestionId: "exam-question-1",
           questionNumber: 1,
-          wordCount: 121,
-          wordLimit: 120,
+          wordCount: 141,
+          wordLimit: 140,
         }],
       },
     }));
