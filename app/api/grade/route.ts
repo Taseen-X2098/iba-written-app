@@ -9,6 +9,7 @@ import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
 import { rubricSourceForGrader } from "@/lib/grading/config";
 import { prepareLearnerProfilePlan, recordLearnerProfileUpdate } from "@/lib/learning/profile";
+import { getWordLimitViolation } from "@/lib/answers/word-limit";
 
 const schema = z.object({
   questionId: z.string().uuid(),
@@ -35,6 +36,15 @@ export async function POST(request: NextRequest) {
       .single();
     if (questionError || !question) throw new ApiError("VALIDATION_ERROR", "Question not found", 404);
     if (question.category === "translation") throw new ApiError("VALIDATION_ERROR", "Translation requires manual review", 409);
+    const wordLimitViolation = getWordLimitViolation(input.submissionText, question.marks);
+    if (wordLimitViolation) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        `Answer exceeds the ${wordLimitViolation.wordLimit}-word limit (${wordLimitViolation.wordCount} words). Shorten it before submitting.`,
+        400,
+        wordLimitViolation,
+      );
+    }
     const useMockGrader = process.env.USE_MOCK_GRADER === "true";
     const rubricSource = rubricSourceForGrader(useMockGrader);
 

@@ -37,9 +37,11 @@ const mockedReserve = jest.mocked(reserveOcrRequest);
 const mockedComplete = jest.mocked(completeOcrRequest);
 const mockedExtract = jest.mocked(extractTextWithZai);
 
-function makeRequest() {
+function makeRequest(imageCount = 1) {
   const formData = new FormData();
-  formData.append("image", new File(["answer image"], "answer.png", { type: "image/png" }));
+  for (let index = 0; index < imageCount; index += 1) {
+    formData.append("image", new File([`answer image ${index}`], `answer-${index + 1}.png`, { type: "image/png" }));
+  }
   formData.append("questionId", QUESTION_ID);
   return new Request("http://localhost/api/ocr", { method: "POST", body: formData });
 }
@@ -107,6 +109,32 @@ describe("POST /api/ocr", () => {
       contextKey: `standalone:${QUESTION_ID}:0:processor:mock:v1`,
     }));
     expect(mockedComplete).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  });
+
+  it("rejects page photos above the server-resolved question limit", async () => {
+    process.env.Z_AI_MOCK = "true";
+
+    const response = await POST(makeRequest(3));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      code: "VALIDATION_ERROR",
+      details: { imageCount: 3, pageLimit: 2 },
+    }));
+    expect(mockedReserve).not.toHaveBeenCalled();
+  });
+
+  it("processes an allowed multi-page answer in one server-validated batch", async () => {
+    process.env.Z_AI_MOCK = "true";
+    const response = await POST(makeRequest(2));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      text: expect.stringMatching(/quick brown fox[\s\S]+quick brown fox/),
+      cached: false,
+    });
+    expect(mockedReserve).toHaveBeenCalledTimes(2);
+    expect(mockedComplete).toHaveBeenCalledTimes(2);
   });
 
   it("returns a duplicate image from cache without using the daily provider allowance", async () => {

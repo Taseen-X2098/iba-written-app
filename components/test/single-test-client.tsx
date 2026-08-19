@@ -12,6 +12,8 @@ import {
   loadEncryptedRecovery,
   saveEncryptedRecovery,
 } from "@/lib/exams/recovery-client";
+import { countWords, wordLimitForMarks } from "@/lib/answers/word-limit";
+import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import { CATEGORY_LABELS, type Question, type GradingResultJSON, type QuestionCategory } from "@/lib/types";
 import { HighlightedText } from "@/components/ui/highlighted-text";
 
@@ -32,7 +34,8 @@ interface Props {
 
 export default function SingleTestClient({ question, hasTestsAvailable }: Props) {
   const router = useRouter();
-  const maxWords = question.marks > 10 ? 250 : 150;
+  const maxWords = wordLimitForMarks(question.marks);
+  const maxImages = ANSWER_PAGE_LIMIT;
   const recoveryId = `standalone:${question.id}`;
   const [state, setState] = useState<TestState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -44,10 +47,12 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const gradingRequestIdRef = useRef<string | null>(null);
   
   // File upload state
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [showCamera, setShowCamera] = useState(false);
   const [ocrText, setOcrText] = useState("");
   const [editedText, setEditedText] = useState("");
+  const editedWordCount = countWords(editedText);
+  const exceedsWordLimit = editedWordCount > maxWords;
   
   // Grading state
   const [gradingResult, setGradingResult] = useState<GradingResultJSON | null>(null);
@@ -175,9 +180,17 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+    if (!e.target.files?.length) return;
+    const files = Array.from(e.target.files);
+    const violation = getPageLimitViolation(files.length);
+    if (violation) {
+      setError(`Maximum ${answerPageLabel()}. Select fewer photos.`);
+      e.target.value = "";
+      return;
     }
+    setError(null);
+    setSelectedFiles(files);
+    e.target.value = "";
   };
 
   const handlePauseToggle = () => {
@@ -205,16 +218,21 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     }
   };
 
-  const handleUploadAndOcr = async (fileOverride?: File) => {
-    const file = fileOverride ?? selectedFile;
-    if (!file) return;
+  const handleUploadAndOcr = async (fileOverride?: File[] | FileList) => {
+    const files = Array.from(fileOverride ?? selectedFiles);
+    if (!files.length) return;
+    const violation = getPageLimitViolation(files.length);
+    if (violation) {
+      setError(`Maximum ${answerPageLabel()}. Select fewer photos.`);
+      return;
+    }
     const returnState: TestState = state === "editing" ? "editing" : "running";
     setError(null);
     setState("uploading");
     
     try {
       const formData = new FormData();
-      formData.append("image", file);
+      for (const file of files) formData.append("image", file);
       formData.append("questionId", question.id);
       
       setState("ocr_processing");
@@ -233,7 +251,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       }).catch(() => undefined);
       setOcrText(data.text);
       setEditedText(data.text);
-      setSelectedFile(null);
+      setSelectedFiles([]);
       setState("editing");
     } catch (err: any) {
       setError(err.message);
@@ -244,6 +262,10 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const handleSubmitForGrading = async () => {
     if (!editedText.trim()) {
       setError("Text cannot be empty");
+      return;
+    }
+    if (exceedsWordLimit) {
+      setError(`Your answer is ${editedWordCount} words. Shorten it to ${maxWords} words before submitting.`);
       return;
     }
     
@@ -304,14 +326,14 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
         <h1 className="text-xl md:text-2xl font-bold text-foreground leading-snug">
           {question.prompt}
         </h1>
-        {question.space_hint && (
-          <p className="mt-3 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800">
-            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-            <span>
-              {question.space_hint}. That space allowance is why the total word limit for this question is {maxWords} words.
-            </span>
-          </p>
-        )}
+        <div className="mt-3 flex items-start gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+          <span>
+            <strong>Hard answer limits: {maxWords} words and maximum {answerPageLabel()}.</strong>{" "}
+            {question.space_hint ? `${question.space_hint}. ` : ""}
+            You may use one or two sheets. If you use two, upload both page photos together. A third photo will be rejected.
+          </span>
+        </div>
       </div>
 
       {error && (
@@ -330,7 +352,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
             </div>
             <h3 className="text-lg font-bold text-foreground mb-2">Ready to practice?</h3>
             <p className="text-sm text-muted-foreground max-w-md mb-8 leading-relaxed">
-              When you start, a timer will begin. Write your answer on a physical piece of paper, then upload a photo when you&apos;re done.
+              When you start, a timer will begin. Your answer must stay within {maxWords} words and {answerPageLabel()}.
             </p>
             <button
               onClick={handleStart}
@@ -383,7 +405,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
             <p className="text-sm text-muted-foreground mb-8">
               {state === "paused" 
                 ? "Test is paused. Your time has been suspended."
-                : "Write your answer on paper. The timer is running."}
+                : `Write within ${maxWords} words and ${answerPageLabel()}. The timer is running.`}
             </p>
             
             <div className={`w-full max-w-md ${state === "paused" ? "opacity-50 pointer-events-none" : ""}`}>
@@ -391,7 +413,14 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                 <div className="mb-8">
                   <WebcamCapture 
                     onCapture={(file) => {
-                      setSelectedFile(file);
+                      const nextFiles = [...selectedFiles, file];
+                      const violation = getPageLimitViolation(nextFiles.length);
+                      if (violation) {
+                        setError(`Maximum ${answerPageLabel()}. Remove a selected photo before taking another.`);
+                      } else {
+                        setError(null);
+                        setSelectedFiles(nextFiles);
+                      }
                       setShowCamera(false);
                     }}
                     onCancel={() => setShowCamera(false)}
@@ -440,6 +469,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       onChange={handleFileSelect}
                       className="hidden"
                       id="file-upload-gallery"
@@ -463,20 +493,27 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
               )}
             </div>
             
-            {selectedFile && (
+            {selectedFiles.length > 0 && (
               <div className="mt-6 flex flex-col items-center gap-4 w-full max-w-sm">
-                <div className="w-full bg-brand-50 border border-brand-200 rounded-lg p-3 flex items-center justify-between">
-                  <span className="text-sm text-brand-700 truncate">{selectedFile.name}</span>
-                  <button onClick={() => setSelectedFile(null)} className="text-brand-700 hover:text-brand-800">
-                    <X size={16} />
-                  </button>
+                <div className="w-full rounded-lg border border-brand-200 bg-brand-50 p-3">
+                  <p className="mb-2 text-xs font-bold text-brand-800">{selectedFiles.length} of {maxImages} page photos selected</p>
+                  <div className="space-y-2">
+                    {selectedFiles.map((file, index) => (
+                      <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3">
+                        <span className="truncate text-sm text-brand-700">Page {index + 1}: {file.name}</span>
+                        <button onClick={() => setSelectedFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="text-brand-700 hover:text-brand-800" aria-label={`Remove page ${index + 1}`}>
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <button
                   onClick={() => void handleUploadAndOcr()}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
                              hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
                 >
-                  Process Image <ArrowRight size={16} />
+                  Process {selectedFiles.length} Page Photo{selectedFiles.length === 1 ? "" : "s"} <ArrowRight size={16} />
                 </button>
               </div>
             )}
@@ -487,11 +524,11 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
           <div className="flex-1 flex flex-col items-center justify-center text-center py-12 animate-fade-in">
             <Loader2 size={48} className="text-brand-500 animate-spin mb-6" />
             <h3 className="text-lg font-bold text-foreground mb-2">
-              {state === "uploading" ? "Uploading image..." : "Extracting text..."}
+              {state === "uploading" ? "Uploading page photos..." : "Extracting text..."}
             </h3>
             <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
               {state === "uploading" 
-                ? "Sending your photo securely." 
+                ? "Sending your page photos securely."
                 : "Our AI is reading your handwriting. This usually takes 5-10 seconds."}
             </p>
           </div>
@@ -515,33 +552,28 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
               <WebcamCapture
                 onCapture={(file) => {
                   setShowCamera(false);
-                  void handleUploadAndOcr(file);
+                  void handleUploadAndOcr([file]);
                 }}
                 onCancel={() => setShowCamera(false)}
               />
             ) : (
               <>
-                {(() => {
-                  const currentWords = editedText.trim() === "" ? 0 : editedText.trim().split(/\s+/).length;
-
-                  return (
-                    <>
-                      <textarea
-                        value={editedText}
-                        onChange={(e) => setEditedText(e.target.value)}
-                        className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
-                                   focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
-                        placeholder="Your answer will appear here..."
-                      />
-                      <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
-                        <span>Running OCR on a new image will replace the text in this editor.</span>
-                        <span className={currentWords >= maxWords ? "text-red-500 font-medium" : ""}>
-                          {currentWords} / {maxWords} words
-                        </span>
-                      </div>
-                    </>
-                  );
-                })()}
+                <textarea
+                  value={editedText}
+                  onChange={(event) => {
+                    setEditedText(event.target.value);
+                    setError(null);
+                  }}
+                  className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
+                             focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
+                  placeholder="Your answer will appear here..."
+                />
+                <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
+                  <span>Running OCR on a new image will replace the text in this editor.</span>
+                  <span className={exceedsWordLimit ? "text-red-500 font-bold" : ""}>
+                    {editedWordCount} / {maxWords} words
+                  </span>
+                </div>
 
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
                   <button
@@ -561,19 +593,22 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                     id="ocr-retry-upload"
                     type="file"
                     accept="image/*"
+                    multiple
                     className="hidden"
                     onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
+                      const files = event.currentTarget.files;
                       event.currentTarget.value = "";
-                      if (file) void handleUploadAndOcr(file);
+                      if (files?.length) void handleUploadAndOcr(files);
                     }}
                   />
                   <button
                     onClick={handleSubmitForGrading}
+                    disabled={exceedsWordLimit}
                     className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
-                               hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
+                               hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Submit for Grading <Sparkles size={16} />
+                    {exceedsWordLimit ? `Remove ${editedWordCount - maxWords} word${editedWordCount - maxWords === 1 ? "" : "s"}` : "Submit for Grading"}
+                    {!exceedsWordLimit && <Sparkles size={16} />}
                   </button>
                 </div>
               </>

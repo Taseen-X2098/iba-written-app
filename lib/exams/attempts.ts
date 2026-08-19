@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
+import { getWordLimitViolation } from "@/lib/answers/word-limit";
 import type {
   AttemptDrafts,
   AttemptQuestion,
@@ -28,6 +29,38 @@ export function writerTokenMatches(token: string, expectedHash: string) {
 
 export async function getAttemptDrafts(attemptId: string) {
   return (await getRedis().hgetall<AttemptDrafts>(CacheKeys.attemptDrafts(attemptId))) ?? {};
+}
+
+export async function assertAttemptDraftWordLimits(
+  attemptId: string,
+  examId: string,
+  drafts?: AttemptDrafts,
+) {
+  const resolvedDrafts = drafts ?? await getAttemptDrafts(attemptId);
+  const admin = await createAdminClient();
+  const { data: questions, error } = await admin
+    .from("exam_questions")
+    .select("id, marks, order_index")
+    .eq("exam_id", examId)
+    .order("order_index", { ascending: true });
+  if (error) throw error;
+
+  const violations = (questions ?? []).flatMap((question) => {
+    const violation = getWordLimitViolation(resolvedDrafts[question.id]?.editedText ?? "", question.marks);
+    return violation
+      ? [{ examQuestionId: question.id, questionNumber: question.order_index + 1, ...violation }]
+      : [];
+  });
+  if (violations.length) {
+    const first = violations[0];
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      `Question ${first.questionNumber} exceeds the ${first.wordLimit}-word limit (${first.wordCount} words). Shorten it before submitting.`,
+      400,
+      { violations },
+    );
+  }
+  return resolvedDrafts;
 }
 
 function normalizeAttempt(data: unknown): ExamAttempt & { writer_token_hash: string } {
@@ -219,12 +252,25 @@ export async function saveAttemptDrafts(input: {
   const ids = [...new Set(input.answers.map((answer) => answer.examQuestionId))];
   const { data: validRows, error } = await admin
     .from("exam_questions")
-    .select("id")
+    .select("id, marks")
     .eq("exam_id", attempt.exam_id)
     .in("id", ids);
   if (error) throw error;
   if ((validRows?.length ?? 0) !== ids.length) {
     throw new ApiError("VALIDATION_ERROR", "One or more questions do not belong to this exam", 400);
+  }
+  const marksById = new Map((validRows ?? []).map((row) => [row.id, row.marks]));
+  for (const answer of input.answers) {
+    const marks = marksById.get(answer.examQuestionId);
+    const violation = marks === undefined ? null : getWordLimitViolation(answer.editedText, marks);
+    if (violation) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        `Answer exceeds the ${violation.wordLimit}-word limit (${violation.wordCount} words). Shorten it before saving.`,
+        400,
+        { examQuestionId: answer.examQuestionId, ...violation },
+      );
+    }
   }
 
   const redis = getRedis();

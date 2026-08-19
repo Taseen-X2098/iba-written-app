@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
 import {
+  assertAttemptDraftWordLimits,
   getAttempt,
   getAttemptDrafts,
   getAvailableTestSlots,
@@ -31,7 +32,7 @@ export async function finalizeOfficialAttempt(input: {
 
   const admin = await createAdminClient();
   const redis = getRedis();
-  const drafts = await getAttemptDrafts(attempt.id);
+  const drafts = await assertAttemptDraftWordLimits(attempt.id, attempt.exam_id);
   const { data: finalizedData, error: finalizeError } = await admin.rpc("finalize_exam_attempt", {
     p_attempt_id: attempt.id,
     p_user_id: input.userId ?? null,
@@ -54,6 +55,17 @@ export async function lockPracticeAttempt(input: {
   userId: string;
   writerToken: string;
 }) {
+  const writableAttempt = await requireAttemptWriter(input.attemptId, input.userId, input.writerToken);
+  if (
+    writableAttempt.mode !== "practice"
+    || !["active", "awaiting_selection", "grading"].includes(writableAttempt.status)
+  ) {
+    throw new ApiError("ATTEMPT_NOT_ACTIVE", "Practice attempt is no longer active", 409);
+  }
+  if (writableAttempt.status === "active") {
+    await assertAttemptDraftWordLimits(writableAttempt.id, writableAttempt.exam_id);
+  }
+
   const admin = await createAdminClient();
   const { data: attemptData, error: lockError } = await admin.rpc("lock_practice_attempt", {
     p_attempt_id: input.attemptId,

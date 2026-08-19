@@ -3,7 +3,11 @@ import { OpenAI } from "openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
-import { getAttemptDrafts, requireAttemptWriter } from "@/lib/exams/attempts";
+import {
+  assertAttemptDraftWordLimits,
+  getAttemptDrafts,
+  requireAttemptWriter,
+} from "@/lib/exams/attempts";
 import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
 import { rubricSourceForGrader } from "@/lib/grading/config";
@@ -64,6 +68,7 @@ export async function createPracticeGradingJob(input: {
   if (liveJobs?.[0]) return { jobId: liveJobs[0].id, status: liveJobs[0].status };
 
   const drafts = await getAttemptDrafts(attempt.id);
+  await assertAttemptDraftWordLimits(attempt.id, attempt.exam_id, drafts);
   const { data: questions, error: questionError } = await admin
     .from("exam_questions")
     .select("id, questions(category)")

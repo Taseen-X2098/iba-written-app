@@ -16,6 +16,8 @@ import {
   Upload,
 } from "lucide-react";
 import { WebcamCapture } from "@/components/ui/webcam-capture";
+import { countWords, getWordLimitViolation, wordLimitForMarks } from "@/lib/answers/word-limit";
+import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
 import type {
   AttemptDrafts,
@@ -100,6 +102,9 @@ export default function ExamTakerClient({
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobItems, setJobItems] = useState<JobItem[] | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const hasOverLimitAnswers = examQuestions.some((question) =>
+    Boolean(getWordLimitViolation(answers[question.id]?.editedText ?? "", question.marks)),
+  );
   const expiryTriggered = useRef(false);
   const completionInFlight = useRef(false);
 
@@ -197,8 +202,13 @@ export default function ExamTakerClient({
         return await persistEntries(entries);
       } catch (error) {
         console.error(error);
+        const message = error instanceof Error ? error.message : "Draft save failed";
+        const failedIds = new Set(entries.map(([id]) => id));
         setAnswers((current) => Object.fromEntries(
-          Object.entries(current).map(([id, answer]) => [id, { ...answer, saving: false }]),
+          Object.entries(current).map(([id, answer]) => [
+            id,
+            failedIds.has(id) ? { ...answer, saving: false, error: message } : { ...answer, saving: false },
+          ]),
         ));
         return false;
       } finally {
@@ -227,11 +237,27 @@ export default function ExamTakerClient({
 
   const completeAttempt = useCallback(async () => {
     if (completionInFlight.current) return;
+    const expired = Date.now() >= new Date(attempt.expires_at).getTime();
+    const overLimitQuestions = examQuestions.flatMap((question, index) => {
+      const violation = getWordLimitViolation(
+        answersRef.current[question.id]?.editedText ?? "",
+        question.marks,
+      );
+      return violation ? [{ questionNumber: index + 1, ...violation }] : [];
+    });
+    if (!expired && overLimitQuestions.length) {
+      const questionList = overLimitQuestions.map((item) => item.questionNumber).join(", ");
+      setReadOnlyReason(`Shorten the over-limit answer${overLimitQuestions.length === 1 ? "" : "s"} for question${overLimitQuestions.length === 1 ? "" : "s"} ${questionList} before submitting.`);
+      return;
+    }
     completionInFlight.current = true;
     setLocked(true);
     setIsSubmitting(true);
     try {
-      await saveRef.current();
+      const saved = await saveRef.current();
+      if (!saved && !expired) {
+        throw new Error("Save the corrected answers before submitting.");
+      }
       const response = await fetch(`/api/exam-attempts/${attempt.id}/complete`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -261,7 +287,7 @@ export default function ExamTakerClient({
       completionInFlight.current = false;
       setIsSubmitting(false);
     }
-  }, [attempt.expires_at, attempt.id, exam.id, isPractice, router, writerToken]);
+  }, [attempt.expires_at, attempt.id, exam.id, examQuestions, isPractice, router, writerToken]);
 
   const completeRef = useRef(completeAttempt);
   useEffect(() => {
@@ -298,24 +324,33 @@ export default function ExamTakerClient({
   }, [attempt.expires_at, attempt.id, exam.id, exam.title, isPractice]);
 
   async function handleFileUpload(questionId: string, files: FileList | File[]) {
+    const question = examQuestions.find((item) => item.id === questionId);
+    const selectedFiles = Array.from(files);
+    const violation = getPageLimitViolation(selectedFiles.length);
+    if (!question || !selectedFiles.length || violation) {
+      const message = violation
+        ? `Maximum ${answerPageLabel()}. Select fewer photos.`
+        : "Select at least one page photo.";
+      setAnswers((current) => ({
+        ...current,
+        [questionId]: { ...current[questionId], uploading: false, error: message },
+      }));
+      return;
+    }
     setAnswers((current) => ({
       ...current,
       [questionId]: { ...current[questionId], uploading: true, error: undefined },
     }));
     try {
-      const extracted: string[] = [];
-      for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.append("image", file);
-        formData.append("attemptId", attempt.id);
-        formData.append("examQuestionId", questionId);
-        formData.append("writerToken", writerToken);
-        const response = await fetch("/api/ocr", { method: "POST", body: formData });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "OCR failed");
-        extracted.push(data.text);
-      }
-      const editedText = extracted.join("\n\n");
+      const formData = new FormData();
+      for (const file of selectedFiles) formData.append("image", file);
+      formData.append("attemptId", attempt.id);
+      formData.append("examQuestionId", questionId);
+      formData.append("writerToken", writerToken);
+      const response = await fetch("/api/ocr", { method: "POST", body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "OCR failed");
+      const editedText = data.text;
       setAnswers((current) => ({
         ...current,
         [questionId]: {
@@ -344,7 +379,7 @@ export default function ExamTakerClient({
     if (locked) return;
     setAnswers((current) => ({
       ...current,
-      [questionId]: { ...current[questionId], editedText: text, isDirty: true },
+      [questionId]: { ...current[questionId], editedText: text, isDirty: true, error: undefined },
     }));
   }
 
@@ -550,8 +585,9 @@ export default function ExamTakerClient({
         {examQuestions.map((question, index) => {
           const answer = answers[question.id];
           if (!answer) return null;
-          const maxWords = question.marks > 10 ? 250 : 150;
-          const wordCount = answer.editedText.trim() ? answer.editedText.trim().split(/\s+/).length : 0;
+          const maxWords = wordLimitForMarks(question.marks);
+          const wordCount = countWords(answer.editedText);
+          const maxImages = ANSWER_PAGE_LIMIT;
           return (
             <section key={question.id} className="rounded-2xl border border-border bg-card p-6">
               <div className="mb-4 flex items-start justify-between gap-3">
@@ -567,14 +603,14 @@ export default function ExamTakerClient({
                   Translation is available for self-study but is not AI graded and does not use a test slot.
                 </div>
               )}
-              {question.questions.space_hint && (
-                <p className="mb-5 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800">
-                  <CheckCircle size={16} className="mt-0.5 shrink-0" />
-                  <span>
-                    {question.questions.space_hint}. That space allowance is why the total word limit for this question is {maxWords} words.
-                  </span>
-                </p>
-              )}
+              <div className="mb-5 flex items-start gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <CheckCircle size={16} className="mt-0.5 shrink-0" />
+                <span>
+                  <strong>Hard answer limits: {maxWords} words and maximum {answerPageLabel()}.</strong>{" "}
+                  {question.questions.space_hint ? `${question.questions.space_hint}. ` : ""}
+                  You may use one or two sheets. If you use two, upload both page photos together. A third photo will be rejected.
+                </span>
+              </div>
 
               {answer.uploading ? (
                 <div className="flex flex-col items-center rounded-xl border border-border bg-muted/30 p-12">
@@ -598,8 +634,8 @@ export default function ExamTakerClient({
                     <Camera className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Take Photo</span>
                   </button>
                   <label className={`rounded-xl border-2 border-dashed border-border p-6 text-center ${locked ? "opacity-50" : "cursor-pointer"}`}>
-                    <ImageIcon className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Upload Image</span>
-                    <input type="file" accept="image/*" multiple={question.questions.max_images > 1} disabled={locked} className="hidden" onChange={(event) => {
+                    <ImageIcon className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Upload Page Photos</span><span className="mt-1 block text-[10px] text-muted-foreground">Maximum {maxImages}</span>
+                    <input type="file" accept="image/*" multiple disabled={locked} className="hidden" onChange={(event) => {
                       if (event.target.files?.length) void handleFileUpload(question.id, event.target.files);
                       event.currentTarget.value = "";
                     }} />
@@ -620,11 +656,11 @@ export default function ExamTakerClient({
                   </div>
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <button type="button" disabled={locked} onClick={() => setActiveCameraId(question.id)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold disabled:opacity-50">
-                      <Camera size={14} /> Take Another Photo
+                      <Camera size={14} /> Replace with Camera Photo
                     </button>
                     <label className={`inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold ${locked ? "opacity-50" : "cursor-pointer"}`}>
                       <ImageIcon size={14} /> Upload Another Image
-                      <input type="file" accept="image/*" multiple={question.questions.max_images > 1} disabled={locked} className="hidden" onChange={(event) => {
+                      <input type="file" accept="image/*" multiple disabled={locked} className="hidden" onChange={(event) => {
                         if (event.currentTarget.files?.length) void handleFileUpload(question.id, event.currentTarget.files);
                         event.currentTarget.value = "";
                       }} />
@@ -646,9 +682,9 @@ export default function ExamTakerClient({
           <button type="button" disabled={locked || isSavingAll || !Object.values(answers).some((answer) => answer.isDirty)} onClick={() => void saveDrafts()} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 font-bold disabled:opacity-50">
             {isSavingAll ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} Save Changes
           </button>
-          <button type="button" disabled={locked || isSubmitting} onClick={() => void completeAttempt()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-8 py-3 font-bold text-white disabled:opacity-50">
+          <button type="button" disabled={locked || isSubmitting || hasOverLimitAnswers} onClick={() => void completeAttempt()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-8 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
             {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
-            {isSubmitting ? "Finalizing…" : isPractice ? "Finish Practice" : "Submit Exam"}
+            {isSubmitting ? "Finalizing…" : hasOverLimitAnswers ? "Shorten Over-Limit Answers" : isPractice ? "Finish Practice" : "Submit Exam"}
           </button>
         </div>
       </div>

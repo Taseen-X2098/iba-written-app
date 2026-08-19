@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
       marks,
       source: source || null,
       space_hint: spaceHint || null,
+      max_images: 2,
       is_active: true,
       created_by: user.id
     })
@@ -87,6 +88,7 @@ export async function PATCH(req: NextRequest) {
       marks,
       source: source || null,
       space_hint: spaceHint || null,
+      max_images: 2,
     })
     .eq("id", id);
 
