@@ -17,3 +17,18 @@ export function formatMark(value: number): string {
 export function formatScore(earned: number, maximum: number): string {
   return `${formatMark(earned)}/${formatMark(maximum)}`;
 }
+
+/** Formats score strings persisted by older grading results for display. */
+export function formatStoredScore(score: unknown, fallbackMaximum?: number): string | undefined {
+  if (typeof score !== "string" && typeof score !== "number") return undefined;
+
+  const [earnedPart, maximumPart] = String(score).split("/", 2);
+  const earned = Number(earnedPart.trim());
+  const maximum = Number((maximumPart ?? "").trim() || fallbackMaximum);
+
+  if (!Number.isFinite(earned) || !Number.isFinite(maximum)) {
+    return String(score);
+  }
+
+  return formatScore(earned, maximum);
+}

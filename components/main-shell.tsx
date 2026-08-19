@@ -25,6 +25,7 @@ import type { Profile, Subscription } from "@/lib/types";
 import { messaging } from "@/lib/firebase";
 import { getToken } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
+import { NavigationLoadingOverlay } from "@/components/ui/navigation-loading-overlay";
 
 // ─── Tab Configuration ────────────────────────────────────────────────────
 
@@ -287,6 +288,7 @@ export default function MainShell({
                 {active && (
                   <div className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-500" />
                 )}
+                <NavigationLoadingOverlay />
               </Link>
             );
           })}
@@ -431,6 +433,7 @@ export default function MainShell({
                 <link.icon size={18} />
                 {link.label}
                 <ChevronRight size={14} className="ml-auto opacity-40" />
+                <NavigationLoadingOverlay />
               </Link>
             );
           })}
@@ -636,6 +639,7 @@ export default function MainShell({
                   {active && (
                     <div className="h-0.5 w-5 rounded-full bg-brand-500 -mt-0.5" />
                   )}
+                  <NavigationLoadingOverlay />
                 </Link>
               );
             })}

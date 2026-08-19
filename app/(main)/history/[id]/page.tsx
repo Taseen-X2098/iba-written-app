@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { FileText, Clock, Calendar, ArrowLeft } from "lucide-react";
 import { HighlightedText } from "@/components/ui/highlighted-text";
 import { CATEGORY_LABELS } from "@/lib/types";
+import { formatStoredScore } from "@/lib/grading/marks";
 import Link from "next/link";
 
 export default async function HistoryDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -43,7 +44,7 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
   const question = Array.isArray(sub.questions) ? sub.questions[0] : sub.questions;
   const studentFeedback = result?.studentFeedback || result?.student_feedback;
   const scoreStr = studentFeedback?.score || (result?.marks ? `${result.marks}/${question.marks || 10}` : undefined);
-  const scoreParts = scoreStr ? scoreStr.split("/") : ["?", "?"];
+  const scoreParts = formatStoredScore(scoreStr, question.marks || 10)?.split("/") || ["?", "?"];
   const summaryText = studentFeedback?.summary || (result?.marks ? "This is a mock summary from test-db." : "No summary available.");
 
   const formatTime = (seconds: number) => {

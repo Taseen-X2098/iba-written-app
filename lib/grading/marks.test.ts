@@ -1,4 +1,4 @@
-import { calibrateAiFinalMark, floorMarkToHalf, formatScore } from "./marks";
+import { calibrateAiFinalMark, floorMarkToHalf, formatScore, formatStoredScore } from "./marks";
 
 describe("mark normalization", () => {
   it.each([
@@ -26,5 +26,10 @@ describe("mark normalization", () => {
   it("formats integer and half marks consistently", () => {
     expect(formatScore(5.5, 10)).toBe("5.5/10");
     expect(formatScore(4, 5)).toBe("4/5");
+  });
+
+  it("normalizes persisted score strings for display", () => {
+    expect(formatStoredScore("8.0000000000000000/12")).toBe("8/12");
+    expect(formatStoredScore("5.5000000000000000", 10)).toBe("5.5/10");
   });
 });

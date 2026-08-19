@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Calendar, Clock } from "lucide-react";
 import { CATEGORY_LABELS } from "@/lib/types";
+import { formatStoredScore } from "@/lib/grading/marks";
 
 export function HistoryClientCard({ sub }: { sub: any }) {
 
@@ -10,7 +11,7 @@ export function HistoryClientCard({ sub }: { sub: any }) {
   const question = sub.questions;
   const studentFeedback = result?.studentFeedback || result?.student_feedback;
   const scoreStr = studentFeedback?.score || (result?.marks ? `${result.marks}/${question.marks || 10}` : undefined);
-  const scoreParts = scoreStr ? scoreStr.split("/") : ["?", "?"];
+  const scoreParts = formatStoredScore(scoreStr, question.marks || 10)?.split("/") || ["?", "?"];
   const summaryText = studentFeedback?.summary || (result?.marks ? "This is a mock summary from test-db." : "No summary available.");
 
   const formatTime = (seconds: number) => {
