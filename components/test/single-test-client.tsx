@@ -3,10 +3,15 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
-  Play, Upload, FileText, CheckCircle2, AlertCircle, 
-  Clock, X, Loader2, ArrowRight, ChevronRight, PenLine, Sparkles, Camera
+  Play, FileText, CheckCircle2, AlertCircle,
+  X, Loader2, ArrowRight, PenLine, Sparkles, Camera
 } from "lucide-react";
 import { WebcamCapture } from "@/components/ui/webcam-capture";
+import {
+  clearEncryptedRecovery,
+  loadEncryptedRecovery,
+  saveEncryptedRecovery,
+} from "@/lib/exams/recovery-client";
 import { CATEGORY_LABELS, type Question, type GradingResultJSON, type QuestionCategory } from "@/lib/types";
 import { HighlightedText } from "@/components/ui/highlighted-text";
 
@@ -27,6 +32,8 @@ interface Props {
 
 export default function SingleTestClient({ question, hasTestsAvailable }: Props) {
   const router = useRouter();
+  const maxWords = question.marks > 10 ? 250 : 150;
+  const recoveryId = `standalone:${question.id}`;
   const [state, setState] = useState<TestState>("idle");
   const [error, setError] = useState<string | null>(null);
   
@@ -45,44 +52,70 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   // Grading state
   const [gradingResult, setGradingResult] = useState<GradingResultJSON | null>(null);
 
-  // Initialize from localStorage
+  // Restore timer metadata plus the encrypted answer recovery for this tab.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("in_progress_test");
-      if (saved) {
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const saved = localStorage.getItem("in_progress_test");
+        if (!saved) return;
         const parsed = JSON.parse(saved);
-        
-        // Expire after 1 hour (3600000 ms) of inactivity
+
+        // Expire after 1 hour (3600000 ms) of inactivity.
         if (Date.now() - parsed.lastUpdatedAt > 3600000) {
           localStorage.removeItem("in_progress_test");
+          clearEncryptedRecovery(recoveryId);
+          window.dispatchEvent(new Event("in_progress_test_updated"));
           return;
         }
 
-        if (parsed.questionId === question.id) {
-          if (parsed.state === "running") {
-            const currentElapsed = parsed.secondsElapsed + Math.floor((Date.now() - parsed.lastUpdatedAt) / 1000);
+        if (parsed.questionId !== question.id) return;
+        if (parsed.state === "running") {
+          const currentElapsed = parsed.secondsElapsed + Math.floor((Date.now() - parsed.lastUpdatedAt) / 1000);
+          if (!cancelled) {
             setSecondsElapsed(currentElapsed);
             setState("running");
-          } else if (parsed.state === "paused") {
+          }
+        } else if (parsed.state === "paused") {
+          if (!cancelled) {
             setSecondsElapsed(parsed.secondsElapsed);
             setState("paused");
           }
+        } else if (parsed.state === "editing") {
+          const recovered = await loadEncryptedRecovery(recoveryId);
+          const answer = recovered[question.id];
+          if (!cancelled) {
+            setSecondsElapsed(parsed.secondsElapsed);
+            if (answer) {
+              setOcrText(answer.ocrText);
+              setEditedText(answer.editedText);
+              setState("editing");
+            } else {
+              setState("paused");
+              setError("The saved answer could not be recovered in this tab.");
+            }
+          }
         }
+      } catch {
+        // Ignore malformed or unavailable recovery data.
       }
-    } catch (e) {
-      // ignore
-    }
-  }, [question.id]);
+    };
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [question.id, recoveryId]);
 
   useEffect(() => {
     secondsRef.current = secondsElapsed;
   }, [secondsElapsed]);
 
-  // Persist timer checkpoints without writing localStorage or waking the shell
-  // on every one-second tick.
+  // Persist stable workflow checkpoints without writing localStorage on every
+  // one-second timer tick. In-flight OCR/grading falls back to the last stable
+  // running or editing checkpoint after a refresh.
   useEffect(() => {
     const persist = () => {
-      if (state !== "running" && state !== "paused") return;
+      if (state !== "running" && state !== "paused" && state !== "editing") return;
       const payload = {
         questionId: question.id,
         prompt: question.prompt,
@@ -99,6 +132,19 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     const checkpoint = window.setInterval(persist, 15_000);
     return () => window.clearInterval(checkpoint);
   }, [state, question]);
+
+  // Keep answer text out of plaintext localStorage. The encrypted payload is
+  // recoverable across refreshes in this tab because its key lives only in
+  // sessionStorage, matching the full-exam recovery behavior.
+  useEffect(() => {
+    if (state !== "editing") return;
+    const timeout = window.setTimeout(() => {
+      void saveEncryptedRecovery(recoveryId, {
+        [question.id]: { ocrText, editedText },
+      });
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [editedText, ocrText, question.id, recoveryId, state]);
 
   // Timer logic
   useEffect(() => {
@@ -152,6 +198,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const handleCancelSession = () => {
     if (confirm("Are you sure you want to cancel this session? Your timer will be reset and removed from history.")) {
       localStorage.removeItem("in_progress_test");
+      clearEncryptedRecovery(recoveryId);
       window.dispatchEvent(new Event("in_progress_test_updated"));
       setSecondsElapsed(0);
       setState("idle");
@@ -178,7 +225,12 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "OCR failed");
-      
+
+      // Finish the recovery write before exposing the editor so an immediate
+      // refresh cannot lose a successful OCR result.
+      await saveEncryptedRecovery(recoveryId, {
+        [question.id]: { ocrText: data.text, editedText: data.text },
+      }).catch(() => undefined);
       setOcrText(data.text);
       setEditedText(data.text);
       setSelectedFile(null);
@@ -223,6 +275,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       
       // Clear localStorage on success
       localStorage.removeItem("in_progress_test");
+      clearEncryptedRecovery(recoveryId);
       window.dispatchEvent(new Event("in_progress_test_updated"));
       
       // Tell Next.js router to refresh so the user's slot count updates
@@ -252,8 +305,11 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
           {question.prompt}
         </h1>
         {question.space_hint && (
-          <p className="mt-2 text-sm text-muted-foreground italic flex items-center gap-1.5">
-            <AlertCircle size={14} /> {question.space_hint}
+          <p className="mt-3 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800">
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+            <span>
+              {question.space_hint}. That space allowance is why the total word limit for this question is {maxWords} words.
+            </span>
           </p>
         )}
       </div>
@@ -466,8 +522,6 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
             ) : (
               <>
                 {(() => {
-                  const maxWords = question.marks > 10 ? 250 : 150;
-                  const maxChars = maxWords * 5;
                   const currentWords = editedText.trim() === "" ? 0 : editedText.trim().split(/\s+/).length;
 
                   return (
@@ -475,7 +529,6 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                       <textarea
                         value={editedText}
                         onChange={(e) => setEditedText(e.target.value)}
-                        maxLength={maxChars}
                         className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
                                    focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
                         placeholder="Your answer will appear here..."

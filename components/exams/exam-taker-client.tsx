@@ -567,6 +567,14 @@ export default function ExamTakerClient({
                   Translation is available for self-study but is not AI graded and does not use a test slot.
                 </div>
               )}
+              {question.questions.space_hint && (
+                <p className="mb-5 flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800">
+                  <CheckCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    {question.questions.space_hint}. That space allowance is why the total word limit for this question is {maxWords} words.
+                  </span>
+                </p>
+              )}
 
               {answer.uploading ? (
                 <div className="flex flex-col items-center rounded-xl border border-border bg-muted/30 p-12">
@@ -603,7 +611,6 @@ export default function ExamTakerClient({
                     value={answer.editedText}
                     onChange={(event) => updateText(question.id, event.target.value)}
                     disabled={locked}
-                    maxLength={maxWords * 8}
                     className="h-52 w-full resize-none rounded-xl border border-border bg-background p-4 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-70"
                     placeholder="Type or review your answer here…"
                   />
