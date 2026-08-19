@@ -158,14 +158,16 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     }
   };
 
-  const handleUploadAndOcr = async () => {
-    if (!selectedFile) return;
+  const handleUploadAndOcr = async (fileOverride?: File) => {
+    const file = fileOverride ?? selectedFile;
+    if (!file) return;
+    const returnState: TestState = state === "editing" ? "editing" : "running";
     setError(null);
     setState("uploading");
     
     try {
       const formData = new FormData();
-      formData.append("image", selectedFile);
+      formData.append("image", file);
       formData.append("questionId", question.id);
       
       setState("ocr_processing");
@@ -179,10 +181,11 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       
       setOcrText(data.text);
       setEditedText(data.text);
+      setSelectedFile(null);
       setState("editing");
     } catch (err: any) {
       setError(err.message);
-      setState("running"); // go back so they can try again
+      setState(returnState);
     }
   };
 
@@ -413,7 +416,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                   </button>
                 </div>
                 <button
-                  onClick={handleUploadAndOcr}
+                  onClick={() => void handleUploadAndOcr()}
                   className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
                              hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
                 >
@@ -452,41 +455,76 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
               Review the extracted text and fix any mistakes the AI made reading your handwriting.
             </p>
             
-            {(() => {
-              const maxWords = question.marks > 10 ? 250 : 150;
-              const maxChars = maxWords * 5;
-              const currentWords = editedText.trim() === "" ? 0 : editedText.trim().split(/\s+/).length;
-              
-              return (
-                <>
-                  <textarea
-                    value={editedText}
-                    onChange={(e) => setEditedText(e.target.value)}
-                    maxLength={maxChars}
-                    className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
-                               focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
-                    placeholder="Your answer will appear here..."
-                  />
-                  <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                    </span>
-                    <span className={currentWords >= maxWords ? "text-red-500 font-medium" : ""}>
-                      {currentWords} / {maxWords} words
-                    </span>
-                  </div>
-                </>
-              );
-            })()}
+            {showCamera ? (
+              <WebcamCapture
+                onCapture={(file) => {
+                  setShowCamera(false);
+                  void handleUploadAndOcr(file);
+                }}
+                onCancel={() => setShowCamera(false)}
+              />
+            ) : (
+              <>
+                {(() => {
+                  const maxWords = question.marks > 10 ? 250 : 150;
+                  const maxChars = maxWords * 5;
+                  const currentWords = editedText.trim() === "" ? 0 : editedText.trim().split(/\s+/).length;
 
-            <div className="mt-4 flex flex-col sm:flex-row sm:justify-end">
-              <button
-                onClick={handleSubmitForGrading}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
-                           hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
-              >
-                Submit for Grading <Sparkles size={16} />
-              </button>
-            </div>
+                  return (
+                    <>
+                      <textarea
+                        value={editedText}
+                        onChange={(e) => setEditedText(e.target.value)}
+                        maxLength={maxChars}
+                        className="flex-1 w-full rounded-xl border border-input bg-background p-4 text-sm leading-relaxed resize-none
+                                   focus:outline-none focus:ring-2 focus:ring-brand-500 min-h-[250px]"
+                        placeholder="Your answer will appear here..."
+                      />
+                      <div className="flex justify-between items-center mt-2 text-xs text-muted-foreground">
+                        <span>Running OCR on a new image will replace the text in this editor.</span>
+                        <span className={currentWords >= maxWords ? "text-red-500 font-medium" : ""}>
+                          {currentWords} / {maxWords} words
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowCamera(true)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:w-auto"
+                  >
+                    <Camera size={16} /> Take Another Photo
+                  </button>
+                  <label
+                    htmlFor="ocr-retry-upload"
+                    className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-border px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted sm:w-auto"
+                  >
+                    <FileText size={16} /> Upload Another Image
+                  </label>
+                  <input
+                    id="ocr-retry-upload"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) void handleUploadAndOcr(file);
+                    }}
+                  />
+                  <button
+                    onClick={handleSubmitForGrading}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white
+                               hover:bg-brand-700 transition-all active:scale-[0.98] shadow-md shadow-brand-200"
+                  >
+                    Submit for Grading <Sparkles size={16} />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

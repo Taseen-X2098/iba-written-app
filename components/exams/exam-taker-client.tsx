@@ -593,6 +593,7 @@ export default function ExamTakerClient({
                     <ImageIcon className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Upload Image</span>
                     <input type="file" accept="image/*" multiple={question.questions.max_images > 1} disabled={locked} className="hidden" onChange={(event) => {
                       if (event.target.files?.length) void handleFileUpload(question.id, event.target.files);
+                      event.currentTarget.value = "";
                     }} />
                   </label>
                 </div>
@@ -607,13 +608,25 @@ export default function ExamTakerClient({
                     placeholder="Type or review your answer here…"
                   />
                   <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                    <span>{answer.error ?? (answer.isDirty ? "Unsaved changes" : "Saved on server")}</span>
+                    <span>{answer.error ?? (answer.isDirty ? "Unsaved changes" : "Saved on server")}. Running OCR on a new image replaces this text.</span>
                     <span className={wordCount > maxWords ? "font-bold text-red-600" : ""}>{wordCount} / {maxWords} words</span>
                   </div>
-                  <button type="button" disabled={locked || !answer.isDirty || answer.saving} onClick={() => void saveDrafts([question.id])} className="mt-3 inline-flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs font-bold disabled:opacity-50">
-                    {answer.saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
-                    {answer.saving ? "Saving…" : "Save this answer"}
-                  </button>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    <button type="button" disabled={locked} onClick={() => setActiveCameraId(question.id)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold disabled:opacity-50">
+                      <Camera size={14} /> Take Another Photo
+                    </button>
+                    <label className={`inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold ${locked ? "opacity-50" : "cursor-pointer"}`}>
+                      <ImageIcon size={14} /> Upload Another Image
+                      <input type="file" accept="image/*" multiple={question.questions.max_images > 1} disabled={locked} className="hidden" onChange={(event) => {
+                        if (event.currentTarget.files?.length) void handleFileUpload(question.id, event.currentTarget.files);
+                        event.currentTarget.value = "";
+                      }} />
+                    </label>
+                    <button type="button" disabled={locked || !answer.isDirty || answer.saving} onClick={() => void saveDrafts([question.id])} className="inline-flex items-center justify-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs font-bold disabled:opacity-50">
+                      {answer.saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                      {answer.saving ? "Saving…" : "Save this answer"}
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
