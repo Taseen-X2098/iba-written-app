@@ -45,11 +45,11 @@ describe('AI Grading Utility', () => {
 
     const result = await grade(client, submission, 'essay', 10);
 
-    expect(result.internal.total).toBe(6.5);
-    expect(result.internal.normalizationVersion).toBe(1);
+    expect(result.internal.total).toBe(7);
+    expect(result.internal.normalizationVersion).toBe(2);
     expect(result.internal).not.toHaveProperty('modelTotal');
-    expect(result.internal.criteria[0].marksAwarded).toBe(3.25);
-    expect(result.studentFeedback.score).toBe('6.5/10');
+    expect(result.internal.criteria[0].marksAwarded).toBe(3.5);
+    expect(result.studentFeedback.score).toBe('7/10');
     // The highlight should be preserved because the quote is exactly in the submission
     expect(result.studentFeedback.highlights.length).toBe(1);
     expect(result.studentFeedback.highlights[0].quote).toBe('This is a verbatim sentence.');
@@ -96,6 +96,27 @@ describe('AI Grading Utility', () => {
     expect(result.studentFeedback.score).toBe('0/10');
   });
 
+  it('should not calibrate a 6-mark question', async () => {
+    const mockResponse = JSON.stringify({
+      internal: {
+        total: 5.8,
+        max: 6,
+        criteria: [
+          { criterion: 'Content', marks_awarded: 5.8, marks_possible: 6, reasoning: 'Strong answer.' }
+        ]
+      },
+      student_feedback: { score: '5.8/6', summary: 'Strong answer.', highlights: [] }
+    });
+
+    const client = createMockClient(mockResponse);
+    const result = await grade(client, 'text', 'basic_paragraph', 6);
+
+    expect(result.internal.total).toBe(5.5);
+    expect(result.internal.criteria[0].marksAwarded).toBe(5.5);
+    expect(result.internal.normalizationVersion).toBe(2);
+    expect(result.studentFeedback.score).toBe('5.5/6');
+  });
+
   it('should throw an error if model returns invalid JSON', async () => {
     const client = createMockClient('this is not json');
     await expect(grade(client, 'text', 'essay', 10)).rejects.toThrow('Model did not return valid structured output');
@@ -128,8 +149,8 @@ describe('AI Grading Utility', () => {
 
     const client = createMockClient(mockResponse);
     const result = await grade(client, 'text', 'essay', 10);
-    expect(result.internal.total).toBe(5.5);
-    expect(result.studentFeedback.score).toBe('5.5/10');
+    expect(result.internal.total).toBe(6);
+    expect(result.studentFeedback.score).toBe('6/10');
   });
 
   it('should preserve multiple valid highlights', async () => {

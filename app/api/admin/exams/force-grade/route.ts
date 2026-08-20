@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdminUser } from "@/lib/auth";
-import { apiErrorResponse, ApiError } from "@/lib/api/errors";
+import { apiErrorResponse } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/server";
 import { finalizeOfficialAttempt } from "@/lib/exams/finalize";
+import { parseJsonRequest } from "@/lib/api/request";
 
 const schema = z.object({
   examId: z.string().uuid(),
@@ -13,17 +14,19 @@ const schema = z.object({
 export async function POST(request: NextRequest) {
   try {
     await requireAdminUser();
-    const parsed = schema.safeParse(await request.json());
-    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid finalization request", 400);
+    const input = await parseJsonRequest(request, schema, {
+      maxBytes: 8_000,
+      message: "Invalid finalization request",
+    });
     const admin = await createAdminClient();
     let query = admin
       .from("exam_attempts")
       .select("id, user_id, expires_at")
-      .eq("exam_id", parsed.data.examId)
+      .eq("exam_id", input.examId)
       .eq("mode", "official")
       .in("status", ["active", "locked"])
       .lte("expires_at", new Date().toISOString());
-    if (parsed.data.targetUserId) query = query.eq("user_id", parsed.data.targetUserId);
+    if (input.targetUserId) query = query.eq("user_id", input.targetUserId);
     const { data: attempts, error } = await query.limit(5_000);
     if (error) throw error;
 
@@ -42,4 +45,3 @@ export async function POST(request: NextRequest) {
     return apiErrorResponse(error);
   }
 }
-

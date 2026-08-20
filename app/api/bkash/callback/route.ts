@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getBkashClient } from "@/lib/bkash/client";
+import { sendPlanActivatedEmail, sendSlotsAddedEmail } from "@/lib/email/brevo";
+import type { PlanType } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
   // We use the admin client because the callback might not have the user's cookies attached
@@ -81,10 +83,11 @@ export async function GET(req: NextRequest) {
         .single();
 
       if (activeSub) {
-        await supabase
+        const { error: slotsUpdateError } = await supabase
           .from("subscriptions")
           .update({ extra_tests_purchased: activeSub.extra_tests_purchased + slotsToAdd })
           .eq("id", activeSub.id);
+        if (slotsUpdateError) throw slotsUpdateError;
       } else {
         // No active subscription, we just create a dummy one for extra slots or update profile
         // But our schema expects subscriptions to hold extra tests.
@@ -92,7 +95,7 @@ export async function GET(req: NextRequest) {
         const expiry = new Date();
         expiry.setFullYear(expiry.getFullYear() + 1); // 1 year expiry for extra slots without plan
         
-        await supabase
+        const { error: slotsInsertError } = await supabase
           .from("subscriptions")
           .insert({
             user_id: paymentRecord.user_id,
@@ -102,7 +105,9 @@ export async function GET(req: NextRequest) {
             expires_at: expiry.toISOString(),
             is_active: true
           });
+        if (slotsInsertError) throw slotsInsertError;
       }
+      await sendSlotsAddedEmail(paymentRecord.user_id, slotsToAdd, "extra");
     } else if (paymentRecord.payment_type === "plan") {
       // It's a plan subscription
       // Get old sub to carry over extra tests
@@ -110,11 +115,12 @@ export async function GET(req: NextRequest) {
       const carriedOverExtra = oldSub ? (oldSub.extra_tests_purchased || 0) : 0;
 
       // Deactivate old subscription
-      await supabase
+      const { error: deactivateError } = await supabase
         .from("subscriptions")
         .update({ is_active: false })
         .eq("user_id", paymentRecord.user_id)
         .eq("is_active", true);
+      if (deactivateError) throw deactivateError;
 
       // Create new one. 30 days from now.
       const expiry = new Date();
@@ -125,7 +131,7 @@ export async function GET(req: NextRequest) {
       // plan1 = 300 tests, plan2 = 300 tests, plan3 = 0 tests (weekly only)
       const tests = (isPlan1 || isPlan2) ? 300 : 0;
 
-      await supabase
+      const { error: planInsertError } = await supabase
         .from("subscriptions")
         .insert({
           user_id: paymentRecord.user_id,
@@ -135,6 +141,8 @@ export async function GET(req: NextRequest) {
           expires_at: expiry.toISOString(),
           is_active: true
         });
+      if (planInsertError) throw planInsertError;
+      await sendPlanActivatedEmail(paymentRecord.user_id, paymentRecord.plan_type as PlanType, expiry.toISOString());
     }
 
     // Success redirect

@@ -16,10 +16,18 @@ describe("mark normalization", () => {
   });
 
   it.each([
-    [7, 10, 5.5],
-    [10, 10, 8.5],
-    [5.6, 10, 4.5],
-  ])("applies the AI factor before flooring (%p/%p)", (modelMark, maximum, expected) => {
+    [7, 10, 6],
+    [10, 10, 9],
+    [5.6, 10, 5],
+  ])("applies the 90% AI factor before flooring (%p/%p)", (modelMark, maximum, expected) => {
+    expect(calibrateAiFinalMark(modelMark, maximum)).toBe(expected);
+  });
+
+  it.each([
+    [5, 5, 5],
+    [5.6, 6, 5.5],
+    [6, 6, 6],
+  ])("does not calibrate questions worth at most 6 marks (%p/%p)", (modelMark, maximum, expected) => {
     expect(calibrateAiFinalMark(modelMark, maximum)).toBe(expected);
   });
 

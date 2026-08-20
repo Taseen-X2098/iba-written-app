@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Settings, User, Lock, Lightbulb, Loader2 } from "lucide-react";
 import type { Profile } from "@/lib/types";
+import { profileFieldsSchema } from "@/lib/validation/profile";
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -39,13 +40,20 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage(null);
 
+    const parsed = profileFieldsSchema.safeParse(form);
+    if (!parsed.success) {
+      setMessage({ type: "error", text: parsed.error.issues[0]?.message || "Check the information you entered" });
+      setSaving(false);
+      return;
+    }
+
     const supabase = createClient();
     const { error } = await supabase
       .from("profiles")
       .update({
-        name: form.name,
-        institute: form.institute,
-        phone: form.phone || null,
+        name: parsed.data.name,
+        institute: parsed.data.institute,
+        phone: parsed.data.phone || null,
       })
       .eq("id", profile!.id);
 
@@ -92,6 +100,7 @@ export default function SettingsPage() {
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               required
+              maxLength={200}
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                          focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             />
@@ -107,6 +116,7 @@ export default function SettingsPage() {
               value={form.institute}
               onChange={(e) => setForm((p) => ({ ...p, institute: e.target.value }))}
               required
+              maxLength={300}
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                          focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             />
@@ -121,6 +131,7 @@ export default function SettingsPage() {
               type="tel"
               value={form.phone}
               onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+              maxLength={50}
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                          focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
             />

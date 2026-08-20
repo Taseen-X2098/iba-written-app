@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Plus, Database, Pencil, Trash2 } from "lucide-react";
+import { Plus, Database, Pencil } from "lucide-react";
+import QuestionRowActions from "@/components/admin/question-row-actions";
 
 export default async function AdminQuestionsPage() {
   const supabase = await createClient();
@@ -8,6 +9,7 @@ export default async function AdminQuestionsPage() {
   const { data: questions, error } = await supabase
     .from("questions")
     .select("*")
+    .eq("is_active", true)
     .neq("category", "translation")
     .order("created_at", { ascending: false });
 
@@ -78,10 +80,7 @@ export default async function AdminQuestionsPage() {
                       <Link href={`/admin/questions/${q.id}`} className="text-muted-foreground hover:text-brand-600 p-1 transition-colors">
                         <Pencil size={16} />
                       </Link>
-                      {/* Delete functionality would ideally be a form post or API call */}
-                      <button className="text-muted-foreground hover:text-red-600 p-1 transition-colors">
-                        <Trash2 size={16} />
-                      </button>
+                      <QuestionRowActions questionId={q.id} />
                     </div>
                   </td>
                 </tr>

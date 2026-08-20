@@ -20,6 +20,18 @@ const OCR_CACHE_VERSION = "v1";
 const MOCK_OCR_TEXT =
   "The quick brown fox jumps over the lazy dog. This is sample OCR text extracted from the uploaded image.";
 
+async function hasValidImageSignature(image: File) {
+  const bytes = new Uint8Array(await image.slice(0, 8).arrayBuffer());
+  if (image.type === "image/png") {
+    const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    return pngSignature.every((byte, index) => bytes[index] === byte);
+  }
+  if (image.type === "image/jpeg") {
+    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  return false;
+}
+
 export async function POST(request: Request) {
   try {
     const user = await requireApiUser();
@@ -65,6 +77,14 @@ export async function POST(request: Request) {
           "VALIDATION_ERROR",
           "Each image must be between 1 byte and 10 MB.",
           413,
+        );
+      }
+
+      if (!(await hasValidImageSignature(image))) {
+        throw new ApiError(
+          "VALIDATION_ERROR",
+          "The uploaded file contents do not match a valid JPEG or PNG image.",
+          415,
         );
       }
     }

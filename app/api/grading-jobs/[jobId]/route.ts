@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/auth";
 import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/server";
+import { parseRequestValue } from "@/lib/api/request";
+import { uuidSchema } from "@/lib/exams/contracts";
 
 export async function GET(_request: Request, context: { params: Promise<{ jobId: string }> }) {
   try {
     const user = await requireApiUser();
-    const { jobId } = await context.params;
+    const { jobId: rawJobId } = await context.params;
+    const jobId = parseRequestValue(uuidSchema, rawJobId, "A valid grading job id is required");
     const admin = await createAdminClient();
     const { data: job, error } = await admin
       .from("grading_jobs")
@@ -29,4 +32,3 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
     return apiErrorResponse(error);
   }
 }
-

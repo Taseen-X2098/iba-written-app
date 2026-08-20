@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { Lightbulb, Plus, Trash2 } from "lucide-react";
+import { requireAdminUser } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { z } from "zod";
+
+const tipContentSchema = z.string().trim().min(1).max(1_000);
+const tipIdSchema = z.string().uuid();
 
 export default async function AdminTipsPage() {
   const supabase = await createClient();
@@ -17,23 +23,21 @@ export default async function AdminTipsPage() {
 
   async function addTip(formData: FormData) {
     "use server";
-    const supabase = await createClient();
-    const content = formData.get("content") as string;
-    
-    if (!content) return;
+    await requireAdminUser();
+    const parsed = tipContentSchema.safeParse(formData.get("content"));
+    if (!parsed.success) return;
 
-    await supabase.from("tips").insert({ content, is_active: true });
+    await createAdminClient().from("tips").insert({ content: parsed.data, is_active: true });
     revalidatePath("/admin/tips");
   }
 
   async function deleteTip(formData: FormData) {
     "use server";
-    const supabase = await createClient();
-    const id = formData.get("id") as string;
-    
-    if (!id) return;
+    await requireAdminUser();
+    const parsed = tipIdSchema.safeParse(formData.get("id"));
+    if (!parsed.success) return;
 
-    await supabase.from("tips").delete().eq("id", id);
+    await createAdminClient().from("tips").delete().eq("id", parsed.data);
     revalidatePath("/admin/tips");
   }
 

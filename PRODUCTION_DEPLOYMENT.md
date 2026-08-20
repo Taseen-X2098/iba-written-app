@@ -140,6 +140,32 @@ For Brevo, enter the SMTP host, port, login, SMTP key, verified sender address,
 and sender name in Supabase. A local `BREVO_SMTP_KEY` or Railway variable has no
 effect because the application does not send authentication email directly.
 
+### 3.3.1 Account-update emails through the Brevo API
+
+Plan activation and test-slot emails are sent directly by the application using
+Brevo's Transactional Email API. Add these variables to the **web** service
+(and to `.env.local` for local development):
+
+```dotenv
+# Brevo Dashboard → SMTP & API → API Keys. Use an API key, never an SMTP key.
+BREVO_API_KEY=xkeysib-your-transactional-api-key
+
+# This address must first be verified under Brevo → Senders, Domains & Dedicated IPs.
+BREVO_SENDER_EMAIL=hello@YOUR_FINAL_WEB_DOMAIN
+BREVO_SENDER_NAME=IBA Written
+```
+
+`NEXT_PUBLIC_SITE_URL` must also be set to the final HTTPS website URL; it is
+used for the email buttons. The application sends a styled HTML email itself,
+so no Brevo template ID is required. If you prefer to keep a visual copy in
+the Brevo dashboard, create Transactional templates from
+`email-templates/brevo-plan-activated.html` and
+`email-templates/brevo-slots-added.html`.
+
+When the Brevo variables are absent, plan and slot updates still succeed, but
+the server logs that the notification was skipped. A Brevo delivery failure is
+also logged and never reverses a successful payment or admin action.
+
 Copy the HTML from `email-templates/` into the corresponding Supabase email
 templates:
 
@@ -360,6 +386,10 @@ make each form accessible to the intended customers, and add their complete
 PLAN_PAYMENT_FORM_URL=
 SLOTS_PAYMENT_FORM_URL=
 MENTORSHIP_FORM_URL=
+
+BREVO_API_KEY=
+BREVO_SENDER_EMAIL=
+BREVO_SENDER_NAME=IBA Written
 ```
 
 `PAYMENT_FORM_URL` is not read by the current application; use
@@ -480,6 +510,11 @@ Optional web variables:
 
 ```dotenv
 SUPABASE_WEBHOOK_SECRET=
+
+# Required to send plan-activation and test-slot emails through Brevo.
+BREVO_API_KEY=
+BREVO_SENDER_EMAIL=
+BREVO_SENDER_NAME=IBA Written
 
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=
 NEXT_PUBLIC_FIREBASE_CLIENT_EMAIL=

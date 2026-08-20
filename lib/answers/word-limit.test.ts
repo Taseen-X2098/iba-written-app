@@ -6,7 +6,7 @@ import {
 
 describe("answer word limits", () => {
   it("uses the same limits displayed by the clients", () => {
-    expect(wordLimitForMarks(5)).toBe(80);
+    expect(wordLimitForMarks(5)).toBe(90);
     expect(wordLimitForMarks(6)).toBe(110);
     expect(wordLimitForMarks(8)).toBe(110);
     expect(wordLimitForMarks(9)).toBe(140);
@@ -24,6 +24,11 @@ describe("answer word limits", () => {
   });
 
   it("reports only answers that exceed their question limit", () => {
+    expect(getWordLimitViolation("word ".repeat(90), 5)).toBeNull();
+    expect(getWordLimitViolation("word ".repeat(91), 5)).toEqual({
+      wordCount: 91,
+      wordLimit: 90,
+    });
     expect(getWordLimitViolation("word ".repeat(140), 10)).toBeNull();
     expect(getWordLimitViolation("word ".repeat(141), 10)).toEqual({
       wordCount: 141,

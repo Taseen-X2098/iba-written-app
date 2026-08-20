@@ -2,6 +2,22 @@ import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { adminMessaging } from "@/lib/firebase-admin";
 import { createClient } from "@supabase/supabase-js"; // Use pure supabase-js to bypass auth context for webhooks
+import { z } from "zod";
+import { parseJsonRequest, parseRequestValue } from "@/lib/api/request";
+import { ApiError, apiErrorResponse } from "@/lib/api/errors";
+
+const webhookEnvelopeSchema = z.object({
+  type: z.string().max(30),
+  table: z.string().max(100),
+  schema: z.string().max(100).optional(),
+  record: z.unknown().optional(),
+});
+
+const notificationRecordSchema = z.object({
+  user_id: z.string().uuid(),
+  title: z.string().trim().min(1).max(200),
+  message: z.string().trim().min(1).max(4_000),
+});
 
 function hasValidWebhookSecret(request: NextRequest, expectedSecret: string) {
   const suppliedSecret = request.headers.get("x-supabase-signature");
@@ -25,11 +41,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const payload = await req.json();
+    const payload = await parseJsonRequest(req, webhookEnvelopeSchema, {
+      maxBytes: 64_000,
+      message: "Invalid webhook payload",
+    });
     
     // Payload from Supabase Webhook (INSERT on notifications table)
     if (payload.type === "INSERT" && payload.table === "notifications") {
-      const { user_id, title, message } = payload.record;
+      const { user_id, title, message } = parseRequestValue(
+        notificationRecordSchema,
+        payload.record,
+        "Invalid notification record",
+      );
 
       // 2. Fetch the user's FCM tokens
       // We use the service_role key to bypass RLS since this is a server-to-server request
@@ -44,7 +67,11 @@ export async function POST(req: NextRequest) {
         .eq("id", user_id)
         .single();
 
-      const tokens = profile?.fcm_tokens || [];
+      const tokens = Array.isArray(profile?.fcm_tokens)
+        ? profile.fcm_tokens
+            .filter((token): token is string => typeof token === "string" && token.length > 0 && token.length <= 4_096)
+            .slice(0, 500)
+        : [];
 
       // 3. Send Push Notification via Firebase Admin
       if (tokens.length > 0) {
@@ -83,6 +110,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: "Ignored payload type" }, { status: 400 });
   } catch (error: unknown) {
+    if (error instanceof ApiError) return apiErrorResponse(error);
     console.error("Webhook processing error:", error);
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
   }

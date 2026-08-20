@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Eye, EyeOff, UserPlus, Loader2 } from "lucide-react";
+import { signupSchema } from "@/lib/validation/profile";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -28,13 +29,9 @@ export default function SignupPage() {
     e.preventDefault();
     setError(null);
 
-    if (form.password !== form.confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
-
-    if (form.password.length < 6) {
-      setError("Password must be at least 6 characters");
+    const parsed = signupSchema.safeParse(form);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message || "Check the information you entered");
       return;
     }
 
@@ -43,13 +40,13 @@ export default function SignupPage() {
     const supabase = createClient();
     const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://iba-written.netlify.app";
     const { error } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
+      email: parsed.data.email,
+      password: parsed.data.password,
       options: {
         data: {
-          name: form.name,
-          institute: form.institute,
-          phone: form.phone || null,
+          name: parsed.data.name,
+          institute: parsed.data.institute,
+          phone: parsed.data.phone || null,
         },
         emailRedirectTo: `${SITE_URL}/auth/callback`,
       },
@@ -90,6 +87,7 @@ export default function SignupPage() {
             onChange={(e) => updateField("name", e.target.value)}
             placeholder="Your full name"
             required
+            maxLength={200}
             autoComplete="name"
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                        placeholder:text-muted-foreground
@@ -113,6 +111,7 @@ export default function SignupPage() {
             onChange={(e) => updateField("institute", e.target.value)}
             placeholder="Your school / university"
             required
+            maxLength={300}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                        placeholder:text-muted-foreground
                        focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
@@ -136,6 +135,7 @@ export default function SignupPage() {
             onChange={(e) => updateField("phone", e.target.value)}
             placeholder="01XXXXXXXXX"
             autoComplete="tel"
+            maxLength={50}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                        placeholder:text-muted-foreground
                        focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
@@ -158,6 +158,7 @@ export default function SignupPage() {
             onChange={(e) => updateField("email", e.target.value)}
             placeholder="you@example.com"
             required
+            maxLength={320}
             autoComplete="email"
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                        placeholder:text-muted-foreground
@@ -188,6 +189,7 @@ export default function SignupPage() {
                          placeholder:text-muted-foreground
                          focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
                          transition-shadow"
+              maxLength={128}
             />
             <button
               type="button"
@@ -216,6 +218,7 @@ export default function SignupPage() {
             placeholder="Re-enter your password"
             required
             autoComplete="new-password"
+            maxLength={128}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
                        placeholder:text-muted-foreground
                        focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent

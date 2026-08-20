@@ -1,4 +1,7 @@
-export const MARK_NORMALIZATION_VERSION = 1;
+export const MARK_NORMALIZATION_VERSION = 2;
+
+export const AI_MARK_CALIBRATION_FACTOR = 0.9;
+export const AI_MARK_CALIBRATION_EXEMPT_MAXIMUM = 6;
 
 export function floorMarkToHalf(value: number, maximum = Number.POSITIVE_INFINITY): number {
   if (!Number.isFinite(value)) return 0;
@@ -7,7 +10,10 @@ export function floorMarkToHalf(value: number, maximum = Number.POSITIVE_INFINIT
 }
 
 export function calibrateAiFinalMark(modelMark: number, maximum: number): number {
-  return floorMarkToHalf(modelMark * 0.85, maximum);
+  const factor = maximum <= AI_MARK_CALIBRATION_EXEMPT_MAXIMUM
+    ? 1
+    : AI_MARK_CALIBRATION_FACTOR;
+  return floorMarkToHalf(modelMark * factor, maximum);
 }
 
 export function formatMark(value: number): string {

@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/auth";
-import { apiErrorResponse, ApiError } from "@/lib/api/errors";
+import { apiErrorResponse } from "@/lib/api/errors";
 import { startAttemptSchema } from "@/lib/exams/contracts";
 import { startAttempt } from "@/lib/exams/attempts";
+import { parseJsonRequest, parseRequestValue } from "@/lib/api/request";
+import { uuidSchema } from "@/lib/exams/contracts";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireApiUser();
-    const { id } = await context.params;
-    const parsed = startAttemptSchema.safeParse(await request.json());
-    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid start request", 400, parsed.error.flatten());
+    const { id: rawId } = await context.params;
+    const id = parseRequestValue(uuidSchema, rawId, "A valid exam id is required");
+    const input = await parseJsonRequest(request, startAttemptSchema, {
+      maxBytes: 8_000,
+      message: "Invalid start request",
+    });
 
     const result = await startAttempt({
       examId: id,
       userId: user.id,
-      mode: parsed.data.mode,
-      attemptId: parsed.data.attemptId,
-      writerToken: parsed.data.writerToken,
+      mode: input.mode,
+      attemptId: input.attemptId,
+      writerToken: input.writerToken,
     });
     const { writer_token_hash: _secret, ...attempt } = result.attempt;
     return NextResponse.json({ ...result, attempt });
@@ -24,4 +29,3 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return apiErrorResponse(error);
   }
 }
-

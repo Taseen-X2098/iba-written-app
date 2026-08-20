@@ -1,5 +1,5 @@
 export const WORD_LIMIT_BANDS = [
-  { maximumMarks: 5, wordLimit: 80 },
+  { maximumMarks: 5, wordLimit: 90 },
   { maximumMarks: 8, wordLimit: 110 },
   { maximumMarks: 10, wordLimit: 140 },
   { maximumMarks: 12, wordLimit: 150 },

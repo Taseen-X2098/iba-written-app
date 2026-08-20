@@ -4,8 +4,8 @@ import QuestionBuilderClient from "@/components/admin/question-builder-client";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-export default async function EditQuestionPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+export default async function EditQuestionPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const supabase = await createClient();
 
   const { data: question } = await supabase

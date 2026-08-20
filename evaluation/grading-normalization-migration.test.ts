@@ -7,29 +7,31 @@ describe("grading normalization migration safety", () => {
       process.cwd(),
       "supabase",
       "migrations",
-      "020_structured_learner_profiles.sql",
+      "022_ninety_percent_mark_calibration.sql",
     ),
     "utf8",
   );
 
-  it("backfills only results without the normalization marker", () => {
-    const guardedBackfills = sql.match(
-      /#>> '\{internal,normalizationVersion\}' IS DISTINCT FROM '1'/g,
-    );
-    expect(guardedBackfills).toHaveLength(3);
+  it("stores the new policy as normalization version 2", () => {
+    expect(sql).toContain("'{internal,normalizationVersion}'");
+    expect(sql).toContain("'2'::jsonb");
   });
 
   it("does not retain the raw model score in student-visible result JSON", () => {
     expect(sql).not.toContain("modelTotal");
   });
 
-  it("applies the AI factor in triggers only to unmarked results", () => {
-    expect(sql).toContain(
-      "WHEN NEW.result #>> '{internal,normalizationVersion}' = '1' THEN 1",
-    );
-    expect(sql).toContain(
-      "WHEN NEW.grading_result #>> '{internal,normalizationVersion}' = '1' THEN 1",
-    );
-    expect(sql).toContain("WHEN NEW.graded_by = 'ai' THEN 0.85");
+  it("preserves results already normalized by either application policy", () => {
+    expect(sql).toContain("IN ('1', '2')");
+  });
+
+  it("applies 90% only when the question is worth more than 6 marks", () => {
+    expect(sql).toContain("CASE WHEN v_maximum <= 6 THEN 1 ELSE 0.90 END");
+  });
+
+  it("enforces the policy on every AI result persistence table", () => {
+    expect(sql).toContain("submissions_half_down_grade");
+    expect(sql).toContain("exam_submissions_half_down_grade");
+    expect(sql).toContain("grading_job_items_half_down_grade");
   });
 });

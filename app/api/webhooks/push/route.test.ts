@@ -92,7 +92,7 @@ describe("push notification webhook authorization", () => {
         schema: "public",
         table: "notifications",
         record: {
-          user_id: "10000000-0000-0000-0000-000000000001",
+          user_id: "10000000-0000-4000-8000-000000000001",
           title: "Test notification",
           message: "Webhook authorization works.",
         },
@@ -103,6 +103,24 @@ describe("push notification webhook authorization", () => {
     await expect(response.json()).resolves.toEqual({ success: true });
     expect(mockedCreateClient).toHaveBeenCalledTimes(1);
     expect(from).toHaveBeenCalledWith("profiles");
+    expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authenticated webhook with an invalid notification record", async () => {
+    const response = await POST(makeRequest({
+      secret: WEBHOOK_SECRET,
+      body: JSON.stringify({
+        type: "INSERT",
+        table: "notifications",
+        record: { user_id: "not-a-uuid", title: "", message: "message" },
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      code: "VALIDATION_ERROR",
+    }));
+    expect(mockedCreateClient).not.toHaveBeenCalled();
     expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
   });
 });

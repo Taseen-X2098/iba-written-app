@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { createOfficialGradingJob } from "@/lib/grading/jobs";
+import { parseJsonRequest } from "@/lib/api/request";
 
 const schema = z.object({
   submissionId: z.string().uuid(),
@@ -12,14 +13,16 @@ const schema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const user = await requireAdminUser();
-    const parsed = schema.safeParse(await request.json());
-    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid AI grading request", 400, parsed.error.flatten());
+    const input = await parseJsonRequest(request, schema, {
+      maxBytes: 8_000,
+      message: "Invalid AI grading request",
+    });
     const job = await createOfficialGradingJob({
-      examId: await examIdForSubmission(parsed.data.submissionId),
+      examId: await examIdForSubmission(input.submissionId),
       requestedBy: user.id,
-      submissionIds: [parsed.data.submissionId],
+      submissionIds: [input.submissionId],
       scope: "selected",
-      allowRegrade: parsed.data.allowRegrade,
+      allowRegrade: input.allowRegrade,
     });
     return NextResponse.json({ success: true, jobId: job.id, status: job.status }, { status: 202 });
   } catch (error) {
@@ -34,4 +37,3 @@ async function examIdForSubmission(submissionId: string) {
   if (error || !data) throw new ApiError("VALIDATION_ERROR", "Submission not found", 404);
   return data.exam_id;
 }
-

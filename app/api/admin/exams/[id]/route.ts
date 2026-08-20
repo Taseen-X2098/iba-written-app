@@ -3,23 +3,28 @@ import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { examDefinitionSchema } from "@/lib/exams/admin-contracts";
 import { createAdminClient } from "@/lib/supabase/server";
+import { parseJsonRequest, parseRequestValue } from "@/lib/api/request";
+import { uuidSchema } from "@/lib/exams/contracts";
 
 export async function PUT(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     await requireAdminUser();
-    const { id } = await context.params;
-    const parsed = examDefinitionSchema.safeParse(await request.json());
-    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid exam definition", 400, parsed.error.flatten());
+    const { id: rawId } = await context.params;
+    const id = parseRequestValue(uuidSchema, rawId, "A valid exam id is required");
+    const input = await parseJsonRequest(request, examDefinitionSchema, {
+      maxBytes: 250_000,
+      message: "Invalid exam definition",
+    });
     const admin = await createAdminClient();
     const { error } = await admin.rpc("update_exam_definition", {
       p_exam_id: id,
-      p_title: parsed.data.title,
-      p_description: parsed.data.description,
-      p_time_limit_minutes: parsed.data.timeLimitMinutes,
-      p_starts_at: parsed.data.startsAt,
-      p_ends_at: parsed.data.endsAt,
-      p_is_published: parsed.data.isPublished,
-      p_questions: parsed.data.questions,
+      p_title: input.title,
+      p_description: input.description,
+      p_time_limit_minutes: input.timeLimitMinutes,
+      p_starts_at: input.startsAt,
+      p_ends_at: input.endsAt,
+      p_is_published: input.isPublished,
+      p_questions: input.questions,
     });
     if (error) {
       if (error.message.includes("EXAM_ALREADY_STARTED")) throw new ApiError("ATTEMPT_ACTIVE", "The exam definition is locked after the first official start. Use Extend Timer for deadline changes.", 409);
@@ -30,4 +35,3 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     return apiErrorResponse(error);
   }
 }
-

@@ -10,6 +10,8 @@ import { createMockClient } from "@/lib/grading/mockClient";
 import { rubricSourceForGrader } from "@/lib/grading/config";
 import { prepareLearnerProfilePlan, recordLearnerProfileUpdate } from "@/lib/learning/profile";
 import { getWordLimitViolation } from "@/lib/answers/word-limit";
+import { parseJsonRequest } from "@/lib/api/request";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 const schema = z.object({
   questionId: z.string().uuid(),
@@ -23,9 +25,16 @@ export async function POST(request: NextRequest) {
   let chargeId: string | null = null;
   try {
     const user = await requireApiUser();
-    const parsed = schema.safeParse(await request.json());
-    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid grading submission", 400, parsed.error.flatten());
-    const input = parsed.data;
+    const input = await parseJsonRequest(request, schema, {
+      maxBytes: 250_000,
+      message: "Invalid grading submission",
+    });
+    await enforceRateLimit({
+      key: `grade:${user.id}`,
+      limit: 12,
+      windowSeconds: 60,
+      message: "Too many grading requests. Wait a minute before trying again.",
+    });
     await requireQuestionAccess(input.questionId);
     const admin = await createAdminClient();
     const { data: question, error: questionError } = await admin

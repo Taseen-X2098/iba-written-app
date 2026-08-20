@@ -3,11 +3,14 @@ import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/server";
 import { wakeGradingWorker } from "@/lib/grading/jobs";
+import { parseRequestValue } from "@/lib/api/request";
+import { uuidSchema } from "@/lib/exams/contracts";
 
 export async function DELETE(_request: Request, context: { params: Promise<{ jobId: string }> }) {
   try {
     await requireAdminUser();
-    const { jobId } = await context.params;
+    const { jobId: rawJobId } = await context.params;
+    const jobId = parseRequestValue(uuidSchema, rawJobId, "A valid grading job id is required");
     const admin = await createAdminClient();
     const { error } = await admin.from("grading_jobs").update({ status: "cancelled", completed_at: new Date().toISOString() }).eq("id", jobId).in("status", ["queued", "running"]);
     if (error) throw error;
@@ -21,7 +24,8 @@ export async function DELETE(_request: Request, context: { params: Promise<{ job
 export async function PATCH(_request: Request, context: { params: Promise<{ jobId: string }> }) {
   try {
     await requireAdminUser();
-    const { jobId } = await context.params;
+    const { jobId: rawJobId } = await context.params;
+    const jobId = parseRequestValue(uuidSchema, rawJobId, "A valid grading job id is required");
     const admin = await createAdminClient();
     const { data: job } = await admin.from("grading_jobs").select("id, status").eq("id", jobId).single();
     if (!job || !["failed", "cancelled"].includes(job.status)) throw new ApiError("GRADING_INCOMPLETE", "Only failed or cancelled jobs can be resumed", 409);
@@ -33,4 +37,3 @@ export async function PATCH(_request: Request, context: { params: Promise<{ jobI
     return apiErrorResponse(error);
   }
 }
-

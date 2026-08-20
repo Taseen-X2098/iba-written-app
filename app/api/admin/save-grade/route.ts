@@ -6,13 +6,16 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { floorMarkToHalf, formatScore, MARK_NORMALIZATION_VERSION } from "@/lib/grading/marks";
 import type { GradingResult } from "@/lib/grading/grade";
 import { prepareManualLearnerProfilePlan, recordLearnerProfileUpdate } from "@/lib/learning/profile";
+import { parseJsonRequest } from "@/lib/api/request";
 
 export async function POST(request: NextRequest) {
   try {
     await requireAdminUser();
-    const parsed = manualGradeSchema.safeParse(await request.json());
-    if (!parsed.success) throw new ApiError("VALIDATION_ERROR", "Invalid manual grade", 400, parsed.error.flatten());
-    const { submissionId, summary, highlights } = parsed.data;
+    const input = await parseJsonRequest(request, manualGradeSchema, {
+      maxBytes: 1_000_000,
+      message: "Invalid manual grade",
+    });
+    const { submissionId, summary, highlights } = input;
     const admin = await createAdminClient();
     const { data: submission, error } = await admin
       .from("exam_submissions")
@@ -21,10 +24,10 @@ export async function POST(request: NextRequest) {
       .single();
     if (error || !submission) throw new ApiError("VALIDATION_ERROR", "Submission not found", 404);
     const marks = (submission.exam_questions as any)?.marks;
-    if (typeof marks !== "number" || parsed.data.score > marks) {
+    if (typeof marks !== "number" || input.score > marks) {
       throw new ApiError("VALIDATION_ERROR", `Score must be between 0 and ${marks ?? 0}`, 400);
     }
-    const score = floorMarkToHalf(parsed.data.score, marks);
+    const score = floorMarkToHalf(input.score, marks);
     const text = submission.edited_text ?? "";
     const safeHighlights = highlights.filter((highlight) => highlight.quote && text.includes(highlight.quote));
     const gradingResult: GradingResult = {

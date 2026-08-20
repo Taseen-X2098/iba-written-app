@@ -39,8 +39,9 @@ const mockedExtract = jest.mocked(extractTextWithZai);
 
 function makeRequest(imageCount = 1) {
   const formData = new FormData();
+  const pngHeader = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   for (let index = 0; index < imageCount; index += 1) {
-    formData.append("image", new File([`answer image ${index}`], `answer-${index + 1}.png`, { type: "image/png" }));
+    formData.append("image", new File([pngHeader, `answer image ${index}`], `answer-${index + 1}.png`, { type: "image/png" }));
   }
   formData.append("questionId", QUESTION_ID);
   return new Request("http://localhost/api/ocr", { method: "POST", body: formData });
@@ -121,6 +122,18 @@ describe("POST /api/ocr", () => {
       code: "VALIDATION_ERROR",
       details: { imageCount: 3, pageLimit: 2 },
     }));
+    expect(mockedReserve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file whose bytes do not match its declared image type", async () => {
+    process.env.Z_AI_MOCK = "true";
+    const formData = new FormData();
+    formData.append("image", new File(["not a png"], "answer.png", { type: "image/png" }));
+    formData.append("questionId", QUESTION_ID);
+
+    const response = await POST(new Request("http://localhost/api/ocr", { method: "POST", body: formData }));
+
+    expect(response.status).toBe(415);
     expect(mockedReserve).not.toHaveBeenCalled();
   });
 
