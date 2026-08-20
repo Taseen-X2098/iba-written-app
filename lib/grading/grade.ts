@@ -41,7 +41,7 @@ export interface ResponsesClient {
 // Structured Outputs schema — the model MUST return exactly this shape.
 // `internal` is the full rubric breakdown, for your eyes only.
 // `student_feedback` is the only part safe to ever show a student: a score,
-// a short plain-language summary, and specific highlights tied to exact
+// a detailed plain-language summary, and specific highlights tied to exact
 // substrings of their own submission (for in-text highlighting in the UI).
 const GRADING_RESULT_FORMAT = {
   type: "json_schema",
@@ -77,7 +77,7 @@ const GRADING_RESULT_FORMAT = {
         type: "object",
         properties: {
           score: { type: "string" }, // e.g. "8/10" — the only number a student sees
-          summary: { type: "string" }, // 2-4 plain-language sentences, no rubric jargon
+          summary: { type: "string" }, // Detailed plain-language feedback, no rubric jargon
           highlights: {
             type: "array",
             items: {
