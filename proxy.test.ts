@@ -13,6 +13,12 @@ function mutation(path: string, options?: { origin?: string; fetchSite?: string;
 }
 
 describe("proxy request-boundary CSRF protection", () => {
+  it("allows unauthenticated visitors to view the subscription page", () => {
+    const response = proxy(new NextRequest("https://app.example.test/subscription"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("allows an authenticated same-origin API mutation", () => {
     const response = proxy(mutation("/api/grade", { origin: "https://app.example.test", fetchSite: "same-origin" }));
     expect(response.status).toBe(200);

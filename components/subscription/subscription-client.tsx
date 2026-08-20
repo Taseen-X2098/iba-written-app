@@ -225,17 +225,13 @@ export default function SubscriptionClient({
                 className={`w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                   isCurrentPlan 
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                    : isDowngrade
-                    ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                     : plan.isPopular
-                    ? 'bg-brand-600 text-white hover:bg-brand-700 shadow-md shadow-brand-200'
-                    : 'bg-brand-50 text-brand-700 hover:bg-brand-100'
+                    ? `bg-brand-600 text-white ${isDowngrade ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-700 shadow-md shadow-brand-200'}`
+                    : `bg-brand-50 text-brand-700 ${isDowngrade ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-100'}`
                 }`}
               >
                 {isCurrentPlan ? (
                   "Current Plan"
-                ) : isDowngrade ? (
-                  "Downgrade not allowed"
                 ) : isUpgrade ? (
                   <>Upgrade ({calculateUpgradeCost(plan.price)} ৳) <TrendingUp size={16}/></>
                 ) : (

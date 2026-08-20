@@ -1,10 +1,10 @@
 export const WORD_LIMIT_BANDS = [
   { maximumMarks: 5, wordLimit: 90 },
-  { maximumMarks: 8, wordLimit: 110 },
-  { maximumMarks: 10, wordLimit: 140 },
-  { maximumMarks: 12, wordLimit: 150 },
-  { maximumMarks: 13, wordLimit: 160 },
-  { maximumMarks: Number.POSITIVE_INFINITY, wordLimit: 180 },
+  { maximumMarks: 8, wordLimit: 140 },
+  { maximumMarks: 10, wordLimit: 180 },
+  { maximumMarks: 12, wordLimit: 220 },
+  { maximumMarks: 13, wordLimit: 240 },
+  { maximumMarks: Number.POSITIVE_INFINITY, wordLimit: 270 },
 ] as const;
 
 /**

@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   },
   description:
     "Practice IBA written exam questions with AI-powered grading. Get instant feedback, track progress, and join weekly exams with leaderboards.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

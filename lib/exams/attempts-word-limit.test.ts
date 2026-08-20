@@ -10,7 +10,7 @@ describe("exam attempt word-limit enforcement", () => {
         select: jest.fn(() => ({
           eq: jest.fn(() => ({
             order: jest.fn(async () => ({
-              data: [{ id: "exam-question-1", marks: 5, order_index: 0 }],
+              data: [{ id: "exam-question-1", marks: 12, order_index: 0 }],
               error: null,
             })),
           })),
@@ -21,7 +21,7 @@ describe("exam attempt word-limit enforcement", () => {
     await expect(assertAttemptDraftWordLimits("attempt-1", "exam-1", {
       "exam-question-1": {
         ocrText: "",
-        editedText: "word ".repeat(91),
+        editedText: "word ".repeat(221),
         updatedAt: "2026-08-20T00:00:00.000Z",
       },
     })).rejects.toEqual(expect.objectContaining({
@@ -31,8 +31,8 @@ describe("exam attempt word-limit enforcement", () => {
         violations: [{
           examQuestionId: "exam-question-1",
           questionNumber: 1,
-          wordCount: 91,
-          wordLimit: 90,
+          wordCount: 221,
+          wordLimit: 220,
         }],
       },
     }));

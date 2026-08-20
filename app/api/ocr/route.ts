@@ -16,7 +16,9 @@ import { getPageLimitViolation } from "@/lib/answers/page-limit";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
-const OCR_CACHE_VERSION = "v1";
+// v2 prevents previously cached raw layout markup from being replayed after
+// Markdown-to-plain-text normalization was added at the Z.ai trust boundary.
+const OCR_CACHE_VERSION = "v2";
 const MOCK_OCR_TEXT =
   "The quick brown fox jumps over the lazy dog. This is sample OCR text extracted from the uploaded image.";
 

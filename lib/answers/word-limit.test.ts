@@ -7,15 +7,15 @@ import {
 describe("answer word limits", () => {
   it("uses the same limits displayed by the clients", () => {
     expect(wordLimitForMarks(5)).toBe(90);
-    expect(wordLimitForMarks(6)).toBe(110);
-    expect(wordLimitForMarks(8)).toBe(110);
-    expect(wordLimitForMarks(9)).toBe(140);
-    expect(wordLimitForMarks(10)).toBe(140);
-    expect(wordLimitForMarks(11)).toBe(150);
-    expect(wordLimitForMarks(12)).toBe(150);
-    expect(wordLimitForMarks(13)).toBe(160);
-    expect(wordLimitForMarks(14)).toBe(180);
-    expect(wordLimitForMarks(15)).toBe(180);
+    expect(wordLimitForMarks(6)).toBe(140);
+    expect(wordLimitForMarks(8)).toBe(140);
+    expect(wordLimitForMarks(9)).toBe(180);
+    expect(wordLimitForMarks(10)).toBe(180);
+    expect(wordLimitForMarks(11)).toBe(220);
+    expect(wordLimitForMarks(12)).toBe(220);
+    expect(wordLimitForMarks(13)).toBe(240);
+    expect(wordLimitForMarks(14)).toBe(270);
+    expect(wordLimitForMarks(15)).toBe(270);
   });
 
   it("counts words across ordinary and multiline whitespace", () => {
@@ -29,10 +29,10 @@ describe("answer word limits", () => {
       wordCount: 91,
       wordLimit: 90,
     });
-    expect(getWordLimitViolation("word ".repeat(140), 10)).toBeNull();
-    expect(getWordLimitViolation("word ".repeat(141), 10)).toEqual({
-      wordCount: 141,
-      wordLimit: 140,
+    expect(getWordLimitViolation("word ".repeat(180), 10)).toBeNull();
+    expect(getWordLimitViolation("word ".repeat(181), 10)).toEqual({
+      wordCount: 181,
+      wordLimit: 180,
     });
   });
 });

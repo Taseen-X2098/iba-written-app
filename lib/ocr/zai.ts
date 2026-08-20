@@ -5,6 +5,16 @@ interface ZaiLayoutParsingResponse {
   message?: string;
 }
 
+// GLM-OCR returns layout-aware Markdown. The answer editor is plain text, so
+// remove presentational wrappers while preserving every recognized word.
+export function normalizeZaiOcrMarkdown(markdown: string) {
+  return markdown
+    .replace(/^\s*<\/?div\b[^>]*>\s*$/gimu, "")
+    .replace(/^\s{0,3}#{1,6}[\t ]+/gmu, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export class ZaiOcrError extends Error {
   constructor(
     message: string,
@@ -54,7 +64,9 @@ export async function extractTextWithZai(input: {
     );
   }
 
-  const text = payload.md_results?.trim();
+  const text = payload.md_results
+    ? normalizeZaiOcrMarkdown(payload.md_results)
+    : "";
   if (!text) {
     throw new ZaiOcrError(
       "Z.ai could not extract text from this image. Please try a clearer photo.",

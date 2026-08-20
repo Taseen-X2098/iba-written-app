@@ -9,6 +9,8 @@ const AUTH_PATHS = [
   "/auth/callback",
 ];
 
+const PUBLIC_PATHS = ["/subscription"];
+
 function hasSupabaseSession(request: NextRequest) {
   return request.cookies.getAll().some(({ name, value }) =>
     Boolean(value) && name.startsWith("sb-") && name.includes("auth-token"),
@@ -56,9 +58,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
   const authPath = AUTH_PATHS.some((path) => pathname.startsWith(path));
+  const publicPath = PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   const hasSession = hasSupabaseSession(request);
 
-  if (!hasSession && !authPath) {
+  if (!hasSession && !authPath && !publicPath) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
