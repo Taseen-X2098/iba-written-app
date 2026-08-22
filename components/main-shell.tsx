@@ -20,6 +20,8 @@ import {
   ExternalLink,
   Play,
   AlertTriangle,
+  Lock,
+  TrendingUp,
 } from "lucide-react";
 import type { Profile, Subscription } from "@/lib/types";
 import { messaging } from "@/lib/firebase";
@@ -43,6 +45,7 @@ const SIDENAV_LINKS = [
   { href: "/questions", label: "Question Bank", icon: BookOpen },
   { href: "/exams", label: "Weekly Exams", icon: Trophy },
   { href: "/progress", label: "Progress", icon: BarChart3 },
+  { href: "/personal-report", label: "Personal Report", icon: TrendingUp },
   { href: "/history", label: "History", icon: BookOpen },
   { href: "/subscription", label: "Subscription", icon: Crown },
   { href: "/tips", label: "Tips", icon: Lightbulb },
@@ -229,6 +232,7 @@ export default function MainShell({
 
   // Calculate usage percentage for the plan bar
   const usageInfo = getUsageInfo(profile, subscription);
+  const personalReportLocked = !subscription && !profile.is_admin;
 
   return (
     <div className="flex min-h-dvh">
@@ -256,6 +260,8 @@ export default function MainShell({
             </button>
           </div>
         )}
+
+        <CurrentPlanIndicator planName={usageInfo.label} />
 
         {/* Nav Links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
@@ -285,8 +291,11 @@ export default function MainShell({
                   )}
                 </div>
                 {link.label}
+                {link.href === "/personal-report" && personalReportLocked && (
+                  <Lock size={13} className="ml-auto text-amber-600" aria-label="Subscriber feature" />
+                )}
                 {active && (
-                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-500" />
+                  <div className={`${link.href === "/personal-report" && personalReportLocked ? "" : "ml-auto"} w-1.5 h-1.5 rounded-full bg-brand-500`} />
                 )}
                 <NavigationLoadingOverlay />
               </Link>
@@ -414,6 +423,8 @@ export default function MainShell({
           </div>
         )}
 
+        <CurrentPlanIndicator planName={usageInfo.label} onClick={() => setSidenavOpen(false)} />
+
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {SIDENAV_LINKS.map((link) => {
             const active = isActiveTab(link.href);
@@ -432,7 +443,10 @@ export default function MainShell({
               >
                 <link.icon size={18} />
                 {link.label}
-                <ChevronRight size={14} className="ml-auto opacity-40" />
+                {link.href === "/personal-report" && personalReportLocked && (
+                  <Lock size={13} className="ml-auto text-amber-600" aria-label="Subscriber feature" />
+                )}
+                <ChevronRight size={14} className={`${link.href === "/personal-report" && personalReportLocked ? "" : "ml-auto"} opacity-40`} />
                 <NavigationLoadingOverlay />
               </Link>
             );
@@ -680,6 +694,32 @@ export default function MainShell({
         </div>
       )}
     </div>
+  );
+}
+
+function CurrentPlanIndicator({
+  planName,
+  onClick,
+}: {
+  planName: string;
+  onClick?: () => void;
+}) {
+  return (
+    <Link
+      href="/subscription"
+      prefetch={false}
+      onClick={onClick}
+      className="mx-3 mt-3 flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-brand-800 transition-colors hover:bg-brand-100"
+    >
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
+        <Crown size={16} aria-hidden="true" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-600">Current plan</p>
+        <p className="truncate text-sm font-bold">{planName}</p>
+      </div>
+      <ChevronRight size={16} className="ml-auto shrink-0 text-brand-600" aria-hidden="true" />
+    </Link>
   );
 }
 

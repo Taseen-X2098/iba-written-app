@@ -35,6 +35,14 @@ describe("getRubric", () => {
     expect(parsed.total).toBe(5);
   });
 
+  it("returns the approved Story Completion rubric at 9 marks", () => {
+    const parsed = JSON.parse(getRubric("story_completion", 9));
+    expect(parsed.total).toBe(9);
+    expect(parsed.criteria[0].criterion).toBe(
+      "Continuity with the opening and prompt adherence",
+    );
+  });
+
   it("returns error for unknown task type", () => {
     const result = getRubric("nonexistent_type", 10);
     const parsed = JSON.parse(result);
@@ -55,7 +63,8 @@ describe("getRubric", () => {
     expect(TASK_TYPES).toContain("creative_writing");
     expect(TASK_TYPES).toContain("personal_reflection");
     expect(TASK_TYPES).toContain("basic_paragraph");
-    expect(TASK_TYPES.length).toBe(5);
+    expect(TASK_TYPES).toContain("story_completion");
+    expect(TASK_TYPES.length).toBe(6);
   });
 });
 
@@ -176,6 +185,7 @@ describe("grade() with mock client", () => {
 
     await grade(fileSearchClient, "A relevant response.", "basic_paragraph", 5, {
       rubricSource: { type: "file_search", vectorStoreId: "vs_test123" },
+      questionPrompt: "A reference question prompt.",
     });
 
     expect(capturedParams?.tools).toEqual([
@@ -188,6 +198,8 @@ describe("grade() with mock client", () => {
     expect(capturedParams?.tool_choice).toEqual({ type: "file_search" });
     expect(capturedParams?.instructions).toContain("call file_search");
     expect(capturedParams?.instructions).not.toContain("call get_rubric");
+    expect(JSON.stringify(capturedParams?.input)).toContain("<question-prompt-");
+    expect(JSON.stringify(capturedParams?.input)).toContain("A reference question prompt.");
   });
 
   it("rejects a real grading response that skipped file search", async () => {
@@ -302,6 +314,12 @@ describe("SYSTEM_PROMPT", () => {
 
   it("mentions translation exclusion", () => {
     expect(SYSTEM_PROMPT).toContain("Translation");
+  });
+
+  it("defines Story Completion continuity and copying rules", () => {
+    expect(SYSTEM_PROMPT).toContain("Story completion");
+    expect(SYSTEM_PROMPT).toContain("copy the supplied opening");
+    expect(SYSTEM_PROMPT).toContain("must not exceed 50%");
   });
 
   it("instructs never to grade from memory", () => {

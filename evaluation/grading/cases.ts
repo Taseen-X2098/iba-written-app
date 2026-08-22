@@ -10,7 +10,7 @@ export interface GradingEvaluationCase {
 }
 
 /**
- * Fifteen fixed submissions: three for each AI-gradable rubric type. They mix
+ * Eighteen fixed submissions: three for each AI-gradable rubric type. They mix
  * strong, average, and weak work so an evaluator can detect both generosity
  * and excessive harshness. Proposed scores intentionally live in a separate
  * file and are never sent to OpenAI.
@@ -173,5 +173,71 @@ I still try problems alone first, but I now set a limit. If uncertainty could af
     difficulty: "easy",
     question: "Describe a time you helped a friend or family member. How did it make you feel?",
     submission: `I helped my younger brother with his homework last week. He had mathematics homework and did not understand it. I showed him how to do the sums and then he finished them. He was happy and thanked me. I also felt happy because helping family is a good thing. I will help him again in the future.`,
+  },
+  {
+    id: "story-completion-15-strong",
+    taskType: "story_completion",
+    marks: 15,
+    difficulty: "very_hard",
+    question: `Complete the story beginning below. Copy the opening into your answer, then continue it.
+
+Before humanity abandoned Earth, archivist Lila had to choose what knowledge the final ship could carry.
+Every saved history displaced a scientific or medical record.
+Governments demanded heroic national stories.
+Lila discovered one shameful account contained the only evidence explaining why`,
+    submission: `Before humanity abandoned Earth, archivist Lila had to choose what knowledge the final ship could carry.
+Every saved history displaced a scientific or medical record.
+Governments demanded heroic national stories.
+Lila discovered one shameful account contained the only evidence explaining why the river cities had survived the First Warming: their leaders had admitted, publicly and early, that the sea walls would fail.
+
+The account occupied the same storage as three surgical manuals. Lila read it twice. Its pages did not contain a machine, formula, or cure. They contained meeting minutes in which ministers confessed uncertainty, released maps that ruined property prices, and moved families before certainty became catastrophe. The evacuation had succeeded because officials sacrificed their reputations before citizens sacrificed their lives.
+
+Minister Voss arrived with the approved histories. In his version, the river cities had been saved by a single fearless president. “People need courage where we are going,” he said.
+
+“They need permission to change course,” Lila replied.
+
+She could not carry everything. She removed the president's marble speeches, three duplicate victory films, and her own celebrated history of the launch programme. The surgical manuals remained. So did the humiliating minutes.
+
+Years later, the ship's navigators discovered that their destination's atmosphere was thinning faster than predicted. The captain first ordered silence, fearing unrest. A student searching the archive found Lila's account and projected it across the settlement deck.
+
+The captain changed course before all the calculations were complete. Some passengers called him a coward. Most survived.
+
+Lila had once believed an archive preserved the finest things people had done. Watching the new planet recede behind them, she understood its harder purpose: preserving the truths that might stop people from making their finest mistake twice.`,
+  },
+  {
+    id: "story-completion-10-average",
+    taskType: "story_completion",
+    marks: 10,
+    difficulty: "medium",
+    question: `Complete the story beginning below. Copy the opening into your answer, then continue it.
+
+On her first day at the bank, intern Sohana found a transaction missing from every official record.
+The money had moved through hundreds of tiny accounts.
+One account belonged to her father.
+When she asked her supervisor for guidance, he closed the spreadsheet and explained that`,
+    submission: `On her first day at the bank, intern Sohana found a transaction missing from every official record.
+The money had moved through hundreds of tiny accounts.
+One account belonged to her father.
+When she asked her supervisor for guidance, he closed the spreadsheet and explained that the transfers were part of a confidential security test.
+
+Sohana wanted to believe him, but her father had lost his job months ago and had never mentioned this account. She copied the transaction numbers onto paper before the supervisor deleted the file. That evening she showed them to her father. He became pale and admitted that a stranger had paid him to open an account, promising that no money would remain there.
+
+The next morning, Sohana reported the evidence to the bank's investigation team. Her supervisor tried to blame her father, but the copied numbers connected the transfers to his own account as well. The bank froze the money and contacted the police. Her father still faced questions, yet Sohana was relieved that he had finally told the truth. She learned that protecting someone does not mean hiding the mistake that puts them in greater danger.`,
+  },
+  {
+    id: "story-completion-8-weak",
+    taskType: "story_completion",
+    marks: 8,
+    difficulty: "easy",
+    question: `Complete the story beginning below. Copy the opening into your answer, then continue it.
+
+Arman had searched three days for his missing dog, Pepper.
+On Friday morning, Pepper appeared outside school with a silver ribbon around his collar.
+The ribbon led toward a house nobody visited.
+Arman pushed open its gate and found`,
+    submission: `Arman had searched three days for his missing dog, Pepper.
+On Friday morning, Pepper appeared outside school with a silver ribbon around his collar.
+The ribbon led toward a house nobody visited.
+Arman pushed open its gate and found a old man. The man said dog came here yesterday. Arman was scared but he go inside. There was many dogs and Pepper barked. The old man was actually kind and he gave all dogs food. Arman thanked him and take Pepper home. Everybody was happy and it was a very memorable day for him.`,
   },
 ];

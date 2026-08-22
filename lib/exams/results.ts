@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
 import { ApiError } from "@/lib/api/errors";
 import type { Highlight } from "@/lib/types";
+import type { PersonalProgressionCardDTO } from "@/lib/types";
+import { getPersonalProgressionCard, hasPersonalProgressionAccess } from "@/lib/learning/progression";
 
 export type LeaderboardRow = {
   user_id: string;
@@ -86,10 +88,24 @@ export async function getPublishedExamResults(examId: string, userId: string, pa
         answer: text,
         score: feedback?.score ?? `0/${submission.exam_questions?.marks ?? 0}`,
         summary: feedback?.summary ?? "No feedback available.",
+        feedback: feedback ?? null,
         highlights,
       };
     })
     .sort((a, b) => a.orderIndex - b.orderIndex);
+
+  const personalProgressionReports: Record<string, PersonalProgressionCardDTO> = {};
+  const reportTypes = [...new Set(safeDetails
+    .map((detail) => detail.category)
+    .filter((category): category is string => Boolean(category) && category !== "translation"))];
+  const progressionAccess = await hasPersonalProgressionAccess(userId);
+  await Promise.all(reportTypes.map(async (submissionType) => {
+    personalProgressionReports[submissionType] = await getPersonalProgressionCard({
+      userId,
+      submissionType,
+      access: progressionAccess,
+    });
+  }));
 
   return {
     exam,
@@ -101,6 +117,6 @@ export async function getPublishedExamResults(examId: string, userId: string, pa
       ? { totalScore: Number(myResult.total_score), maxScore: Number(myResult.max_score), rank: myResult.rank }
       : null,
     details: safeDetails,
+    personalProgressionReports,
   };
 }
-

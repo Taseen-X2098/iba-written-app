@@ -6,6 +6,8 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { floorMarkToHalf, formatScore, MARK_NORMALIZATION_VERSION } from "@/lib/grading/marks";
 import type { GradingResult } from "@/lib/grading/grade";
 import { prepareManualLearnerProfilePlan, recordLearnerProfileUpdate } from "@/lib/learning/profile";
+import { wakeGradingWorker } from "@/lib/grading/jobs";
+import { drainProgressionReportQueue } from "@/lib/learning/report-jobs";
 import { parseJsonRequest } from "@/lib/api/request";
 
 export async function POST(request: NextRequest) {
@@ -50,6 +52,7 @@ export async function POST(request: NextRequest) {
       throw saveError;
     }
     const category = (submission.exam_questions as any)?.questions?.category;
+    let reportEnqueued = false;
     if (submission.user_id && typeof category === "string") {
       try {
         const profilePlan = await prepareManualLearnerProfilePlan({
@@ -58,15 +61,22 @@ export async function POST(request: NextRequest) {
           submission: text,
           result: gradingResult,
         });
-        await recordLearnerProfileUpdate({
+        const profileRecord = await recordLearnerProfileUpdate({
           userId: submission.user_id,
           sourceKind: "official_exam",
           sourceId: submissionId,
           category,
           plan: profilePlan,
         });
+        reportEnqueued = profileRecord.reportEnqueued;
       } catch (profileError) {
         console.error("Unable to record learner profile after manual grade", profileError);
+      }
+    }
+    if (reportEnqueued) {
+      const woke = await wakeGradingWorker();
+      if (!woke && process.env.NODE_ENV !== "production") {
+        void drainProgressionReportQueue({ batchSize: 2 });
       }
     }
     return NextResponse.json({ success: true, gradingResult });

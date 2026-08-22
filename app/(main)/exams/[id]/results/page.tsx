@@ -3,6 +3,8 @@ import { Clock, Medal, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requirePageUser } from "@/lib/auth";
 import { getPublishedExamResults } from "@/lib/exams/results";
+import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
+import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
 
 export default async function ExamResultsPage({
   params,
@@ -104,7 +106,10 @@ export default async function ExamResultsPage({
                 <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Your answer</h3>
                 <div className="mb-5 whitespace-pre-wrap rounded-xl bg-muted/30 p-4 text-sm">{detail.answer || "No answer"}</div>
                 <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Feedback</h3>
-                <p className="text-sm">{detail.summary}</p>
+                {detail.feedback ? <SubmissionFeedback feedback={detail.feedback} /> : <p className="text-sm">{detail.summary}</p>}
+                <div className="mt-5">
+                  <PersonalProgressionCard report={results.personalProgressionReports[detail.category] ?? null} />
+                </div>
                 {detail.highlights.length > 0 && <div className="mt-4 space-y-2">{detail.highlights.map((highlight, highlightIndex) => <div key={highlightIndex} className="rounded-lg border border-border bg-muted/20 p-3 text-xs"><strong className="block">“{highlight.quote}”</strong>{highlight.comment}</div>)}</div>}
               </article>
             ))}
@@ -127,4 +132,3 @@ function StatusCard({ title, message }: { title: string; message: string }) {
     </div>
   );
 }
-

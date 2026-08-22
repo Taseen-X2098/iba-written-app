@@ -63,12 +63,17 @@ describe("CATEGORY_LABELS", () => {
   it("covers all question categories", () => {
     const categories: QuestionCategory[] = [
       "quote_analysis", "creative_writing", "personal_reflection",
-      "translation", "basic_paragraph"
+      "story_completion", "translation", "basic_paragraph"
     ];
     categories.forEach(cat => {
       expect(CATEGORY_LABELS[cat]).toBeTruthy();
       expect(typeof CATEGORY_LABELS[cat]).toBe("string");
     });
+  });
+
+  it("uses the approved writing-category display names", () => {
+    expect(CATEGORY_LABELS.creative_writing).toBe("Story Writting");
+    expect(CATEGORY_LABELS.story_completion).toBe("Story Completion");
   });
 });
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Save, Loader2, ChevronDown } from "lucide-react";
 import type { QuestionCategory, Difficulty } from "@/lib/types";
 import { CATEGORY_LABELS } from "@/lib/types";
+import { STORY_COMPLETION_MARKS } from "@/lib/questions/story-completion";
 
 export default function QuestionBuilderClient({
   initialData,
@@ -74,7 +75,17 @@ export default function QuestionBuilderClient({
           <div className="relative">
             <select 
               value={form.category}
-              onChange={e => setForm({...form, category: e.target.value as QuestionCategory})}
+              onChange={e => {
+                const category = e.target.value as QuestionCategory;
+                setForm({
+                  ...form,
+                  category,
+                  marks: category === "story_completion"
+                    && !STORY_COMPLETION_MARKS.includes(form.marks as typeof STORY_COMPLETION_MARKS[number])
+                      ? 10
+                      : form.marks,
+                });
+              }}
               className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 pr-10"
             >
               {Object.entries(CATEGORY_LABELS)
@@ -106,14 +117,26 @@ export default function QuestionBuilderClient({
 
         <div>
           <label className="block text-sm font-medium text-foreground mb-1">Marks</label>
-          <input 
-            type="number"
-            min="1"
-            value={form.marks}
-            onChange={e => setForm({...form, marks: Number(e.target.value)})}
-            required
-            className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          />
+          {form.category === "story_completion" ? (
+            <select
+              value={form.marks}
+              onChange={e => setForm({...form, marks: Number(e.target.value)})}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              {STORY_COMPLETION_MARKS.map((marks) => (
+                <option key={marks} value={marks}>{marks}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="number"
+              min="1"
+              value={form.marks}
+              onChange={e => setForm({...form, marks: Number(e.target.value)})}
+              required
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          )}
         </div>
 
         <div>
@@ -138,6 +161,13 @@ export default function QuestionBuilderClient({
           className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
         />
       </div>
+
+      {form.category === "story_completion" && (
+        <p className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-xs leading-relaxed text-brand-800">
+          Put the instruction first, add a blank line, then add the 30–45-word starter as four lines.
+          Students must copy that starter before continuing it. Story Completion questions always allow two images.
+        </p>
+      )}
 
       <div className="pt-4 border-t border-border flex justify-end gap-3">
         <button

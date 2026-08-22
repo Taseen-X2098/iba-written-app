@@ -4,6 +4,16 @@ import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseRequestValue } from "@/lib/api/request";
 import { uuidSchema } from "@/lib/exams/contracts";
+import { getPersonalProgressionCard, hasPersonalProgressionAccess } from "@/lib/learning/progression";
+
+function joinedQuestionCategory(row: unknown): string | null {
+  if (!row || typeof row !== "object") return null;
+  const joined = (row as Record<string, unknown>).questions;
+  const question = Array.isArray(joined) ? joined[0] : joined;
+  if (!question || typeof question !== "object") return null;
+  const category = (question as Record<string, unknown>).category;
+  return typeof category === "string" ? category : null;
+}
 
 export async function GET(_request: Request, context: { params: Promise<{ jobId: string }> }) {
   try {
@@ -27,7 +37,26 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
       .eq("job_id", jobId)
       .order("created_at");
     if (itemsError) throw itemsError;
-    return NextResponse.json({ job, items: items ?? [] });
+    const personalProgressionReports: Record<string, Awaited<ReturnType<typeof getPersonalProgressionCard>>> = {};
+    if (job.kind === "practice_exam" && job.requested_by === user.id && job.status === "completed") {
+      const examQuestionIds = [...new Set((items ?? []).map((item) => item.exam_question_id))];
+      const { data: questionRows } = await admin
+        .from("exam_questions")
+        .select("id, questions(category)")
+        .in("id", examQuestionIds.length ? examQuestionIds : ["00000000-0000-0000-0000-000000000000"]);
+      const categories = [...new Set((questionRows ?? [])
+        .map(joinedQuestionCategory)
+        .filter((category): category is string => Boolean(category) && category !== "translation"))];
+      const access = await hasPersonalProgressionAccess(user.id);
+      await Promise.all(categories.map(async (category) => {
+        personalProgressionReports[category] = await getPersonalProgressionCard({
+          userId: user.id,
+          submissionType: category,
+          access,
+        });
+      }));
+    }
+    return NextResponse.json({ job, items: items ?? [], personalProgressionReports });
   } catch (error) {
     return apiErrorResponse(error);
   }

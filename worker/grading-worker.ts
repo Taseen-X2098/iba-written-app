@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { drainGradingQueue } from "../lib/grading/jobs";
+import { drainProgressionReportQueue } from "../lib/learning/report-jobs";
 
 const port = Number(process.env.PORT ?? 8080);
 const workerId = process.env.RAILWAY_REPLICA_ID ?? `railway-${randomUUID()}`;
 let running: Promise<void> | null = null;
+let rerunRequested = false;
 
 function authorized(header: string | undefined) {
   const secret = process.env.GRADING_WORKER_SECRET;
@@ -15,9 +17,19 @@ function authorized(header: string | undefined) {
 }
 
 function wake() {
-  if (running) return running;
+  if (running) {
+    rerunRequested = true;
+    return running;
+  }
   running = (async () => {
-    await drainGradingQueue({ workerId, batchSize: Number(process.env.GRADING_CONCURRENCY ?? 4) });
+    do {
+      rerunRequested = false;
+      await drainGradingQueue({ workerId, batchSize: Number(process.env.GRADING_CONCURRENCY ?? 4) });
+      await drainProgressionReportQueue({
+        workerId: `${workerId}-progression`,
+        batchSize: Number(process.env.PROGRESSION_REPORT_CONCURRENCY ?? 2),
+      });
+    } while (rerunRequested);
   })()
     .catch((error) => console.error("Worker drain failed", error))
     .finally(() => {

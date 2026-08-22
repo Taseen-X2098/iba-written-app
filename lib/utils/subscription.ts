@@ -32,7 +32,7 @@ export function getUsageInfo(
     const remaining = freeRemaining;
     const pct = total > 0 ? (remaining / total) * 100 : 0;
     return {
-      label: "Free Tests",
+      label: "Free Plan",
       remaining,
       total,
       percentage: pct,
@@ -55,7 +55,7 @@ export function getUsageInfo(
     
     const pct = total > 0 ? (remaining / total) * 100 : 0;
     return {
-      label: subscription.plan_type === "plan_1" ? "Practice Plan" : "Complete Plan",
+      label: subscription.plan_type === "plan_1" ? "Basic Practice" : "Complete Prep",
       remaining,
       total,
       percentage: pct,
@@ -73,7 +73,7 @@ export function getUsageInfo(
   const remaining = freeRemaining;
   const pct = total > 0 ? (remaining / total) * 100 : 0;
   return {
-    label: "Exam Plan",
+    label: "Exams Only",
     remaining: remaining,
     total: total,
     percentage: pct,

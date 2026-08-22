@@ -8,6 +8,7 @@ export type QuestionCategory =
   | "creative_writing"
   | "personal_reflection"
   | "quote_analysis"
+  | "story_completion"
   | "translation";
 
 export type Difficulty = "easy" | "medium" | "hard" | "very_hard";
@@ -239,6 +240,60 @@ export interface Highlight {
   type: "strength" | "improvement";
 }
 
+export interface GrammarErrorFeedback {
+  quote: string;
+  errorType: string;
+  explanation: string;
+  corrections: string[];
+}
+
+export type ProgressionStatus = "building" | "improving" | "steady" | "needs_attention";
+
+export interface ProgressionSnapshotDTO {
+  headline: string;
+  status: ProgressionStatus;
+  recentWin: string;
+  focusArea: string;
+  nextStep: string;
+  evidence: string;
+}
+
+export interface ProgressionReportInsight {
+  skill: string;
+  insight: string;
+  evidence: string;
+}
+
+export interface ProgressionReportNextStep {
+  action: string;
+  reason: string;
+  exampleLine: string;
+}
+
+export interface ProgressionReportContent {
+  title: string;
+  overview: string;
+  trajectory: ProgressionStatus;
+  strengths: ProgressionReportInsight[];
+  growthAreas: ProgressionReportInsight[];
+  resolvedWins: ProgressionReportInsight[];
+  nextSteps: ProgressionReportNextStep[];
+}
+
+export type PersonalProgressionCardDTO =
+  | {
+      locked: true;
+      submissionType: QuestionCategory;
+      submissionTypeLabel: string;
+    }
+  | {
+      locked: false;
+      submissionType: QuestionCategory;
+      submissionTypeLabel: string;
+      snapshot: ProgressionSnapshotDTO;
+      latestReport: ProgressionReportContent | null;
+    };
+
 export interface GradingResultJSON {
   internal: {
     total: number;
@@ -249,6 +304,10 @@ export interface GradingResultJSON {
   studentFeedback: {
     score: string;
     summary: string;
+    remarks?: string;
+    personalizedFeedback?: string;
+    waysToImprove?: string;
+    grammarErrors?: GrammarErrorFeedback[];
     highlights: Highlight[];
   };
 }
@@ -287,9 +346,10 @@ export const FREE_TESTS_ON_SIGNUP = 3;
 export const CATEGORY_LABELS: Record<QuestionCategory, string> = {
   argumentative_essay: "Argumentative Essay",
   basic_paragraph: "Paragraph Writing",
-  creative_writing: "Creative Writing",
+  creative_writing: "Story Writting",
   personal_reflection: "Personal Reflection",
   quote_analysis: "Quote Analysis",
+  story_completion: "Story Completion",
   translation: "Translation",
 };
 

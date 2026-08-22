@@ -74,7 +74,10 @@ async function main() {
         testCase.submission,
         testCase.taskType,
         testCase.marks,
-        { rubricSource: { type: "file_search", vectorStoreId } }
+        {
+          rubricSource: { type: "file_search", vectorStoreId },
+          questionPrompt: testCase.question,
+        }
       );
       const score = actual.internal.total;
       const withinRange =

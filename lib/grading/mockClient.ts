@@ -63,6 +63,8 @@ export function createMockClient(options: MockOptions): ResponsesClient {
 
         const mockScore = Math.round(options.marks * 0.8 * 10) / 10;
 
+        const remarks = options.studentSummary
+          ?? "This is canned mock feedback for testing — no real grading happened. The response addresses the task and provides a usable starting point for revision.";
         const mockResult = {
           internal: {
             total: mockScore,
@@ -78,9 +80,10 @@ export function createMockClient(options: MockOptions): ResponsesClient {
           },
           student_feedback: {
             score: `${mockScore}/${options.marks}`,
-            summary:
-              options.studentSummary ??
-              "This is canned mock feedback for testing — no real grading happened. Swap in a real OpenAI client to get an actual response.",
+            remarks,
+            ways_to_improve:
+              "For the next answer, make the central point explicit, connect each example to it, and complete a final sentence-level proofread. A stronger transition would state how the next idea supports the main position.",
+            grammar_errors: [],
             highlights: firstFewWords
               ? [
                   {

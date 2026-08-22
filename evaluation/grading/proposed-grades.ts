@@ -6,7 +6,7 @@ export interface ProposedGrade {
 }
 
 /**
- * Human-proposed reference labels for the 15 evaluation submissions. These
+ * Human-proposed reference labels for the 18 evaluation submissions. These
  * are deliberately bands, not single "correct" marks: writing assessment is
  * subjective, while a score outside the band is useful evidence of drift.
  */
@@ -100,5 +100,23 @@ export const PROPOSED_GRADES: Record<string, ProposedGrade> = {
     acceptableRange: { min: 2, max: 3.5 },
     qualityLevel: "weak",
     rationale: "The experience is concrete and on-topic, but it mostly narrates what happened. The feeling and lesson are generic, with little self-awareness beyond ‘helping is good.’",
+  },
+  "story-completion-15-strong": {
+    targetScore: 12,
+    acceptableRange: { min: 10.5, max: 13.5 },
+    qualityLevel: "strong",
+    rationale: "It copies and completes the opening naturally, builds a causal ethical conflict from the archive constraint, uses controlled characterization and imagery, and earns its thematic ending. Some strict extraordinary credit is justified.",
+  },
+  "story-completion-10-average": {
+    targetScore: 6.5,
+    acceptableRange: { min: 5.5, max: 7.5 },
+    qualityLevel: "average",
+    rationale: "It follows and copies the starter, develops a complete investigation with credible consequences, and ends clearly. The plot and language are competent but conventional, with limited atmosphere or characterization.",
+  },
+  "story-completion-8-weak": {
+    targetScore: 3,
+    acceptableRange: { min: 2, max: 4 },
+    qualityLevel: "weak",
+    rationale: "It copies and completes the opening but resolves the mystery immediately, lists events with almost no development, and contains repeated basic grammar errors. The ending is abrupt and generic.",
   },
 };

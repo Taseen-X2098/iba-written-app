@@ -30,6 +30,11 @@ export interface ResponsesCreateParams {
 export interface ResponsesCreateResult {
   output: ResponsesOutputItem[];
   output_text: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 export interface ResponsesClient {
@@ -77,7 +82,27 @@ const GRADING_RESULT_FORMAT = {
         type: "object",
         properties: {
           score: { type: "string" }, // e.g. "8/10" — the only number a student sees
-          summary: { type: "string" }, // Detailed plain-language feedback, no rubric jargon
+          remarks: { type: "string" },
+          ways_to_improve: { type: "string" },
+          grammar_errors: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                quote: { type: "string" },
+                error_type: { type: "string" },
+                explanation: { type: "string" },
+                corrections: {
+                  type: "array",
+                  items: { type: "string" },
+                  minItems: 1,
+                  maxItems: 2,
+                },
+              },
+              required: ["quote", "error_type", "explanation", "corrections"],
+              additionalProperties: false,
+            },
+          },
           highlights: {
             type: "array",
             items: {
@@ -92,7 +117,7 @@ const GRADING_RESULT_FORMAT = {
             },
           },
         },
-        required: ["score", "summary", "highlights"],
+        required: ["score", "remarks", "ways_to_improve", "grammar_errors", "highlights"],
         additionalProperties: false,
       },
     },
@@ -105,6 +130,13 @@ export interface Highlight {
   quote: string;
   comment: string;
   type: "strength" | "improvement";
+}
+
+export interface GrammarError {
+  quote: string;
+  errorType: string;
+  explanation: string;
+  corrections: string[];
 }
 
 export interface GradingResult {
@@ -123,8 +155,24 @@ export interface GradingResult {
   studentFeedback: {
     score: string;
     summary: string;
+    remarks?: string;
+    personalizedFeedback?: string;
+    waysToImprove?: string;
+    grammarErrors?: GrammarError[];
     highlights: Highlight[];
   };
+}
+
+export function composeStudentFeedbackSummary(input: {
+  remarks: string;
+  personalizedFeedback: string;
+  waysToImprove: string;
+}): string {
+  return [input.remarks, input.personalizedFeedback, input.waysToImprove]
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 12_000);
 }
 
 function systemPromptFor(rubricSource: GradingRubricSource): string {
@@ -161,6 +209,37 @@ function validateHighlights(submission: string, highlights: Highlight[]): Highli
   return valid;
 }
 
+function validateGrammarErrors(submission: string, value: unknown): GrammarError[] {
+  if (!Array.isArray(value)) return [];
+  const validated: GrammarError[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const quote = String(row.quote ?? "").trim();
+    const errorType = String(row.error_type ?? "").trim().slice(0, 120);
+    const explanation = String(row.explanation ?? "").trim().slice(0, 1_000);
+    const corrections = Array.isArray(row.corrections)
+      ? row.corrections
+          .map((correction) => String(correction).trim())
+          .filter(Boolean)
+          .slice(0, 2)
+      : [];
+    if (!quote || !submission.includes(quote) || !errorType || !explanation || !corrections.length) {
+      continue;
+    }
+    validated.push({ quote, errorType, explanation, corrections });
+  }
+  return validated;
+}
+
+function taskTypeLabel(taskType: string): string {
+  return taskType
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function calibrateCriteria(
   criteria: GradingResult["internal"]["criteria"],
   modelTotal: number,
@@ -186,7 +265,10 @@ export async function grade(
   submission: string,
   taskType: string,
   marks: number,
-  options: { rubricSource?: GradingRubricSource } = {}
+  options: {
+    rubricSource?: GradingRubricSource;
+    questionPrompt?: string;
+  } = {}
 ): Promise<GradingResult> {
   const rubricSource = options.rubricSource ?? { type: "local_function" };
   const usesFileSearch = rubricSource.type === "file_search";
@@ -204,12 +286,18 @@ export async function grade(
   // random nonce isn't guessable in advance, so it can't be pre-embedded
   // in a submission written before this function ever runs.
   const nonce = randomUUID();
+  const questionReference = options.questionPrompt?.trim()
+    ? `The original question is reference material between the ` +
+      `<question-prompt-${nonce}> tags below.\n\n` +
+      `<question-prompt-${nonce}>\n${options.questionPrompt.trim()}\n</question-prompt-${nonce}>\n\n`
+    : "";
   const userMessage =
     `Task type: ${taskType}\n` +
     `Total marks: ${marks}\n\n` +
     (usesFileSearch
       ? `First retrieve the exact '${taskType}' rubric for ${marks} total marks from the rubric vector store.\n\n`
       : "") +
+    questionReference +
     `Everything between the <submission-${nonce}> tags below is the ` +
     `student's raw, unmodified text. See the system instructions for how ` +
     `to treat it.\n\n` +
@@ -266,7 +354,14 @@ export async function grade(
       max: number;
       criteria: { criterion: string; marks_awarded: number; marks_possible: number; reasoning: string }[];
     };
-    student_feedback: { score: string; summary: string; highlights: Highlight[] };
+    student_feedback: {
+      score: string;
+      summary?: string;
+      remarks?: string;
+      ways_to_improve?: string;
+      grammar_errors?: unknown;
+      highlights: Highlight[];
+    };
   };
 
   try {
@@ -288,6 +383,12 @@ export async function grade(
     parsed.internal.total,
     normalizedTotal,
   );
+  const legacySummary = String(parsed.student_feedback.summary ?? "").trim();
+  const remarks = String(parsed.student_feedback.remarks ?? legacySummary).trim()
+    || "Your response addresses the task, but the available feedback could not be expanded further.";
+  const personalizedFeedback = `No previous ${taskTypeLabel(taskType)} records were found for personalized feedback yet. This feedback is based only on your current submission.`;
+  const waysToImprove = String(parsed.student_feedback.ways_to_improve ?? "").trim()
+    || "For your next submission, revise the weakest sentence for clarity, connect each supporting point directly to your main idea, and proofread once for grammar and punctuation.";
 
   return {
     internal: {
@@ -298,7 +399,11 @@ export async function grade(
     },
     studentFeedback: {
       score: formatScore(normalizedTotal, marks),
-      summary: parsed.student_feedback.summary,
+      summary: composeStudentFeedbackSummary({ remarks, personalizedFeedback, waysToImprove }),
+      remarks,
+      personalizedFeedback,
+      waysToImprove,
+      grammarErrors: validateGrammarErrors(submission, parsed.student_feedback.grammar_errors),
       highlights: validateHighlights(submission, parsed.student_feedback.highlights),
     },
   };

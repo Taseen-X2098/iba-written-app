@@ -3,6 +3,7 @@ import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseJsonRequest } from "@/lib/api/request";
+import { STORY_COMPLETION_MARKS } from "@/lib/questions/story-completion";
 import { z } from "zod";
 
 const questionFieldsSchema = z.object({
@@ -13,15 +14,30 @@ const questionFieldsSchema = z.object({
     "creative_writing",
     "personal_reflection",
     "quote_analysis",
+    "story_completion",
     "translation",
   ]),
   difficulty: z.enum(["easy", "medium", "hard", "very_hard"]),
   marks: z.number().int().min(1).max(100),
   source: z.string().trim().max(500).optional().default(""),
   spaceHint: z.string().trim().max(500).optional().default(""),
+}).superRefine((question, context) => {
+  if (
+    question.category === "story_completion"
+    && !(STORY_COMPLETION_MARKS as readonly number[]).includes(question.marks)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["marks"],
+      message: "Story Completion marks must be 8, 9, 10, 12, 13, or 15",
+    });
+  }
 });
 
-const updateQuestionSchema = questionFieldsSchema.extend({ id: z.string().uuid() });
+const updateQuestionSchema = z.intersection(
+  questionFieldsSchema,
+  z.object({ id: z.string().uuid() }),
+);
 const deleteQuestionSchema = z.object({ id: z.string().uuid() });
 
 export async function POST(req: NextRequest) {

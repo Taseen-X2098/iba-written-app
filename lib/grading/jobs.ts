@@ -255,11 +255,12 @@ async function processItem(item: ClaimedItem) {
   try {
     const { data: eq, error: eqError } = await admin
       .from("exam_questions")
-      .select("id, marks, questions(category)")
+      .select("id, marks, questions(category, prompt)")
       .eq("id", item.exam_question_id)
       .single();
     if (eqError || !eq) throw eqError ?? new Error("Question not found");
     const category = (eq.questions as any)?.category;
+    const questionPrompt = (eq.questions as any)?.prompt;
 
     if (category === "translation") {
       if (attemptId) {
@@ -305,6 +306,7 @@ async function processItem(item: ClaimedItem) {
       : (new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ResponsesClient);
     const rawResult = await grade(client, submissionText, category, eq.marks, {
       rubricSource,
+      questionPrompt,
     });
     const profilePlan = await prepareLearnerProfilePlan({
       client,

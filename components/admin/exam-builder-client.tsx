@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown } from "lucide-react";
 import type { Question, QuestionCategory, Difficulty } from "@/lib/types";
 import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "@/lib/types";
+import { STORY_COMPLETION_MARKS } from "@/lib/questions/story-completion";
 
 interface Props {
   availableQuestions: Question[];
@@ -237,7 +238,15 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
                             value={sq.q.category}
                             onChange={(e) => {
                               const newArr = [...selectedQuestions];
-                              newArr[index].q.category = e.target.value as QuestionCategory;
+                              const category = e.target.value as QuestionCategory;
+                              newArr[index].q.category = category;
+                              if (
+                                category === "story_completion"
+                                && !(STORY_COMPLETION_MARKS as readonly number[]).includes(sq.marks)
+                              ) {
+                                newArr[index].marks = 10;
+                                newArr[index].q.marks = 10;
+                              }
                               setSelectedQuestions(newArr);
                             }}
                             className="bg-background border border-border rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -269,17 +278,37 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
                     )}
                   </div>
                   <div className="w-20">
-                    <input 
-                      type="number"
-                      value={sq.marks}
-                      onChange={(e) => {
-                        const newArr = [...selectedQuestions];
-                        newArr[index].marks = Number(e.target.value);
-                        setSelectedQuestions(newArr);
-                      }}
-                      className="w-full bg-muted border border-border rounded px-2 py-1 text-sm text-center"
-                      title="Marks"
-                    />
+                    {sq.q.category === "story_completion" ? (
+                      <select
+                        value={sq.marks}
+                        onChange={(e) => {
+                          const newArr = [...selectedQuestions];
+                          newArr[index].marks = Number(e.target.value);
+                          if (newArr[index].q.id.startsWith("temp_")) {
+                            newArr[index].q.marks = Number(e.target.value);
+                          }
+                          setSelectedQuestions(newArr);
+                        }}
+                        className="w-full bg-muted border border-border rounded px-2 py-1 text-sm text-center"
+                        title="Marks"
+                      >
+                        {STORY_COMPLETION_MARKS.map((marks) => (
+                          <option key={marks} value={marks}>{marks}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="number"
+                        value={sq.marks}
+                        onChange={(e) => {
+                          const newArr = [...selectedQuestions];
+                          newArr[index].marks = Number(e.target.value);
+                          setSelectedQuestions(newArr);
+                        }}
+                        className="w-full bg-muted border border-border rounded px-2 py-1 text-sm text-center"
+                        title="Marks"
+                      />
+                    )}
                   </div>
                   <button 
                     onClick={() => removeQuestion(sq.q.id)}

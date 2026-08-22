@@ -16,6 +16,9 @@ import {
   Upload,
 } from "lucide-react";
 import { WebcamCapture } from "@/components/ui/webcam-capture";
+import { QuestionPrompt } from "@/components/questions/question-prompt";
+import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
+import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
 import { countWords, getWordLimitViolation, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
@@ -25,6 +28,7 @@ import type {
   Exam,
   ExamAttempt,
   GradingResultJSON,
+  PersonalProgressionCardDTO,
 } from "@/lib/types";
 
 type AnswerState = {
@@ -101,6 +105,7 @@ export default function ExamTakerClient({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobItems, setJobItems] = useState<JobItem[] | null>(null);
+  const [personalProgressionReports, setPersonalProgressionReports] = useState<Record<string, PersonalProgressionCardDTO>>({});
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const hasOverLimitAnswers = examQuestions.some((question) =>
     Boolean(getWordLimitViolation(answers[question.id]?.editedText ?? "", question.marks)),
@@ -415,6 +420,9 @@ export default function ExamTakerClient({
       const data = await response.json();
       if (cancelled || !response.ok) return;
       setJobStatus(data.job.status);
+      if (data.personalProgressionReports) {
+        setPersonalProgressionReports(data.personalProgressionReports);
+      }
       setJobItems((current) => {
         const merged = new Map((current ?? []).map((item) => [item.exam_question_id, item]));
         for (const item of data.items as JobItem[]) merged.set(item.exam_question_id, item);
@@ -477,15 +485,26 @@ export default function ExamTakerClient({
                     {translation ? "Not AI graded" : `${result?.internal.total ?? 0}/${question.marks}`}
                   </span>
                 </div>
-                <p className="mb-4 whitespace-pre-wrap text-sm font-medium">{question.questions.prompt}</p>
+                <QuestionPrompt
+                  prompt={question.questions.prompt}
+                  category={question.questions.category}
+                  className="mb-4 text-sm font-medium"
+                />
                 <div className="mb-4 rounded-xl bg-muted/30 p-4 text-sm whitespace-pre-wrap">
                   {answers[question.id]?.editedText || "No answer"}
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {translation
-                    ? "Translation is kept for self-study and excluded from quota and totals."
-                    : result?.studentFeedback.summary ?? "This answer was not selected for AI grading and counts as zero."}
-                </p>
+                {translation ? (
+                  <p className="text-sm text-muted-foreground">Translation is kept for self-study and excluded from quota and totals.</p>
+                ) : result ? (
+                  <div className="space-y-5">
+                    <SubmissionFeedback feedback={result.studentFeedback} />
+                    <PersonalProgressionCard
+                      report={personalProgressionReports[question.questions.category] ?? null}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">This answer was not selected for AI grading and counts as zero.</p>
+                )}
                 {result?.studentFeedback.highlights?.length ? (
                   <div className="mt-4 space-y-2">
                     {result.studentFeedback.highlights.map((highlight, highlightIndex) => (
@@ -597,7 +616,11 @@ export default function ExamTakerClient({
                 </div>
                 <span className="text-sm font-bold text-muted-foreground">{question.marks} marks</span>
               </div>
-              <p className="mb-5 whitespace-pre-wrap font-medium">{question.questions.prompt}</p>
+              <QuestionPrompt
+                prompt={question.questions.prompt}
+                category={question.questions.category}
+                className="mb-5 font-medium"
+              />
               {isPractice && question.questions.category === "translation" && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                   Translation is available for self-study but is not AI graded and does not use a test slot.

@@ -14,8 +14,17 @@ import {
 } from "@/lib/exams/recovery-client";
 import { countWords, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
-import { CATEGORY_LABELS, type Question, type GradingResultJSON, type QuestionCategory } from "@/lib/types";
+import {
+  CATEGORY_LABELS,
+  type Question,
+  type GradingResultJSON,
+  type PersonalProgressionCardDTO,
+  type QuestionCategory,
+} from "@/lib/types";
 import { HighlightedText } from "@/components/ui/highlighted-text";
+import { QuestionPrompt } from "@/components/questions/question-prompt";
+import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
+import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
 
 type TestState = 
   | "idle" 
@@ -26,6 +35,16 @@ type TestState =
   | "editing" 
   | "grading" 
   | "feedback";
+
+// A standalone attempt remains timed while its answer is being uploaded,
+// transcribed, or reviewed. The timer stops only once the student submits it
+// for grading.
+const TIMED_TEST_STATES: ReadonlySet<TestState> = new Set([
+  "running",
+  "uploading",
+  "ocr_processing",
+  "editing",
+]);
 
 interface Props {
   question: Question;
@@ -56,6 +75,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   
   // Grading state
   const [gradingResult, setGradingResult] = useState<GradingResultJSON | null>(null);
+  const [personalProgressionReport, setPersonalProgressionReport] = useState<PersonalProgressionCardDTO | null>(null);
 
   // Restore timer metadata plus the encrypted answer recovery for this tab.
   useEffect(() => {
@@ -151,11 +171,16 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     return () => window.clearTimeout(timeout);
   }, [editedText, ocrText, question.id, recoveryId, state]);
 
-  // Timer logic
+  // Keep the timer active until the student submits for grading, not merely
+  // until they start uploading an image.
   useEffect(() => {
-    if (state === "running") {
+    if (TIMED_TEST_STATES.has(state)) {
       timerRef.current = setInterval(() => {
-        setSecondsElapsed((prev) => prev + 1);
+        setSecondsElapsed((prev) => {
+          const next = prev + 1;
+          secondsRef.current = next;
+          return next;
+        });
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -203,6 +228,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
 
   const handleRestartTimer = () => {
     if (confirm("Are you sure you want to restart the timer?")) {
+      secondsRef.current = 0;
       setSecondsElapsed(0);
       setState("running");
     }
@@ -213,6 +239,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       localStorage.removeItem("in_progress_test");
       clearEncryptedRecovery(recoveryId);
       window.dispatchEvent(new Event("in_progress_test_updated"));
+      secondsRef.current = 0;
       setSecondsElapsed(0);
       setState("idle");
     }
@@ -270,6 +297,9 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     }
     
     setError(null);
+    // Read the ref so the final recorded duration includes every second up to
+    // the submission click, even if React has not rendered the latest tick.
+    const timeTakenSeconds = secondsRef.current;
     setState("grading");
     
     let receivedResponse = false;
@@ -283,7 +313,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
           idempotencyKey: gradingRequestIdRef.current,
           submissionText: editedText,
           ocrText,
-          timeTakenSeconds: secondsElapsed,
+          timeTakenSeconds,
         }),
       });
       receivedResponse = true;
@@ -292,6 +322,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       if (!res.ok) throw new Error(data.error || "Grading failed");
       
       setGradingResult(data.gradingResult);
+      setPersonalProgressionReport(data.personalProgressionReport ?? null);
       gradingRequestIdRef.current = null;
       setState("feedback");
       
@@ -323,9 +354,11 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
             {question.marks} Marks
           </span>
         </div>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground leading-snug">
-          {question.prompt}
-        </h1>
+        <QuestionPrompt
+          prompt={question.prompt}
+          category={question.category}
+          className="text-xl font-bold leading-snug text-foreground md:text-2xl"
+        />
         <div className="mt-3 flex items-start gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
           <span>
@@ -645,13 +678,17 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                   </span>
                 </div>
               </div>
-              <div>
-                <h3 className="text-lg sm:text-xl font-bold text-brand-900 mb-1.5 sm:mb-2">AI Feedback Summary</h3>
+              <div className="text-center md:text-left">
+                <h3 className="text-lg sm:text-xl font-bold text-brand-900 mb-1.5 sm:mb-2">Your evaluated submission</h3>
                 <p className="text-sm text-brand-800 leading-relaxed">
-                  {gradingResult.studentFeedback.summary}
+                  Read the three feedback sections carefully, then use your personal progression report to choose the next skill to practise.
                 </p>
               </div>
             </div>
+
+            <SubmissionFeedback feedback={gradingResult.studentFeedback} />
+
+            <PersonalProgressionCard report={personalProgressionReport} />
 
             {/* Highlights Interactive Text */}
             <div>

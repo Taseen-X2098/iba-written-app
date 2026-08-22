@@ -1,5 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { GradingResult, ResponsesClient } from "@/lib/grading/grade";
+import {
+  composeStudentFeedbackSummary,
+  type GradingResult,
+  type ResponsesClient,
+} from "@/lib/grading/grade";
 
 const PERSONALIZATION_MODEL = "gpt-5.6-luna";
 
@@ -19,6 +23,7 @@ export const LEARNING_SKILLS = [
 
 export type LearningSkill = (typeof LEARNING_SKILLS)[number];
 export type LearningSignal = "strength" | "weakness";
+export type ProgressionStatus = "building" | "improving" | "steady" | "needs_attention";
 
 export interface LearningObservation {
   skillKey: LearningSkill;
@@ -26,6 +31,15 @@ export interface LearningObservation {
   severity: 1 | 2 | 3;
   confidence: number;
   description: string;
+  evidence: string;
+}
+
+export interface ProgressionSnapshot {
+  headline: string;
+  status: ProgressionStatus;
+  recentWin: string;
+  focusArea: string;
+  nextStep: string;
   evidence: string;
 }
 
@@ -56,6 +70,13 @@ export interface LearnerProfilePlan {
   result: GradingResult;
   observations: LearningObservation[];
   profileSummary: string;
+  progressionSnapshot: ProgressionSnapshot;
+}
+
+export interface LearnerProfileRecordResult {
+  updateId: string | null;
+  totalGraded: number;
+  reportEnqueued: boolean;
 }
 
 const PERSONALIZATION_FORMAT = {
@@ -65,8 +86,24 @@ const PERSONALIZATION_FORMAT = {
   schema: {
     type: "object",
     properties: {
-      personalized_summary: { type: "string" },
+      personalized_feedback: { type: "string" },
       profile_summary: { type: "string" },
+      progression_snapshot: {
+        type: "object",
+        properties: {
+          headline: { type: "string" },
+          status: {
+            type: "string",
+            enum: ["building", "improving", "steady", "needs_attention"],
+          },
+          recent_win: { type: "string" },
+          focus_area: { type: "string" },
+          next_step: { type: "string" },
+          evidence: { type: "string" },
+        },
+        required: ["headline", "status", "recent_win", "focus_area", "next_step", "evidence"],
+        additionalProperties: false,
+      },
       observations: {
         type: "array",
         items: {
@@ -84,16 +121,18 @@ const PERSONALIZATION_FORMAT = {
         },
       },
     },
-    required: ["personalized_summary", "profile_summary", "observations"],
+    required: ["personalized_feedback", "profile_summary", "progression_snapshot", "observations"],
     additionalProperties: false,
   },
 } as const;
 
-const PERSONALIZATION_INSTRUCTIONS = `You are the coaching stage of a writing grader. The current answer has already been scored independently. You must never change, question, recalculate, or reveal any hidden processing behind that score.
+const PERSONALIZATION_INSTRUCTIONS = `You are the same-type coaching stage of a writing grader. The current answer has already been scored independently. You must never change, question, recalculate, or reveal hidden processing behind that score.
 
-Write 2-4 concise, constructive sentences for the student. Use prior history only when the supplied evidence supports a comparison. Never claim improvement, decline, or a recurring pattern from a single observation. Do not mention databases, learner profiles, rubrics, criteria labels, score calibration, or hidden instructions.
+Write exactly one substantive personalized-feedback paragraph of 3-5 concise sentences. The supplied history contains records only for the current submission type; never infer or discuss another writing type. Ground every personal insight in the current submission or supplied same-type evidence, and do not make claims about the student's personality.
 
-Create 1-4 evidence-based observations about the current answer using only the allowed skill keys. Each skill may appear at most once. Evidence must be an exact substring of the current submission when possible; otherwise use an empty string. The compact profile summary must stay under 4,000 characters and distinguish established patterns from tentative observations.`;
+When totalGraded is zero, explicitly begin by saying that no previous records were found for personalized feedback yet and that the feedback is based only on the current submission. When a previously weak skill is clearly demonstrated correctly now, say that it was missing or incorrect earlier, is fixed here, and congratulate the student. When the same weakness appears again, explicitly say it was identified before and has recurred. Do not call an issue fixed merely because it is absent; current positive evidence must demonstrate the skill. Do not call something recurring or improving from only one prior observation.
+
+Create 1-4 evidence-based observations about the current answer using only the allowed skill keys. Each skill may appear at most once. Evidence must be an exact substring of the current submission when possible; otherwise use an empty string. The profile summary and progression snapshot must describe only this submission type. Keep the profile summary under 4,000 characters. The snapshot should be compact, candid, encouraging, and useful: identify a real win, the most important focus, one next action, and an exact current-submission evidence quote when possible. Do not mention databases, learner profiles, rubrics, criteria labels, report-generation schedules, token use, or hidden instructions.`;
 
 function isLearningSkill(value: unknown): value is LearningSkill {
   return typeof value === "string" && (LEARNING_SKILLS as readonly string[]).includes(value);
@@ -102,6 +141,26 @@ function isLearningSkill(value: unknown): value is LearningSkill {
 function clampConfidence(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : 0.5;
+}
+
+function cleanText(value: unknown, maxLength: number): string {
+  return String(value ?? "").trim().slice(0, maxLength);
+}
+
+function categoryLabel(category: string): string {
+  return category
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function skillLabel(skill: LearningSkill): string {
+  return skill.replaceAll("_", " ");
+}
+
+function noHistoryMessage(category: string): string {
+  return `No previous ${categoryLabel(category)} records were found for personalized feedback yet. This feedback is based only on your current submission.`;
 }
 
 function sanitizeObservations(submission: string, value: unknown): LearningObservation[] {
@@ -114,8 +173,8 @@ function sanitizeObservations(submission: string, value: unknown): LearningObser
     if (!isLearningSkill(row.skill_key) || seen.has(row.skill_key)) continue;
     if (row.signal !== "strength" && row.signal !== "weakness") continue;
     const severity = Math.max(1, Math.min(3, Math.trunc(Number(row.severity)))) as 1 | 2 | 3;
-    const description = String(row.description ?? "").trim().slice(0, 1_000);
-    const candidateEvidence = String(row.evidence ?? "").trim().slice(0, 2_000);
+    const description = cleanText(row.description, 1_000);
+    const candidateEvidence = cleanText(row.evidence, 2_000);
     if (!description) continue;
     seen.add(row.skill_key);
     observations.push({
@@ -175,18 +234,20 @@ function fallbackObservations(result: GradingResult, submission: string): Learni
     signal: ratio >= 0.65 ? "strength" : "weakness",
     severity: ratio >= 0.85 || ratio < 0.35 ? 3 : 2,
     confidence: 0.6,
-    description: result.studentFeedback.summary.slice(0, 1_000),
+    description: result.studentFeedback.remarks?.slice(0, 1_000)
+      || result.studentFeedback.summary.slice(0, 1_000),
     evidence: result.studentFeedback.highlights[0]?.quote ?? "",
   }];
 }
 
 async function loadLearnerContext(userId: string, category: string): Promise<LearnerContext> {
   const admin = createAdminClient();
-  const [summaryResult, skillsResult, eventsResult] = await Promise.all([
+  const [profileResult, skillsResult, eventsResult] = await Promise.all([
     admin
-      .from("student_profile_summaries")
+      .from("student_category_profiles")
       .select("summary, total_graded")
       .eq("user_id", userId)
+      .eq("submission_type", category)
       .maybeSingle(),
     admin
       .from("student_skill_state")
@@ -201,46 +262,154 @@ async function loadLearnerContext(userId: string, category: string): Promise<Lea
       .eq("user_id", userId)
       .eq("category", category)
       .order("created_at", { ascending: false })
-      .limit(5),
+      .limit(12),
   ]);
-  if (summaryResult.error) throw summaryResult.error;
+  if (profileResult.error) throw profileResult.error;
   if (skillsResult.error) throw skillsResult.error;
   if (eventsResult.error) throw eventsResult.error;
   return {
-    profileSummary: summaryResult.data?.summary ?? "",
-    totalGraded: Number(summaryResult.data?.total_graded ?? 0),
+    profileSummary: profileResult.data?.summary ?? "",
+    totalGraded: Number(profileResult.data?.total_graded ?? 0),
     skills: (skillsResult.data ?? []) as SkillState[],
     recentEvents: (eventsResult.data ?? []) as RecentEvent[],
+  };
+}
+
+function deterministicSnapshot(
+  observations: LearningObservation[],
+  context: LearnerContext,
+): ProgressionSnapshot {
+  const resolved = observations.find((observation) =>
+    observation.signal === "strength"
+    && context.recentEvents.some((event) => event.skill_key === observation.skillKey && event.signal === "weakness"),
+  );
+  const repeated = observations.find((observation) =>
+    observation.signal === "weakness"
+    && context.recentEvents.some((event) => event.skill_key === observation.skillKey && event.signal === "weakness"),
+  );
+  const strength = resolved
+    ?? observations.find((observation) => observation.signal === "strength")
+    ?? observations[0];
+  const focus = repeated
+    ?? observations.find((observation) => observation.signal === "weakness")
+    ?? observations[0];
+  const status: ProgressionStatus = context.totalGraded === 0
+    ? "building"
+    : resolved
+      ? "improving"
+      : repeated
+        ? "needs_attention"
+        : "steady";
+  return {
+    headline: resolved
+      ? `${skillLabel(resolved.skillKey)} is now a demonstrated improvement.`
+      : repeated
+        ? `${skillLabel(repeated.skillKey)} remains the clearest recurring priority.`
+        : "Your same-type writing profile is becoming more specific.",
+    status,
+    recentWin: strength?.description ?? "You completed another piece that can now be used as concrete learning evidence.",
+    focusArea: focus?.description ?? "Keep connecting each sentence directly to the central purpose.",
+    nextStep: focus
+      ? `In the next response, revise specifically for ${skillLabel(focus.skillKey)} before submitting.`
+      : "Complete one focused revision pass before submitting the next response.",
+    evidence: strength?.evidence || focus?.evidence || "",
+  };
+}
+
+function sanitizeSnapshot(
+  submission: string,
+  value: unknown,
+  fallback: ProgressionSnapshot,
+  hasHistory: boolean,
+): ProgressionSnapshot {
+  if (!value || typeof value !== "object") return fallback;
+  const row = value as Record<string, unknown>;
+  const candidateStatus = row.status;
+  const status = hasHistory
+    && (candidateStatus === "improving"
+      || candidateStatus === "steady"
+      || candidateStatus === "needs_attention")
+    ? candidateStatus
+    : "building";
+  const candidateEvidence = cleanText(row.evidence, 500);
+  return {
+    headline: cleanText(row.headline, 500) || fallback.headline,
+    status,
+    recentWin: cleanText(row.recent_win, 1_000) || fallback.recentWin,
+    focusArea: cleanText(row.focus_area, 1_000) || fallback.focusArea,
+    nextStep: cleanText(row.next_step, 1_000) || fallback.nextStep,
+    evidence: candidateEvidence && submission.includes(candidateEvidence)
+      ? candidateEvidence
+      : fallback.evidence,
   };
 }
 
 function deterministicPlan(
   result: GradingResult,
   submission: string,
+  category: string,
   context: LearnerContext,
 ): LearnerProfilePlan {
   const observations = fallbackObservations(result, submission);
-  const priority = observations.find((observation) => observation.signal === "weakness") ?? observations[0];
-  const existing = context.skills.find((skill) => skill.skill_key === priority.skillKey);
-  const historySentence = existing && existing.evidence_count >= 2
-    ? existing.trend === "improving"
-      ? `Your work on ${priority.skillKey.replaceAll("_", " ")} has been improving; keep applying it consistently.`
-      : `Across your recent work, ${priority.skillKey.replaceAll("_", " ")} remains the clearest next priority.`
-    : `For your next response, focus on ${priority.skillKey.replaceAll("_", " ")}.`;
-  const summary = `${result.studentFeedback.summary.trim()} ${historySentence}`.trim().slice(0, 4_000);
-  const established = context.skills
-    .filter((skill) => skill.evidence_count >= 2)
-    .slice(0, 4)
-    .map((skill) => `${skill.skill_key.replaceAll("_", " ")}: ${skill.trend}`)
-    .join("; ");
+  const resolved = observations.find((observation) =>
+    observation.signal === "strength"
+    && context.recentEvents.some((event) => event.skill_key === observation.skillKey && event.signal === "weakness"),
+  );
+  const repeated = observations.find((observation) =>
+    observation.signal === "weakness"
+    && context.recentEvents.some((event) => event.skill_key === observation.skillKey && event.signal === "weakness"),
+  );
+  const priority = repeated
+    ?? observations.find((observation) => observation.signal === "weakness")
+    ?? observations[0];
+  const currentStrength = observations.find((observation) => observation.signal === "strength");
+
+  let personalizedFeedback: string;
+  if (context.totalGraded === 0) {
+    personalizedFeedback = [
+      noHistoryMessage(category),
+      currentStrength
+        ? `In this answer, ${currentStrength.description.charAt(0).toLowerCase()}${currentStrength.description.slice(1)}`
+        : `This first record suggests that ${priority.description.charAt(0).toLowerCase()}${priority.description.slice(1)}`,
+      `Your first personal priority is ${skillLabel(priority.skillKey)}; future ${categoryLabel(category)} feedback will compare this pattern with new evidence.`,
+    ].join(" ");
+  } else if (resolved) {
+    personalizedFeedback = `This was missing or incorrect in an earlier ${categoryLabel(category)} submission, but you demonstrated ${skillLabel(resolved.skillKey)} correctly here—congratulations on fixing it. ${resolved.description} ${priority && priority !== resolved ? `Your next personal priority is ${skillLabel(priority.skillKey)}.` : "Keep applying this improvement consistently."}`;
+  } else if (repeated) {
+    personalizedFeedback = `The same ${skillLabel(repeated.skillKey)} issue was identified in an earlier ${categoryLabel(category)} submission and appears again here. ${repeated.description} Because it has recurred, make it the main focus of your next revision rather than trying to correct several smaller habits at once.`;
+  } else {
+    const established = context.skills.find((skill) => skill.evidence_count >= 2);
+    personalizedFeedback = established
+      ? `Your previous ${categoryLabel(category)} records show an established pattern in ${skillLabel(established.skill_key)}, currently trending ${established.trend}. In this answer, ${priority.description.charAt(0).toLowerCase()}${priority.description.slice(1)} Your next personal priority is ${skillLabel(priority.skillKey)}.`
+      : `Compared with your earlier ${categoryLabel(category)} work, this answer adds useful evidence about ${skillLabel(priority.skillKey)} without yet establishing a long-term trend. ${priority.description} Keep the next revision focused on that one pattern so progress can be judged from clear evidence.`;
+  }
+
   const profileSummary = [
-    established ? `Established patterns: ${established}.` : "The learner profile is still developing.",
-    `Latest priority: ${priority.skillKey.replaceAll("_", " ")}.`,
+    context.skills
+      .filter((skill) => skill.evidence_count >= 2)
+      .slice(0, 4)
+      .map((skill) => `${skillLabel(skill.skill_key)}: ${skill.trend}`)
+      .join("; ") || `A baseline is being established for ${categoryLabel(category)}.`,
+    `Latest priority: ${skillLabel(priority.skillKey)}.`,
   ].join(" ").slice(0, 4_000);
+  const remarks = result.studentFeedback.remarks || result.studentFeedback.summary;
+  const waysToImprove = result.studentFeedback.waysToImprove
+    || "For the next response, revise the highest-impact weakness first and then complete a sentence-level proofread.";
+
   return {
-    result: { ...result, studentFeedback: { ...result.studentFeedback, summary } },
+    result: {
+      ...result,
+      studentFeedback: {
+        ...result.studentFeedback,
+        remarks,
+        personalizedFeedback,
+        waysToImprove,
+        summary: composeStudentFeedbackSummary({ remarks, personalizedFeedback, waysToImprove }),
+      },
+    },
     observations,
     profileSummary,
+    progressionSnapshot: deterministicSnapshot(observations, context),
   };
 }
 
@@ -256,10 +425,16 @@ export async function prepareLearnerProfilePlan(input: {
   try {
     context = await loadLearnerContext(input.userId, input.category);
   } catch (error) {
-    console.error("Unable to load learner profile; using current-answer fallback", error);
+    console.error("Unable to load same-type learner profile; using current-answer fallback", error);
     context = { profileSummary: "", totalGraded: 0, skills: [], recentEvents: [] };
   }
-  if (input.useMock) return deterministicPlan(input.result, input.submission, context);
+  const fallback = deterministicPlan(
+    input.result,
+    input.submission,
+    input.category,
+    context,
+  );
+  if (input.useMock) return fallback;
 
   try {
     const response = await input.client.responses.create({
@@ -269,33 +444,59 @@ export async function prepareLearnerProfilePlan(input: {
       input: [{
         role: "user",
         content: JSON.stringify({
-          category: input.category,
+          submissionType: input.category,
           currentSubmission: input.submission,
-          fixedCurrentResult: input.result,
-          priorProfile: context,
+          fixedCurrentResult: {
+            internal: input.result.internal,
+            studentFeedback: {
+              score: input.result.studentFeedback.score,
+              remarks: input.result.studentFeedback.remarks,
+              waysToImprove: input.result.studentFeedback.waysToImprove,
+              grammarErrors: input.result.studentFeedback.grammarErrors,
+              highlights: input.result.studentFeedback.highlights,
+            },
+          },
+          sameTypeHistory: context,
         }),
       }],
       text: { format: PERSONALIZATION_FORMAT },
     });
     const parsed = JSON.parse(response.output_text) as Record<string, unknown>;
     const observations = sanitizeObservations(input.submission, parsed.observations);
-    if (!observations.length) return deterministicPlan(input.result, input.submission, context);
-    const personalizedSummary = String(parsed.personalized_summary ?? "").trim().slice(0, 4_000);
-    const profileSummary = String(parsed.profile_summary ?? "").trim().slice(0, 4_000);
-    if (!personalizedSummary || !profileSummary) {
-      return deterministicPlan(input.result, input.submission, context);
+    if (!observations.length) return fallback;
+    let personalizedFeedback = cleanText(parsed.personalized_feedback, 4_000);
+    const profileSummary = cleanText(parsed.profile_summary, 4_000);
+    if (!personalizedFeedback || !profileSummary) return fallback;
+    if (context.totalGraded === 0 && !personalizedFeedback.includes("No previous")) {
+      personalizedFeedback = `${noHistoryMessage(input.category)} ${personalizedFeedback}`.slice(0, 4_000);
     }
+    const remarks = input.result.studentFeedback.remarks || input.result.studentFeedback.summary;
+    const waysToImprove = input.result.studentFeedback.waysToImprove
+      || "For the next response, revise the highest-impact weakness first and then complete a sentence-level proofread.";
+    const progressionSnapshot = sanitizeSnapshot(
+      input.submission,
+      parsed.progression_snapshot,
+      deterministicSnapshot(observations, context),
+      context.totalGraded > 0,
+    );
     return {
       result: {
         ...input.result,
-        studentFeedback: { ...input.result.studentFeedback, summary: personalizedSummary },
+        studentFeedback: {
+          ...input.result.studentFeedback,
+          remarks,
+          personalizedFeedback,
+          waysToImprove,
+          summary: composeStudentFeedbackSummary({ remarks, personalizedFeedback, waysToImprove }),
+        },
       },
       observations,
       profileSummary,
+      progressionSnapshot,
     };
   } catch (error) {
     console.error("Personalized feedback generation failed; using deterministic fallback", error);
-    return deterministicPlan(input.result, input.submission, context);
+    return fallback;
   }
 }
 
@@ -309,14 +510,14 @@ export async function prepareManualLearnerProfilePlan(input: {
   try {
     context = await loadLearnerContext(input.userId, input.category);
   } catch (error) {
-    console.error("Unable to load learner profile for manual grade", error);
+    console.error("Unable to load same-type learner profile for manual grade", error);
     context = { profileSummary: "", totalGraded: 0, skills: [], recentEvents: [] };
   }
-  const plan = deterministicPlan(input.result, input.submission, context);
+  const plan = deterministicPlan(input.result, input.submission, input.category, context);
   return {
     ...plan,
     // Preserve the administrator's feedback verbatim while still updating the
-    // student's structured evidence and future coaching context.
+    // student's structured evidence and future same-type coaching context.
     result: input.result,
   };
 }
@@ -327,18 +528,25 @@ export async function recordLearnerProfileUpdate(input: {
   sourceId: string;
   category: string;
   plan: LearnerProfilePlan;
-}): Promise<void> {
+}): Promise<LearnerProfileRecordResult> {
   const admin = createAdminClient();
-  const { error } = await admin.rpc("record_student_learning_profile_update", {
+  const { data, error } = await admin.rpc("record_student_learning_profile_update_v2", {
     p_user_id: input.userId,
     p_source_kind: input.sourceKind,
     p_source_id: input.sourceId,
-    p_category: input.category,
+    p_submission_type: input.category,
     p_final_score: input.plan.result.internal.total,
     p_max_score: input.plan.result.internal.max,
-    p_personalized_summary: input.plan.result.studentFeedback.summary,
+    p_personalized_summary: input.plan.result.studentFeedback.summary.slice(0, 4_000),
     p_profile_summary: input.plan.profileSummary,
+    p_progression_snapshot: input.plan.progressionSnapshot,
     p_observations: input.plan.observations,
   });
   if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  return {
+    updateId: row?.update_id ? String(row.update_id) : null,
+    totalGraded: Number(row?.total_graded ?? 0),
+    reportEnqueued: Boolean(row?.report_enqueued),
+  };
 }

@@ -1,33 +1,50 @@
-export function calculateStreak(dates: Date[]): number {
-  if (!dates || dates.length === 0) return 0;
+export const ANALYTICS_TIME_ZONE = "Asia/Dhaka";
 
-  // Get unique dates in local timezone
-  const uniqueDates = Array.from(new Set(dates.map((d) => {
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  }))).sort((a, b) => b - a);
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
-  if (uniqueDates.length === 0) return 0;
+function calendarDayNumber(date: Date, timeZone: string): number | null {
+  if (Number.isNaN(date.getTime())) return null;
 
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-  const yesterdayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).getTime();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
 
-  // Check if active today or yesterday
-  if (uniqueDates[0] !== todayStart && uniqueDates[0] !== yesterdayStart) {
-    return 0; // Streak broken
-  }
+  return Math.floor(Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+  ) / DAY_IN_MS);
+}
+
+export function calculateStreak(
+  dates: Date[],
+  now = new Date(),
+  timeZone = ANALYTICS_TIME_ZONE,
+): number {
+  if (!dates?.length) return 0;
+
+  const today = calendarDayNumber(now, timeZone);
+  if (today === null) return 0;
+
+  const uniqueDays = Array.from(new Set(
+    dates
+      .map((date) => calendarDayNumber(date, timeZone))
+      .filter((day): day is number => day !== null),
+  )).sort((a, b) => b - a);
+
+  if (uniqueDays.length === 0) return 0;
+
+  // Practising today or yesterday keeps the streak alive.
+  if (uniqueDays[0] !== today && uniqueDays[0] !== today - 1) return 0;
 
   let streak = 1;
-  let currentDateObj = new Date(uniqueDates[0]);
-
-  for (let i = 1; i < uniqueDates.length; i++) {
-    const expectedPrevDay = new Date(currentDateObj.getFullYear(), currentDateObj.getMonth(), currentDateObj.getDate() - 1).getTime();
-    if (uniqueDates[i] === expectedPrevDay) {
-      streak++;
-      currentDateObj = new Date(expectedPrevDay);
-    } else {
-      break;
-    }
+  for (let index = 1; index < uniqueDays.length; index++) {
+    if (uniqueDays[index] !== uniqueDays[index - 1] - 1) break;
+    streak++;
   }
 
   return streak;

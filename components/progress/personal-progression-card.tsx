@@ -1,0 +1,123 @@
+import Link from "next/link";
+import { ArrowRight, Crown, Lock, Sparkles, Target, TrendingUp } from "lucide-react";
+import type { PersonalProgressionCardDTO, ProgressionStatus } from "@/lib/types";
+
+const STATUS_LABELS: Record<ProgressionStatus, string> = {
+  building: "Building your baseline",
+  improving: "Improving",
+  steady: "Steady",
+  needs_attention: "Needs focused attention",
+};
+
+export function PersonalProgressionCard({
+  report,
+}: {
+  report: PersonalProgressionCardDTO | null;
+}) {
+  if (!report) {
+    return (
+      <section className="rounded-2xl border border-border bg-card p-5 sm:p-6">
+        <h3 className="font-bold text-foreground">Personal Progression Report</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your progression snapshot is temporarily unavailable. Your submission feedback has still been saved.
+        </p>
+      </section>
+    );
+  }
+
+  if (report.locked) {
+    return (
+      <section className="relative overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5 sm:p-6">
+        <Crown className="absolute -right-4 -top-4 text-amber-200/70" size={96} aria-hidden="true" />
+        <div className="relative">
+          <div className="flex items-center gap-2">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-800">
+              <Lock size={18} aria-hidden="true" />
+            </span>
+            <div>
+              <h3 className="font-bold text-amber-950">Personal Progression Report</h3>
+              <p className="text-xs font-semibold text-amber-700">{report.submissionTypeLabel} · Subscriber feature</p>
+            </div>
+          </div>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-amber-900">
+            Unlock a private, evidence-backed view of your improvements, recurring mistakes, resolved weaknesses, and next personal practice target for this writing type.
+          </p>
+          <Link
+            href="/subscription"
+            prefetch={false}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+          >
+            View subscription options <ArrowRight size={15} aria-hidden="true" />
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-brand-50">
+      <div className="border-b border-violet-100 p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+              <TrendingUp size={20} aria-hidden="true" />
+            </span>
+            <div>
+              <h3 className="font-bold text-foreground">Personal Progression Report</h3>
+              <p className="text-xs font-medium text-muted-foreground">{report.submissionTypeLabel} only</p>
+            </div>
+          </div>
+          <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-xs font-bold text-violet-800">
+            {STATUS_LABELS[report.snapshot.status]}
+          </span>
+        </div>
+        <p className="mt-4 text-base font-bold leading-6 text-foreground">{report.snapshot.headline}</p>
+        {report.latestReport?.overview ? (
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">{report.latestReport.overview}</p>
+        ) : null}
+      </div>
+
+      <div className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
+        <ProgressItem icon={<Sparkles size={16} />} label="Recent win" value={report.snapshot.recentWin} />
+        <ProgressItem icon={<Target size={16} />} label="Current focus" value={report.snapshot.focusArea} />
+        <ProgressItem icon={<ArrowRight size={16} />} label="Next step" value={report.snapshot.nextStep} />
+      </div>
+
+      {report.snapshot.evidence ? (
+        <div className="mx-5 mb-5 rounded-xl border border-violet-100 bg-white/80 p-3 text-sm sm:mx-6 sm:mb-6">
+          <span className="font-bold text-violet-800">Evidence from your writing: </span>
+          <span className="text-muted-foreground">“{report.snapshot.evidence}”</span>
+        </div>
+      ) : null}
+
+      <div className="border-t border-violet-100 px-5 py-4 text-right sm:px-6">
+        <Link
+          href={`/personal-report?type=${encodeURIComponent(report.submissionType)}`}
+          prefetch={false}
+          className="inline-flex items-center gap-1.5 text-sm font-bold text-violet-700 hover:text-violet-900"
+        >
+          Open full personal report <ArrowRight size={15} aria-hidden="true" />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function ProgressItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-violet-100 bg-white/80 p-4">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-700">
+        {icon} {label}
+      </div>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{value}</p>
+    </div>
+  );
+}

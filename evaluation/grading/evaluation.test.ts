@@ -4,7 +4,7 @@ import { TASK_TYPES } from "@/lib/grading/tools";
 
 describe("real grading evaluation fixtures", () => {
   it("contains exactly three cases for every AI-gradable rubric type", () => {
-    expect(GRADING_EVALUATION_CASES).toHaveLength(15);
+    expect(GRADING_EVALUATION_CASES).toHaveLength(18);
 
     for (const taskType of TASK_TYPES) {
       expect(

@@ -4,6 +4,9 @@ import { FileText, Clock, Calendar, ArrowLeft } from "lucide-react";
 import { HighlightedText } from "@/components/ui/highlighted-text";
 import { CATEGORY_LABELS } from "@/lib/types";
 import { formatStoredScore } from "@/lib/grading/marks";
+import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
+import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
+import { getPersonalProgressionCard } from "@/lib/learning/progression";
 import Link from "next/link";
 
 export default async function HistoryDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -45,7 +48,10 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
   const studentFeedback = result?.studentFeedback || result?.student_feedback;
   const scoreStr = studentFeedback?.score || (result?.marks ? `${result.marks}/${question.marks || 10}` : undefined);
   const scoreParts = formatStoredScore(scoreStr, question.marks || 10)?.split("/") || ["?", "?"];
-  const summaryText = studentFeedback?.summary || (result?.marks ? "This is a mock summary from test-db." : "No summary available.");
+  const personalProgressionReport = await getPersonalProgressionCard({
+    userId: user.id,
+    submissionType: question.category,
+  });
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -101,12 +107,16 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
             </div>
           </div>
           <div className="flex-1 text-center md:text-left">
-            <h3 className="text-base sm:text-lg font-bold text-brand-900 mb-1.5 sm:mb-2">AI Feedback Summary</h3>
+            <h3 className="text-base sm:text-lg font-bold text-brand-900 mb-1.5 sm:mb-2">Your evaluated submission</h3>
             <p className="text-sm text-brand-800 leading-relaxed">
-              {summaryText}
+              Review the three feedback sections, then use the personal progression report to focus your next practice session.
             </p>
           </div>
         </div>
+
+        {studentFeedback ? <SubmissionFeedback feedback={studentFeedback} /> : null}
+
+        <PersonalProgressionCard report={personalProgressionReport} />
 
         {/* Highlights Interactive Text */}
         {studentFeedback?.highlights ? (

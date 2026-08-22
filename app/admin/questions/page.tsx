@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Plus, Database, Pencil } from "lucide-react";
 import QuestionRowActions from "@/components/admin/question-row-actions";
+import { CATEGORY_LABELS, type QuestionCategory } from "@/lib/types";
+import { questionPromptPreview } from "@/lib/questions/story-completion";
 
 export default async function AdminQuestionsPage() {
   const supabase = await createClient();
@@ -55,11 +57,11 @@ export default async function AdminQuestionsPage() {
               {safeQuestions.map((q: any) => (
                 <tr key={q.id} className="hover:bg-muted/30 transition-colors">
                   <td className="px-6 py-4 font-medium text-foreground max-w-md truncate" title={q.prompt}>
-                    {q.prompt}
+                    {questionPromptPreview(q.prompt, q.category)}
                   </td>
                   <td className="px-6 py-4">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground capitalize">
-                      {q.category.replace("_", " ")}
+                      {CATEGORY_LABELS[q.category as QuestionCategory] ?? q.category.replaceAll("_", " ")}
                     </span>
                   </td>
                   <td className="px-6 py-4">

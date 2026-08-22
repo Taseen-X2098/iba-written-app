@@ -7,6 +7,7 @@ import { fetchQuestionsClient } from "@/lib/api/questions-client";
 import { BookOpen, Search, Filter, Loader2, ArrowRight, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { CATEGORY_LABELS, DIFFICULTY_LABELS, type QuestionCategory } from "@/lib/types";
+import { questionPromptPreview } from "@/lib/questions/story-completion";
 
 interface Props {
   initialSearch?: string;
@@ -155,8 +156,8 @@ export default function QuestionBankClient({
           <h2 className="text-xl font-bold text-foreground">Question Bank</h2>
           <p className="text-sm text-muted-foreground">
             {isFreeTier
-              ? "15 free questions across five topics · 3 AI evaluations included."
-              : "Practice more than 500 questions by topic."}
+              ? "18 free questions across six topics · 3 AI evaluations included."
+              : "Practice 625 questions by topic."}
           </p>
         </div>
       </div>
@@ -301,7 +302,7 @@ export default function QuestionBankClient({
               </div>
 
               <p className="text-sm text-foreground line-clamp-3 leading-relaxed mb-4">
-                {q.prompt}
+                {questionPromptPreview(q.prompt, q.category)}
               </p>
 
               {q.source && (

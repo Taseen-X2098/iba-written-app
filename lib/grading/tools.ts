@@ -12,6 +12,7 @@ export const TASK_TYPES = [
   "creative_writing",
   "personal_reflection",
   "basic_paragraph",
+  "story_completion",
 ] as const;
 
 export type TaskType = (typeof TASK_TYPES)[number];

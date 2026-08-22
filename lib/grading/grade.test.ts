@@ -181,4 +181,43 @@ describe('AI Grading Utility', () => {
     const result = await grade(client, 'text', 'essay', 10);
     expect(result).toBeDefined();
   });
+
+  it('returns the three feedback sections and keeps every locatable grammar correction', async () => {
+    const mockResponse = JSON.stringify({
+      internal: { total: 6, max: 10, criteria: [] },
+      student_feedback: {
+        score: '6/10',
+        remarks: 'The answer has a relevant position, but sentence accuracy weakens its authority.',
+        ways_to_improve: 'Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
+        grammar_errors: [
+          {
+            quote: 'People is affected',
+            error_type: 'Subject–verb agreement',
+            explanation: 'The plural subject “People” requires “are.”',
+            corrections: ['People are affected', 'Individuals are affected'],
+          },
+          {
+            quote: 'A hallucinated quote',
+            error_type: 'Spelling',
+            explanation: 'This quote does not exist.',
+            corrections: ['Corrected'],
+          },
+        ],
+        highlights: [],
+      },
+    });
+    const result = await grade(
+      createMockClient(mockResponse),
+      'People is affected by this policy.',
+      'argumentative_essay',
+      10,
+    );
+
+    expect(result.studentFeedback.remarks).toContain('relevant position');
+    expect(result.studentFeedback.personalizedFeedback).toContain('No previous Argumentative Essay records');
+    expect(result.studentFeedback.waysToImprove).toContain('People are affected');
+    expect(result.studentFeedback.grammarErrors).toHaveLength(1);
+    expect(result.studentFeedback.grammarErrors?.[0].corrections).toHaveLength(2);
+    expect(result.studentFeedback.summary.split('\n\n')).toHaveLength(3);
+  });
 });

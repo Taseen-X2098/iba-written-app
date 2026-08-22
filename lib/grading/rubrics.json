@@ -1163,5 +1163,277 @@
         }
       ]
     }
+  },
+  "story_completion": {
+    "8": {
+      "total": 8,
+      "criteria": [
+        {
+          "criterion": "Continuity with the opening and prompt adherence",
+          "marks": 0.5,
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+        },
+        {
+          "criterion": "Plot development, causality and pacing",
+          "marks": 2,
+          "guidance": "Main scoring zone — events form a coherent narrative rather than a list or unrelated sequence."
+        },
+        {
+          "criterion": "Characterization, setting and descriptive detail",
+          "marks": 1,
+          "guidance": "Characters and setting gain enough specific detail to make the continuation concrete."
+        },
+        {
+          "criterion": "Language, vocabulary and narrative style",
+          "marks": 1,
+          "guidance": "Clear narrative voice, appropriate word choice, and some sentence variety."
+        },
+        {
+          "criterion": "Theme, message or emotional impact",
+          "marks": 0.5,
+          "guidance": "The story creates some meaning, feeling, or consequence beyond merely listing events."
+        },
+        {
+          "criterion": "Ending and resolution",
+          "marks": 0.5,
+          "guidance": "The ending is deliberate rather than abrupt; an earned open ending is valid."
+        },
+        {
+          "criterion": "Flow, structure, paragraphing and grammar",
+          "marks": 1,
+          "guidance": "Consistent point of view and tense unless a shift is deliberate and controlled; apply grammar and spelling standards strictly."
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 1.5,
+          "guidance": "Zero for normal competent work by default; reserve for exceptional voice, construction, insight, or an unexpected but earned turn."
+        }
+      ]
+    },
+    "9": {
+      "total": 9,
+      "criteria": [
+        {
+          "criterion": "Continuity with the opening and prompt adherence",
+          "marks": 0.5,
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+        },
+        {
+          "criterion": "Plot development, causality and pacing",
+          "marks": 2.5,
+          "guidance": "Main scoring zone — events form a coherent, sufficiently developed narrative arc."
+        },
+        {
+          "criterion": "Characterization, setting and descriptive detail",
+          "marks": 1,
+          "guidance": "Characters and setting gain specific, relevant detail."
+        },
+        {
+          "criterion": "Language, vocabulary and narrative style",
+          "marks": 1,
+          "guidance": "Clear narrative voice, appropriate word choice, and sentence variety."
+        },
+        {
+          "criterion": "Theme, message or emotional impact",
+          "marks": 0.5,
+          "guidance": "The story creates meaning, feeling, or consequence beyond merely listing events."
+        },
+        {
+          "criterion": "Ending and resolution",
+          "marks": 0.5,
+          "guidance": "The ending is deliberate rather than abrupt; an earned open ending is valid."
+        },
+        {
+          "criterion": "Flow, structure, paragraphing and grammar",
+          "marks": 1,
+          "guidance": "Consistent point of view and tense unless deliberately controlled; apply grammar and spelling standards strictly."
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": "Zero for normal competent work by default; reserve for exceptional voice, construction, insight, or an unexpected but earned turn."
+        }
+      ]
+    },
+    "10": {
+      "total": 10,
+      "criteria": [
+        {
+          "criterion": "Continuity with the opening and prompt adherence",
+          "marks": 0.5,
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+        },
+        {
+          "criterion": "Plot development, causality and pacing",
+          "marks": 2.5,
+          "guidance": "Main scoring zone — coherent arc, causal progression, controlled pacing, and meaningful development."
+        },
+        {
+          "criterion": "Characterization, setting and descriptive detail",
+          "marks": 1.5,
+          "guidance": "Characters respond credibly and the setting is developed with relevant detail."
+        },
+        {
+          "criterion": "Language, vocabulary and narrative style",
+          "marks": 1.5,
+          "guidance": "Controlled voice, precise vocabulary, sentence variety, and purposeful imagery where appropriate."
+        },
+        {
+          "criterion": "Theme, message or emotional impact",
+          "marks": 0.5,
+          "guidance": "The story creates meaning, feeling, or consequence beyond merely listing events."
+        },
+        {
+          "criterion": "Ending and resolution",
+          "marks": 0.5,
+          "guidance": "The ending is deliberate rather than abrupt; an earned open ending is valid."
+        },
+        {
+          "criterion": "Flow, structure, paragraphing and grammar",
+          "marks": 1,
+          "guidance": "Logical paragraphing and consistent point of view and tense unless deliberately controlled; apply grammar and spelling standards strictly."
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": "Zero for normal competent work by default; reserve for exceptional voice, construction, insight, or an unexpected but earned turn."
+        }
+      ]
+    },
+    "12": {
+      "total": 12,
+      "criteria": [
+        {
+          "criterion": "Continuity with the opening and prompt adherence",
+          "marks": 0.5,
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+        },
+        {
+          "criterion": "Plot development, causality and pacing",
+          "marks": 3.5,
+          "guidance": "Main scoring zone — coherent arc, causal progression, purposeful complications, and controlled pacing."
+        },
+        {
+          "criterion": "Characterization, setting and descriptive detail",
+          "marks": 1.5,
+          "guidance": "Characters respond credibly and the setting is developed with specific, relevant detail."
+        },
+        {
+          "criterion": "Language, vocabulary and narrative style",
+          "marks": 1.5,
+          "guidance": "Controlled voice, precise vocabulary, sentence variety, and purposeful imagery."
+        },
+        {
+          "criterion": "Theme, message or emotional impact",
+          "marks": 1,
+          "guidance": "Meaning or emotion grows from the events rather than being attached as a generic moral."
+        },
+        {
+          "criterion": "Ending and resolution",
+          "marks": 1,
+          "guidance": "The ending resolves or deliberately reframes the central tension; an earned open ending is valid."
+        },
+        {
+          "criterion": "Flow, structure, paragraphing and grammar",
+          "marks": 1,
+          "guidance": "Logical structure and consistent point of view and tense unless deliberately controlled; apply grammar and spelling standards strictly."
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": "Zero for normal competent work by default; reserve for exceptional voice, construction, insight, or an unexpected but earned turn."
+        }
+      ]
+    },
+    "13": {
+      "total": 13,
+      "criteria": [
+        {
+          "criterion": "Continuity with the opening and prompt adherence",
+          "marks": 0.5,
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+        },
+        {
+          "criterion": "Plot development, causality and pacing",
+          "marks": 4,
+          "guidance": "Main scoring zone — coherent arc, causal progression, purposeful complications, and controlled pacing."
+        },
+        {
+          "criterion": "Characterization, setting and descriptive detail",
+          "marks": 1.5,
+          "guidance": "Characters respond credibly and the setting is developed with specific, relevant detail."
+        },
+        {
+          "criterion": "Language, vocabulary and narrative style",
+          "marks": 1.5,
+          "guidance": "Controlled voice, precise vocabulary, sentence variety, and purposeful imagery."
+        },
+        {
+          "criterion": "Theme, message or emotional impact",
+          "marks": 1,
+          "guidance": "Meaning or emotion grows naturally from the events and choices."
+        },
+        {
+          "criterion": "Ending and resolution",
+          "marks": 1,
+          "guidance": "The ending resolves or deliberately reframes the central tension; an earned open ending is valid."
+        },
+        {
+          "criterion": "Flow, structure, paragraphing and grammar",
+          "marks": 1.5,
+          "guidance": "Logical structure, effective paragraphing, and consistent point of view and tense unless deliberately controlled; apply grammar and spelling standards strictly."
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 2,
+          "guidance": "Zero for normal competent work by default; reserve for exceptional voice, construction, insight, or an unexpected but earned turn."
+        }
+      ]
+    },
+    "15": {
+      "total": 15,
+      "criteria": [
+        {
+          "criterion": "Continuity with the opening and prompt adherence",
+          "marks": 0.5,
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+        },
+        {
+          "criterion": "Plot development, causality and pacing",
+          "marks": 4,
+          "guidance": "Main scoring zone — an original, coherent arc with causal progression, purposeful complications, and controlled pacing."
+        },
+        {
+          "criterion": "Characterization, setting and descriptive detail",
+          "marks": 2,
+          "guidance": "Characters feel credible and the setting is developed through specific descriptive or sensory detail."
+        },
+        {
+          "criterion": "Language, vocabulary and narrative style",
+          "marks": 2,
+          "guidance": "Controlled voice, precise vocabulary, sentence variety, tone control, and purposeful literary devices."
+        },
+        {
+          "criterion": "Theme, message or emotional impact",
+          "marks": 1,
+          "guidance": "Meaning or emotion grows naturally from the events and choices rather than appearing as a generic moral."
+        },
+        {
+          "criterion": "Ending and resolution",
+          "marks": 1,
+          "guidance": "The ending is earned and deliberate, resolving or purposefully reframing the central tension."
+        },
+        {
+          "criterion": "Flow, structure, paragraphing and grammar",
+          "marks": 1.5,
+          "guidance": "Logical structure, effective paragraphing, and consistent point of view and tense unless deliberately controlled; apply grammar and spelling standards strictly."
+        },
+        {
+          "criterion": "Extraordinary (strict)",
+          "marks": 3,
+          "guidance": "Zero for normal competent work by default; reserve for genuinely exceptional voice, construction, insight, or an unexpected but earned turn."
+        }
+      ]
+    }
   }
 }
