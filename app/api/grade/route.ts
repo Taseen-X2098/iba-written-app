@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
     const profilePlan = await prepareLearnerProfilePlan({
       client,
       useMock: useMockGrader,
+      requireAiPersonalization: true,
       userId: user.id,
       category: question.category,
       submission: input.submissionText,

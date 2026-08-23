@@ -147,7 +147,7 @@ export default async function StudentExamsPage() {
 
                       let buttonText = "Enter Exam";
                       if (canContinue) {
-                        buttonText = "Continue Exam";
+                        buttonText = "Resume Exam";
                       } else if (isOngoing) {
                         buttonText = "Finalize Exam";
                       }

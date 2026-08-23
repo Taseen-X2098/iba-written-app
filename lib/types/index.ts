@@ -218,6 +218,7 @@ export interface Tip {
 export interface Notification {
   id: string;
   user_id: string;
+  exam_id: string | null;
   type: NotificationType;
   title: string;
   message: string;

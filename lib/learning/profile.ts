@@ -106,6 +106,8 @@ const PERSONALIZATION_FORMAT = {
       },
       observations: {
         type: "array",
+        minItems: 1,
+        maxItems: 4,
         items: {
           type: "object",
           properties: {
@@ -416,6 +418,7 @@ function deterministicPlan(
 export async function prepareLearnerProfilePlan(input: {
   client: ResponsesClient;
   useMock: boolean;
+  requireAiPersonalization?: boolean;
   userId: string;
   category: string;
   submission: string;
@@ -463,10 +466,16 @@ export async function prepareLearnerProfilePlan(input: {
     });
     const parsed = JSON.parse(response.output_text) as Record<string, unknown>;
     const observations = sanitizeObservations(input.submission, parsed.observations);
-    if (!observations.length) return fallback;
+    if (!observations.length) {
+      if (input.requireAiPersonalization) throw new Error("AI personalization returned no usable observations");
+      return fallback;
+    }
     let personalizedFeedback = cleanText(parsed.personalized_feedback, 4_000);
     const profileSummary = cleanText(parsed.profile_summary, 4_000);
-    if (!personalizedFeedback || !profileSummary) return fallback;
+    if (!personalizedFeedback || !profileSummary) {
+      if (input.requireAiPersonalization) throw new Error("AI personalization returned incomplete feedback");
+      return fallback;
+    }
     if (context.totalGraded === 0 && !personalizedFeedback.includes("No previous")) {
       personalizedFeedback = `${noHistoryMessage(input.category)} ${personalizedFeedback}`.slice(0, 4_000);
     }
@@ -495,31 +504,26 @@ export async function prepareLearnerProfilePlan(input: {
       progressionSnapshot,
     };
   } catch (error) {
+    if (input.requireAiPersonalization) throw error;
     console.error("Personalized feedback generation failed; using deterministic fallback", error);
     return fallback;
   }
 }
 
 export async function prepareManualLearnerProfilePlan(input: {
+  client: ResponsesClient;
+  useMock: boolean;
   userId: string;
   category: string;
   submission: string;
   result: GradingResult;
 }): Promise<LearnerProfilePlan> {
-  let context: LearnerContext;
-  try {
-    context = await loadLearnerContext(input.userId, input.category);
-  } catch (error) {
-    console.error("Unable to load same-type learner profile for manual grade", error);
-    context = { profileSummary: "", totalGraded: 0, skills: [], recentEvents: [] };
-  }
-  const plan = deterministicPlan(input.result, input.submission, input.category, context);
-  return {
-    ...plan,
-    // Preserve the administrator's feedback verbatim while still updating the
-    // student's structured evidence and future same-type coaching context.
-    result: input.result,
-  };
+  // The administrator fixes the score, remarks, and improvement directions.
+  // This second stage may personalize coaching but cannot change that score.
+  return prepareLearnerProfilePlan({
+    ...input,
+    requireAiPersonalization: true,
+  });
 }
 
 export async function recordLearnerProfileUpdate(input: {

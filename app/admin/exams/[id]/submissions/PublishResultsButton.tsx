@@ -4,13 +4,32 @@ import { useState } from "react";
 import { Loader2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-export default function PublishResultsButton({ examId, allGraded, isRepublish }: { examId: string, allGraded: boolean, isRepublish?: boolean }) {
+export default function PublishResultsButton({
+  examId,
+  allGraded,
+  examEnded = true,
+  hasSubmissions = true,
+  isRepublish,
+}: {
+  examId: string;
+  allGraded: boolean;
+  examEnded?: boolean;
+  hasSubmissions?: boolean;
+  isRepublish?: boolean;
+}) {
   const [publishing, setPublishing] = useState(false);
   const router = useRouter();
+  const disabledReason = !hasSubmissions
+    ? "At least one official submission is required before results can be published."
+    : !allGraded
+      ? "Publication is blocked until every answer has a final grade."
+      : !examEnded
+        ? "Results cannot be published before the exam ends."
+        : null;
 
   const handlePublish = async () => {
-    if (!allGraded) {
-      alert("Publication is blocked until every answer has a final grade. Blank answers are finalized as explicit zeroes.");
+    if (disabledReason) {
+      alert(disabledReason);
       return;
     }
     if (!confirm(isRepublish ? "Recalculate and republish results? Rankings will be rebuilt from the latest final grades." : "Publish final results and notify students?")) {
@@ -27,8 +46,8 @@ export default function PublishResultsButton({ examId, allGraded, isRepublish }:
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to publish results");
       router.refresh();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to publish results");
     } finally {
       setPublishing(false);
     }
@@ -37,7 +56,8 @@ export default function PublishResultsButton({ examId, allGraded, isRepublish }:
   return (
     <button
       onClick={handlePublish}
-      disabled={publishing || !allGraded}
+      disabled={publishing || Boolean(disabledReason)}
+      title={disabledReason ?? undefined}
       className={`${isRepublish ? 'bg-brand-100 text-brand-700 hover:bg-brand-200 border-brand-300' : 'bg-brand-600 text-white hover:bg-brand-700'} border px-5 py-2.5 rounded-xl font-bold shadow transition-colors flex items-center gap-2 disabled:opacity-50`}
     >
       {publishing ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}

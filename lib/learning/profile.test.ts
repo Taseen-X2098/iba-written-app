@@ -158,20 +158,38 @@ describe("structured learner profiles", () => {
     expect(profileChain).toBeDefined();
   });
 
-  it("preserves an administrator's summary while preparing profile evidence", async () => {
+  it("adds generated personal feedback without changing an administrator's fixed score", async () => {
     const plan = await prepareManualLearnerProfilePlan({
+      client: { responses: { create: jest.fn() } },
+      useMock: true,
       userId: "00000000-0000-0000-0000-000000000001",
       category: "essay",
       submission: "A clear idea appears here.",
       result: baseResult,
     });
 
-    expect(plan.result.studentFeedback.summary).toBe(baseResult.studentFeedback.summary);
+    expect(plan.result.internal.total).toBe(baseResult.internal.total);
+    expect(plan.result.studentFeedback.personalizedFeedback).toContain("No previous Essay records");
+    expect(plan.result.studentFeedback.summary).toContain(baseResult.studentFeedback.summary);
     expect(plan.observations).toHaveLength(1);
+  });
+
+  it("does not silently replace required AI personalization after a manual score", async () => {
+    const personalizationError = new Error("Personalization unavailable");
+    await expect(prepareManualLearnerProfilePlan({
+      client: { responses: { create: jest.fn(async () => { throw personalizationError; }) } },
+      useMock: false,
+      userId: "00000000-0000-0000-0000-000000000001",
+      category: "essay",
+      submission: "A clear idea appears here.",
+      result: baseResult,
+    })).rejects.toThrow("Personalization unavailable");
   });
 
   it("records the normalized mark and structured observations", async () => {
     const plan = await prepareManualLearnerProfilePlan({
+      client: { responses: { create: jest.fn() } },
+      useMock: true,
       userId: "00000000-0000-0000-0000-000000000001",
       category: "essay",
       submission: "A clear idea appears here.",

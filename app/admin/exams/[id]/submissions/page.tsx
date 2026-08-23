@@ -1,9 +1,18 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { ArrowLeft, Users, CheckCircle, Clock } from "lucide-react";
+import { ArrowLeft, CheckCircle } from "lucide-react";
 import PublishResultsButton from "./PublishResultsButton";
 import { ForceGradeButton } from "../../ForceGradeButton";
 import { listExpiredOfficialAttempts } from "@/lib/exams/finalize";
+import BulkSubmissionGradingClient, { type BulkSubmissionStudent } from "./BulkSubmissionGradingClient";
+import { examHasEnded } from "@/lib/grading/admin-queue";
+
+export const dynamic = "force-dynamic";
+
+function joinedRecord(value: unknown): Record<string, unknown> | null {
+  const record = Array.isArray(value) ? value[0] : value;
+  return record && typeof record === "object" ? record as Record<string, unknown> : null;
+}
 
 export default async function AdminExamSubmissionsPage({
   params,
@@ -23,11 +32,14 @@ export default async function AdminExamSubmissionsPage({
     adminClient
       .from("exam_submissions")
       .select(`
+        id,
         user_id,
+        edited_text,
         grading_result,
         graded_by,
         submitted_at,
-        profiles(name, institute)
+        profiles(name, institute),
+        exam_questions(questions(category))
       `)
       .eq("exam_id", id),
     listExpiredOfficialAttempts(id),
@@ -40,19 +52,32 @@ export default async function AdminExamSubmissionsPage({
   const pendingProfilesById = new Map((pendingProfiles ?? []).map((profile) => [profile.id, profile]));
 
   // Group by user
-  const userSubmissions = (submissions || []).reduce((acc: any, sub: any) => {
+  const userSubmissions = (submissions || []).reduce((acc: Record<string, BulkSubmissionStudent>, sub) => {
+    const profile = joinedRecord(sub.profiles);
+    const examQuestion = joinedRecord(sub.exam_questions);
+    const question = joinedRecord(examQuestion?.questions);
+    const name = typeof profile?.name === "string" ? profile.name.trim() : "";
+    const institute = typeof profile?.institute === "string" ? profile.institute.trim() : "";
     if (!acc[sub.user_id]) {
       acc[sub.user_id] = {
         userId: sub.user_id,
-        profile: sub.profiles,
+        name: name || "Unknown User",
+        institute: institute || null,
         totalQuestions: 0,
         gradedQuestions: 0,
         isSubmitted: !!sub.submitted_at,
+        canFinalize: false,
+        aiEligibleSubmissionIds: [],
+        manualOnlyAnswers: 0,
       };
     }
     acc[sub.user_id].totalQuestions += 1;
     if (sub.grading_result) {
       acc[sub.user_id].gradedQuestions += 1;
+    } else if (question?.category === "translation") {
+      acc[sub.user_id].manualOnlyAnswers += 1;
+    } else if (sub.edited_text?.trim()) {
+      acc[sub.user_id].aiEligibleSubmissionIds.push(sub.id);
     }
     return acc;
   }, {});
@@ -61,19 +86,21 @@ export default async function AdminExamSubmissionsPage({
     if (!userSubmissions[attempt.user_id]) {
       userSubmissions[attempt.user_id] = {
         userId: attempt.user_id,
-        profile: pendingProfilesById.get(attempt.user_id),
+        name: pendingProfilesById.get(attempt.user_id)?.name?.trim() || "Unknown User",
+        institute: pendingProfilesById.get(attempt.user_id)?.institute?.trim() || null,
         totalQuestions: 0,
         gradedQuestions: 0,
         isSubmitted: false,
+        canFinalize: false,
+        aiEligibleSubmissionIds: [],
+        manualOnlyAnswers: 0,
       };
     }
-    userSubmissions[attempt.user_id].attemptStatus = attempt.status;
-    userSubmissions[attempt.user_id].attemptExpiresAt = attempt.expires_at;
     userSubmissions[attempt.user_id].canFinalize = true;
   }
 
-  const students = Object.values(userSubmissions);
-  const totalGraded = students.filter((s: any) => s.totalQuestions > 0 && s.gradedQuestions === s.totalQuestions).length;
+  const students = Object.values(userSubmissions) as BulkSubmissionStudent[];
+  const totalGraded = students.filter((student) => student.totalQuestions > 0 && student.gradedQuestions === student.totalQuestions).length;
   const allGraded = students.length > 0 && totalGraded === students.length;
 
   return (
@@ -99,83 +126,17 @@ export default async function AdminExamSubmissionsPage({
               <CheckCircle size={16} /> Published
             </div>
           )}
-          <PublishResultsButton examId={id} allGraded={allGraded} isRepublish={exam.results_published} />
+          <PublishResultsButton
+            examId={id}
+            allGraded={allGraded}
+            examEnded={examHasEnded(exam.ends_at)}
+            hasSubmissions={students.length > 0}
+            isRepublish={exam.results_published}
+          />
         </div>
       </div>
 
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        {students.length === 0 ? (
-          <div className="p-12 text-center text-muted-foreground">
-            <Users size={32} className="mx-auto mb-3 opacity-50" />
-            <p>No submissions yet.</p>
-          </div>
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="bg-muted/50 border-b border-border">
-              <tr>
-                <th className="px-6 py-3 font-medium text-muted-foreground">Student</th>
-                <th className="px-6 py-3 font-medium text-muted-foreground">Status</th>
-                <th className="px-6 py-3 font-medium text-muted-foreground">Progress</th>
-                <th className="px-6 py-3 text-right font-medium text-muted-foreground">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {students.map((student: any) => (
-                <tr key={student.userId} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-6 py-4">
-                    <p className="font-bold text-foreground">{student.profile?.name || "Unknown User"}</p>
-                    <p className="text-muted-foreground text-xs">{student.profile?.institute}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    {student.canFinalize ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-red-100 text-red-700">
-                        Expired — Finalize
-                      </span>
-                    ) : student.isSubmitted ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-green-100 text-green-700">
-                        Submitted
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-700">
-                        Ongoing
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      {student.totalQuestions === 0 ? (
-                        <Clock size={16} className="text-red-500" />
-                      ) : student.gradedQuestions === student.totalQuestions ? (
-                        <CheckCircle size={16} className="text-green-500" />
-                      ) : (
-                        <Clock size={16} className="text-amber-500" />
-                      )}
-                      <span className="font-medium">
-                        {student.totalQuestions === 0
-                          ? "Awaiting finalization"
-                          : `${student.gradedQuestions} / ${student.totalQuestions} Graded`}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      {student.canFinalize && <ForceGradeButton examId={id} targetUserId={student.userId} />}
-                      {student.totalQuestions > 0 && (
-                        <Link
-                          href={`/admin/exams/${id}/submissions/${student.userId}`}
-                          className="bg-brand-50 text-brand-700 hover:bg-brand-100 px-4 py-2 rounded-lg text-sm font-bold transition-colors inline-block"
-                        >
-                          {student.gradedQuestions === student.totalQuestions ? "Review Grades" : "Grade Submission"}
-                        </Link>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <BulkSubmissionGradingClient examId={id} students={students} />
     </div>
   );
 }

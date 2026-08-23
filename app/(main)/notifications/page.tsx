@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Bell, Check, Loader2, Trophy, Crown, AlertCircle, Clock } from "lucide-react";
 import type { Notification, NotificationType } from "@/lib/types";
@@ -20,28 +21,30 @@ const NOTIFICATION_COLORS: Record<NotificationType, string> = {
 };
 
 export default function NotificationsPage() {
+  const router = useRouter();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadNotifications();
+    async function loadNotifications() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data } = await supabase
+          .from("notifications")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        if (data) setNotifications(data);
+      }
+      setLoading(false);
+    }
+
+    void loadNotifications();
   }, []);
-
-  async function loadNotifications() {
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (data) setNotifications(data);
-    setLoading(false);
-  }
 
   async function markAsRead(id: string) {
     const supabase = createClient();
@@ -53,6 +56,16 @@ export default function NotificationsPage() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
     );
+  }
+
+  async function openNotification(notification: Notification) {
+    if (!notification.is_read) void markAsRead(notification.id);
+
+    if (notification.type === "exam_available" && notification.exam_id) {
+      router.push(`/exams/${notification.exam_id}`);
+    } else if (notification.type === "results_published" && notification.exam_id) {
+      router.push(`/exams/${notification.exam_id}/results`);
+    }
   }
 
   async function markAllAsRead() {
@@ -123,7 +136,7 @@ export default function NotificationsPage() {
             return (
               <button
                 key={n.id}
-                onClick={() => !n.is_read && markAsRead(n.id)}
+                onClick={() => void openNotification(n)}
                 className={`w-full text-left flex items-start gap-3 rounded-xl border p-4 transition-all
                   ${
                     n.is_read

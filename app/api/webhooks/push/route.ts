@@ -15,6 +15,8 @@ const webhookEnvelopeSchema = z.object({
 
 const notificationRecordSchema = z.object({
   user_id: z.string().uuid(),
+  exam_id: z.string().uuid().nullable().optional(),
+  type: z.enum(["exam_available", "results_published", "subscription_expiring", "inactivity_reminder"]).optional(),
   title: z.string().trim().min(1).max(200),
   message: z.string().trim().min(1).max(4_000),
 });
@@ -48,7 +50,7 @@ export async function POST(req: NextRequest) {
     
     // Payload from Supabase Webhook (INSERT on notifications table)
     if (payload.type === "INSERT" && payload.table === "notifications") {
-      const { user_id, title, message } = parseRequestValue(
+      const { user_id, exam_id, type, title, message } = parseRequestValue(
         notificationRecordSchema,
         payload.record,
         "Invalid notification record",
@@ -75,11 +77,17 @@ export async function POST(req: NextRequest) {
 
       // 3. Send Push Notification via Firebase Admin
       if (tokens.length > 0) {
+        const targetUrl = exam_id && type === "exam_available"
+          ? `/exams/${exam_id}`
+          : exam_id && type === "results_published"
+            ? `/exams/${exam_id}/results`
+            : "/notifications";
         const messagePayload = {
           notification: {
             title: title || "IBA Written App",
             body: message,
           },
+          data: { url: targetUrl },
           tokens: tokens,
         };
 

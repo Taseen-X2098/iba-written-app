@@ -21,6 +21,19 @@ type ClaimedItem = {
   attempt_count: number;
 };
 
+type OfficialSubmissionCandidate = {
+  id: string;
+  question_id: string;
+  edited_text: string | null;
+  grading_result: unknown | null;
+  questions: unknown;
+};
+
+function joinedRecord(value: unknown): Record<string, unknown> | null {
+  const record = Array.isArray(value) ? value[0] : value;
+  return record && typeof record === "object" ? record as Record<string, unknown> : null;
+}
+
 export async function wakeGradingWorker() {
   const url = process.env.GRADING_WORKER_URL;
   const secret = process.env.GRADING_WORKER_SECRET;
@@ -77,7 +90,7 @@ export async function createPracticeGradingJob(input: {
   if (questionError) throw questionError;
 
   const validIds = (questions ?? [])
-    .filter((row: any) => row.questions?.category !== "translation" && drafts[row.id]?.editedText?.trim())
+    .filter((row) => joinedRecord(row.questions)?.category !== "translation" && drafts[row.id]?.editedText?.trim())
     .map((row) => row.id);
   if (validIds.length !== selectedIds.length) {
     throw new ApiError("VALIDATION_ERROR", "Only non-empty, non-translation answers can be graded", 400);
@@ -162,24 +175,32 @@ export async function createOfficialGradingJob(input: {
   scope: "selected" | "missing";
   allowRegrade: boolean;
 }) {
+  if (input.allowRegrade) {
+    throw new ApiError("VALIDATION_ERROR", "Existing grades cannot be AI-graded again", 400);
+  }
   const admin = await createAdminClient();
   let query = admin
     .from("exam_submissions")
-    .select("id, question_id, grading_result, graded_by, questions:exam_questions(questions(category))")
+    .select("id, question_id, edited_text, grading_result, graded_by, questions:exam_questions(questions(category))")
     .eq("exam_id", input.examId);
   if (input.scope === "missing") query = query.is("grading_result", null);
   if (input.submissionIds?.length) query = query.in("id", [...new Set(input.submissionIds)]);
 
   const { data: submissions, error } = await query;
   if (error) throw error;
-  const eligible = (submissions ?? []).filter((submission: any) => {
-    const category = submission.questions?.questions?.category;
+  const eligible = ((submissions ?? []) as OfficialSubmissionCandidate[]).filter((submission) => {
+    const category = joinedRecord(joinedRecord(submission.questions)?.questions)?.category;
     if (category === "translation") return false;
-    if (submission.graded_by === "admin" && !input.allowRegrade) return false;
-    if (input.scope === "selected" && !input.allowRegrade && submission.grading_result) return false;
-    return true;
+    if (submission.grading_result != null) return false;
+    return Boolean(submission.edited_text?.trim());
   });
-  if (!eligible.length) throw new ApiError("GRADING_INCOMPLETE", "No eligible answers were selected", 409);
+  if (!eligible.length) {
+    throw new ApiError(
+      "GRADING_INCOMPLETE",
+      "No ungraded, non-translation answers with student text were selected",
+      409,
+    );
+  }
 
   const { data: job, error: jobError } = await admin
     .from("grading_jobs")
@@ -195,7 +216,7 @@ export async function createOfficialGradingJob(input: {
   if (jobError) throw jobError;
 
   const { error: itemError } = await admin.from("grading_job_items").insert(
-    eligible.map((submission: any) => ({
+    eligible.map((submission) => ({
       job_id: job.id,
       exam_question_id: submission.question_id,
       exam_submission_id: submission.id,
@@ -251,7 +272,7 @@ async function processItem(item: ClaimedItem) {
   const { data: job, error: jobError } = await admin.from("grading_jobs").select("*").eq("id", item.job_id).single();
   if (jobError || !job) throw jobError ?? new Error("Grading job not found");
 
-  let attemptId: string | undefined = job.attempt_id ?? undefined;
+  const attemptId: string | undefined = job.attempt_id ?? undefined;
   try {
     const { data: eq, error: eqError } = await admin
       .from("exam_questions")
@@ -259,8 +280,10 @@ async function processItem(item: ClaimedItem) {
       .eq("id", item.exam_question_id)
       .single();
     if (eqError || !eq) throw eqError ?? new Error("Question not found");
-    const category = (eq.questions as any)?.category;
-    const questionPrompt = (eq.questions as any)?.prompt;
+    const question = joinedRecord(eq.questions);
+    const category = question?.category;
+    const questionPrompt = typeof question?.prompt === "string" ? question.prompt : undefined;
+    if (typeof category !== "string") throw new Error("Question category is missing");
 
     if (category === "translation") {
       if (attemptId) {
@@ -285,12 +308,12 @@ async function processItem(item: ClaimedItem) {
       if (!item.exam_submission_id) throw new Error("Official grading item has no submission");
       const { data: submission, error: submissionError } = await admin
         .from("exam_submissions")
-        .select("user_id, edited_text, graded_by")
+        .select("user_id, edited_text, grading_result, graded_by")
         .eq("id", item.exam_submission_id)
         .single();
       if (submissionError || !submission) throw submissionError ?? new Error("Submission not found");
-      if (submission.graded_by === "admin" && !job.allow_regrade) {
-        await admin.from("grading_job_items").update({ status: "skipped", last_error: "Admin grade protected" }).eq("id", item.id);
+      if (submission.grading_result != null) {
+        await admin.from("grading_job_items").update({ status: "skipped", last_error: "Existing grade protected" }).eq("id", item.id);
         await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
         return;
       }
@@ -311,6 +334,7 @@ async function processItem(item: ClaimedItem) {
     const profilePlan = await prepareLearnerProfilePlan({
       client,
       useMock: isMock,
+      requireAiPersonalization: true,
       userId: studentUserId,
       category,
       submission: submissionText,
@@ -325,13 +349,19 @@ async function processItem(item: ClaimedItem) {
         p_success: true,
       });
     } else {
-      let update = admin
+      const { data: savedSubmission, error: saveError } = await admin
         .from("exam_submissions")
         .update({ grading_result: result, graded_by: "ai" })
-        .eq("id", item.exam_submission_id!);
-      if (!job.allow_regrade) update = update.or("graded_by.is.null,graded_by.neq.admin");
-      const { error: saveError } = await update;
+        .eq("id", item.exam_submission_id!)
+        .is("grading_result", null)
+        .select("id")
+        .maybeSingle();
       if (saveError) throw saveError;
+      if (!savedSubmission) {
+        await admin.from("grading_job_items").update({ status: "skipped", last_error: "Existing grade protected" }).eq("id", item.id);
+        await admin.rpc("refresh_grading_job", { p_job_id: item.job_id });
+        return;
+      }
     }
 
     await admin

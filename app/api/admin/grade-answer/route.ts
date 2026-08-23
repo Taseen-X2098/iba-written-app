@@ -7,7 +7,7 @@ import { parseJsonRequest } from "@/lib/api/request";
 
 const schema = z.object({
   submissionId: z.string().uuid(),
-  allowRegrade: z.boolean().default(false),
+  allowRegrade: z.literal(false).optional().default(false),
 });
 
 export async function POST(request: NextRequest) {

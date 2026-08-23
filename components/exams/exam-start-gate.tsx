@@ -9,7 +9,15 @@ function sessionKey(examId: string, mode: ExamAttemptMode) {
   return `exam-attempt-session:${examId}:${mode}`;
 }
 
-export default function ExamStartGate({ exam, mode }: { exam: Exam; mode: ExamAttemptMode }) {
+export default function ExamStartGate({
+  exam,
+  mode,
+  hasResumableAttempt = false,
+}: {
+  exam: Exam;
+  mode: ExamAttemptMode;
+  hasResumableAttempt?: boolean;
+}) {
   const [started, setStarted] = useState<AttemptStartResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +92,9 @@ export default function ExamStartGate({ exam, mode }: { exam: Exam; mode: ExamAt
         </p>
         <h1 className="mb-3 text-2xl font-black text-foreground">{exam.title}</h1>
         <p className="mb-6 text-sm leading-6 text-muted-foreground">
-          The {exam.time_limit_minutes}-minute timer starts only after you press the button below.
-          Questions remain hidden until then. Leaving the page will not pause the timer.
+          {hasResumableAttempt
+            ? "Your exam is already in progress. Resuming it will not reset the timer."
+            : `The ${exam.time_limit_minutes}-minute timer starts only after you press the button below. Questions remain hidden until then. Leaving the page will not pause the timer.`}
         </p>
         {mode === "official" && (
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-left text-sm text-amber-900">
@@ -111,12 +120,13 @@ export default function ExamStartGate({ exam, mode }: { exam: Exam; mode: ExamAt
             onClick={() => begin(false)}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-6 py-3 font-bold text-white disabled:opacity-50"
           >
-            {loading ? <Loader2 className="animate-spin" size={18} /> : <Play size={18} />}
-            {loading ? "Starting..." : mode === "practice" ? "Start Practice" : "Start Official Exam"}
+            {loading ? <Loader2 className="animate-spin" size={18} /> : hasResumableAttempt ? <RefreshCw size={18} /> : <Play size={18} />}
+            {loading
+              ? hasResumableAttempt ? "Resuming..." : "Starting..."
+              : hasResumableAttempt ? "Resume Exam" : mode === "practice" ? "Start Practice" : "Start Official Exam"}
           </button>
         )}
       </div>
     </div>
   );
 }
-

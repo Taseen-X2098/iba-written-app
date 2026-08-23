@@ -16,8 +16,8 @@ export default async function TakeExamPage({
   const mode: ExamAttemptMode = practice === "true" ? "practice" : "official";
   const user = await requirePageUser();
 
-  // This GET is deliberately read-only and fetches metadata only. Questions and
-  // attempt state are returned exclusively by the explicit start POST.
+  // This GET is deliberately read-only. Questions and attempt content are
+  // returned exclusively by the explicit start POST.
   const supabase = await createClient();
   const { data: exam, error } = await supabase
     .from("exams")
@@ -28,19 +28,24 @@ export default async function TakeExamPage({
   if (error || !exam) redirect("/exams");
 
   const now = Date.now();
+  let hasResumableAttempt = false;
   if (mode === "official") {
+    const { data: resumable } = await supabase
+      .from("exam_attempts")
+      .select("id, status, expires_at")
+      .eq("exam_id", id)
+      .eq("user_id", user.id)
+      .eq("mode", "official")
+      .in("status", ["active", "locked"])
+      .maybeSingle();
+    hasResumableAttempt = Boolean(
+      resumable && now <= new Date(resumable.expires_at).getTime() + 3 * 60_000,
+    );
+
     const startsAt = new Date(exam.starts_at).getTime();
     const endsAt = new Date(exam.ends_at).getTime();
     if (now < startsAt || now >= endsAt) {
-      const { data: resumable } = await supabase
-        .from("exam_attempts")
-        .select("id, status, expires_at")
-        .eq("exam_id", id)
-        .eq("user_id", user.id)
-        .eq("mode", "official")
-        .in("status", ["active", "locked"])
-        .maybeSingle();
-      if (!resumable || now > new Date(resumable.expires_at).getTime() + 3 * 60_000) redirect("/exams");
+      if (!hasResumableAttempt) redirect("/exams");
     }
   } else if (!exam.results_published) {
     redirect("/exams");
@@ -48,7 +53,7 @@ export default async function TakeExamPage({
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-background">
-      <ExamStartGate exam={exam as Exam} mode={mode} />
+      <ExamStartGate exam={exam as Exam} mode={mode} hasResumableAttempt={hasResumableAttempt} />
     </div>
   );
 }

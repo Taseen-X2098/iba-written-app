@@ -1,7 +1,17 @@
 import { createAdminClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import GradingClient from "./GradingClient";
+import GradingClient, { type GradingSubmission } from "./GradingClient";
+import { CATEGORY_LABELS, type GradingResultJSON, type QuestionCategory } from "@/lib/types";
+
+function joinedRecord(value: unknown): Record<string, unknown> | null {
+  const record = Array.isArray(value) ? value[0] : value;
+  return record && typeof record === "object" ? record as Record<string, unknown> : null;
+}
+
+function isQuestionCategory(value: unknown): value is QuestionCategory {
+  return typeof value === "string" && value in CATEGORY_LABELS;
+}
 
 export default async function AdminGradeSubmissionPage({
   params,
@@ -43,6 +53,25 @@ export default async function AdminGradeSubmissionPage({
     return <div>Data not found</div>;
   }
 
+  const normalizedSubmissions = submissions.flatMap((submission): GradingSubmission[] => {
+    const examQuestion = joinedRecord(submission.exam_questions);
+    const question = joinedRecord(examQuestion?.questions);
+    if (typeof examQuestion?.marks !== "number" || !isQuestionCategory(question?.category)) return [];
+    return [{
+      id: submission.id,
+      edited_text: submission.edited_text,
+      grading_result: submission.grading_result as GradingResultJSON | null,
+      graded_by: submission.graded_by === "ai" || submission.graded_by === "admin" ? submission.graded_by : null,
+      exam_questions: {
+        marks: examQuestion.marks,
+        questions: {
+          category: question.category,
+          prompt: typeof question.prompt === "string" ? question.prompt : "Question",
+        },
+      },
+    }];
+  });
+
   return (
     <div className="max-w-6xl mx-auto animate-fade-in">
       <div className="flex items-center gap-2 mb-6">
@@ -58,7 +87,7 @@ export default async function AdminGradeSubmissionPage({
         </p>
       </div>
 
-      <GradingClient examId={id} submissions={submissions} />
+      <GradingClient examId={id} submissions={normalizedSubmissions} />
     </div>
   );
 }

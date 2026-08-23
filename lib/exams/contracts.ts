@@ -36,24 +36,35 @@ export const adminGradingJobSchema = z.object({
   examId: uuidSchema,
   submissionIds: z.array(uuidSchema).max(5_000).optional(),
   scope: z.enum(["selected", "missing"]).default("selected"),
-  allowRegrade: z.boolean().default(false),
+  // Official grades are final once stored. Keep accepting an omitted/false
+  // value for older clients, but never expose a path that can overwrite one.
+  allowRegrade: z.literal(false).optional().default(false),
 });
 
-export const manualGradeSchema = z.object({
-  submissionId: uuidSchema,
-  score: z.number().finite().min(0),
-  summary: z.string().trim().min(1).max(10_000),
-  highlights: z
-    .array(
-      z.object({
-        quote: z.string().max(2_000),
-        comment: z.string().max(5_000),
-        type: z.enum(["strength", "improvement"]),
-      }),
-    )
-    .max(100)
-    .default([]),
-});
+export const manualGradeSchema = z
+  .object({
+    submissionId: uuidSchema,
+    score: z.number().finite().min(0),
+    remarks: z.string().trim().min(1).max(10_000).optional(),
+    waysToImprove: z.string().trim().min(1).max(10_000).optional(),
+    // Kept as a compatibility alias for clients deployed before the feedback
+    // form was split into the same sections students see on the result page.
+    summary: z.string().trim().min(1).max(10_000).optional(),
+    highlights: z
+      .array(
+        z.object({
+          quote: z.string().max(2_000),
+          comment: z.string().max(5_000),
+          type: z.enum(["strength", "improvement"]),
+        }),
+      )
+      .max(100)
+      .default([]),
+  })
+  .refine((value) => Boolean(value.remarks || value.summary), {
+    message: "Remarks are required",
+    path: ["remarks"],
+  });
 
 export function parseBody<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);

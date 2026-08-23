@@ -106,6 +106,44 @@ describe("push notification webhook authorization", () => {
     expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
   });
 
+  it("sends exam notifications with their exam start-page target", async () => {
+    const single = jest.fn().mockResolvedValue({ data: { fcm_tokens: ["device-token"] } });
+    const eq = jest.fn().mockReturnValue({ single });
+    const select = jest.fn().mockReturnValue({ eq });
+    const from = jest.fn().mockReturnValue({ select });
+    mockedCreateClient.mockReturnValue(
+      { from } as unknown as ReturnType<typeof createClient>,
+    );
+    mockedSendEachForMulticast.mockResolvedValue({
+      successCount: 1,
+      failureCount: 0,
+      responses: [{ success: true }],
+    });
+
+    const examId = "20000000-0000-4000-8000-000000000002";
+    const response = await POST(makeRequest({
+      secret: WEBHOOK_SECRET,
+      body: JSON.stringify({
+        type: "INSERT",
+        schema: "public",
+        table: "notifications",
+        record: {
+          user_id: "10000000-0000-4000-8000-000000000001",
+          exam_id: examId,
+          type: "exam_available",
+          title: "New Weekly Exam!",
+          message: "A new exam is available.",
+        },
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mockedSendEachForMulticast).toHaveBeenCalledWith(expect.objectContaining({
+      data: { url: `/exams/${examId}` },
+      tokens: ["device-token"],
+    }));
+  });
+
   it("rejects an authenticated webhook with an invalid notification record", async () => {
     const response = await POST(makeRequest({
       secret: WEBHOOK_SECRET,
