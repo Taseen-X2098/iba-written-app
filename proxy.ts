@@ -9,7 +9,7 @@ const AUTH_PATHS = [
   "/auth/callback",
 ];
 
-const PUBLIC_PATHS = ["/subscription"];
+const PUBLIC_PATHS = ["/subscription", "/~offline"];
 
 function hasSupabaseSession(request: NextRequest) {
   return request.cookies.getAll().some(({ name, value }) =>
@@ -75,6 +75,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icons/|manifest.json|sw.js|firebase-messaging-sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icons/|firebase-sdk/|~offline|manifest.webmanifest|sw.js|firebase-messaging-sw.js|workbox-|fallback-|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?)$).*)",
   ],
 };

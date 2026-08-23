@@ -1,6 +1,6 @@
 # Production Deployment and Configuration Runbook
 
-Last validated: 2026-08-18
+Last validated: 2026-08-24
 
 This runbook describes how to reproduce the production infrastructure for the
 IBA Written application. It intentionally contains placeholders instead of real
@@ -13,7 +13,7 @@ The application uses:
 - Supabase for authentication and the durable PostgreSQL database.
 - Railway for two services from the same repository and branch:
   - `web`: the Next.js application and public API.
-  - `grading-worker`: the private background grading service.
+  - `grading-worker`: the private background grading and retention-notification service.
 - Upstash Redis for drafts, caches, and locks.
 - Z.ai GLM-OCR for handwriting extraction and OpenAI for AI grading.
 - Firebase Cloud Messaging (FCM) for optional browser push notifications.
@@ -75,7 +75,7 @@ The server-only key bypasses Row Level Security. It must never be placed in a
 ### 3.1 Apply database migrations
 
 All SQL files in `supabase/migrations` must be applied in numeric order, from
-`001_schema.sql` through `020_structured_learner_profiles.sql`. The migrations create
+`001_schema.sql` through `028_retention_notifications.sql`. The migrations create
 the schema, RLS policies, triggers, RPCs, grading queues, and production question
 bank.
 
@@ -212,7 +212,14 @@ exam results become published
 notifications INSERT
   -> Supabase Database Webhook calls the Railway web service
   -> web service reads that user's profiles.fcm_tokens
-  -> Firebase sends the push notification
+  -> Firebase sends a data message
+  -> the foreground app or background service worker shows one system notification
+
+grading-worker retention poll (every minute by default)
+  -> atomically enqueues due Monday/Wednesday, exam, expiry, and lapsed jobs
+  -> claims each due job once across worker replicas
+  -> inserts the in-app notification (which enters the webhook flow above)
+  -> sends the five-day post-expiry Brevo email and retries failures
 ```
 
 The `profiles` table is used during a manual notification test only to obtain a
@@ -446,6 +453,8 @@ and health-checks `/api/health`.
    ```dotenv
    PORT=8080
    GRADING_CONCURRENCY=4
+   RETENTION_NOTIFICATION_CONCURRENCY=20
+   RETENTION_POLL_INTERVAL_MS=60000
    ```
 
 The worker exposes `/health` privately and accepts authenticated `POST /wake`
@@ -533,6 +542,7 @@ GRADING_CONCURRENCY=4
 
 NEXT_PUBLIC_SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_SITE_URL=https://YOUR_FINAL_WEB_DOMAIN
 
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
@@ -542,6 +552,14 @@ OPENAI_VECTOR_IBA_WRITTEN=
 USE_MOCK_GRADER=false
 
 GRADING_WORKER_SECRET=
+
+# Required here for the five-day post-expiry retention email.
+BREVO_API_KEY=
+BREVO_SENDER_EMAIL=
+BREVO_SENDER_NAME=IBA Written
+
+RETENTION_NOTIFICATION_CONCURRENCY=20
+RETENTION_POLL_INTERVAL_MS=60000
 ```
 
 Railway supplies `RAILWAY_REPLICA_ID` automatically. Do not configure
@@ -620,6 +638,10 @@ Verify all of the following:
 - [ ] An unauthorized push-webhook call returns `401`.
 - [ ] A real `notifications` insert produces a successful webhook delivery.
 - [ ] FCM push reaches a registered browser, if push is enabled.
+- [ ] FCM push appears once in the system notification bar with the app open and closed.
+- [ ] Admin Settings can select/edit practice hooks and change reminder timing.
+- [ ] A staging retention cycle creates only one row/job per event after repeated polls.
+- [ ] A five-day post-expiry staging job sends both the notification and Brevo email.
 - [ ] Subscribe opens `PLAN_PAYMENT_FORM_URL`.
 - [ ] Buy Now opens `SLOTS_PAYMENT_FORM_URL`.
 - [ ] Apply for Mentorship opens `MENTORSHIP_FORM_URL`.

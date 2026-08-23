@@ -1,7 +1,12 @@
-import { createAdminClient } from "@/lib/supabase/server";
-import { sendExamPublishedEmails, sendPlanActivatedEmail, sendSlotsAddedEmail } from "./brevo";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  sendExamPublishedEmails,
+  sendPlanActivatedEmail,
+  sendSlotsAddedEmail,
+  sendSubscriptionRetentionEmail,
+} from "./brevo";
 
-jest.mock("@/lib/supabase/server", () => ({ createAdminClient: jest.fn() }));
+jest.mock("@/lib/supabase/admin", () => ({ createAdminClient: jest.fn() }));
 
 const originalEnv = { ...process.env };
 
@@ -20,7 +25,7 @@ describe("Brevo account-update emails", () => {
     Object.assign(globalThis, { fetch: fetchMock });
     fetchMock.mockResolvedValue(new Response("{}", { status: 201 }));
 
-    jest.mocked(createAdminClient).mockResolvedValue({
+    jest.mocked(createAdminClient).mockReturnValue({
       auth: {
         admin: {
           getUserById: jest.fn().mockResolvedValue({
@@ -36,7 +41,7 @@ describe("Brevo account-update emails", () => {
           })),
         })),
       })),
-    } as unknown as Awaited<ReturnType<typeof createAdminClient>>);
+    } as unknown as ReturnType<typeof createAdminClient>);
   });
 
   afterEach(() => {
@@ -71,6 +76,21 @@ describe("Brevo account-update emails", () => {
     expect(request.htmlContent).toContain("https://example.com/test");
   });
 
+  it("sends escaped, personalized subscription-retention content", async () => {
+    await expect(sendSubscriptionRetentionEmail("student-id", {
+      subject: "Your progress is waiting",
+      title: "Your personal plan",
+      message: "Ayesha, your plan ended five days ago.",
+      details: "What still needs work\nUse <clear> topic sentences.\n\nYour next step\nComplete one timed answer.",
+    })).resolves.toEqual({ delivered: true, skipped: false });
+
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.subject).toBe("Your progress is waiting");
+    expect(request.htmlContent).toContain("What still needs work<br>Use &lt;clear&gt; topic sentences.");
+    expect(request.htmlContent).toContain("Continue my progress");
+    expect(request.htmlContent).toContain("https://example.com/subscription");
+  });
+
   it("sends exam-start emails only to students with an active, unexpired eligible plan", async () => {
     const gt = jest.fn().mockResolvedValue({
       data: [
@@ -91,10 +111,10 @@ describe("Brevo account-update emails", () => {
       },
       error: null,
     });
-    jest.mocked(createAdminClient).mockResolvedValue({
+    jest.mocked(createAdminClient).mockReturnValue({
       auth: { admin: { listUsers } },
       from: jest.fn().mockReturnValue({ select }),
-    } as unknown as Awaited<ReturnType<typeof createAdminClient>>);
+    } as unknown as ReturnType<typeof createAdminClient>);
 
     await expect(sendExamPublishedEmails({
       id: "10000000-0000-4000-8000-000000000001",

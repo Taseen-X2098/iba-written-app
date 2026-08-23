@@ -3,6 +3,7 @@ import Providers from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  applicationName: "IBA Written",
   title: {
     default: "IBA Written — AI-Powered Exam Preparation",
     template: "%s | IBA Written",
@@ -10,10 +11,16 @@ export const metadata: Metadata = {
   description:
     "Practice IBA written exam questions with AI-powered grading. Get instant feedback, track progress, and join weekly exams with leaderboards.",
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: {
+      url: "/icons/apple-touch-icon.png",
+      sizes: "180x180",
+      type: "image/png",
+    },
   },
-  manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

@@ -1,5 +1,7 @@
-importScripts('https://www.gstatic.com/firebasejs/10.0.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.0.0/firebase-messaging-compat.js');
+// Keep the worker install self-contained. These browser bundles are copied
+// from the pinned Firebase dependency so PWA setup does not depend on a CDN.
+importScripts('/firebase-sdk/firebase-app-compat.js');
+importScripts('/firebase-sdk/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: "AIzaSyCIGNYP8v40s5_AtNJFRaKUq1qsVAdkQlU",
@@ -15,20 +17,30 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage(function(payload) {
   console.log('[firebase-messaging-sw] Background Message received:', payload);
-  
-  const notificationTitle = payload.notification?.title || 'New Notification';
+
+  const notificationTitle = payload.data?.title || payload.notification?.title || 'IBA Written';
+  const tag = payload.data?.tag;
   const notificationOptions = {
-    body: payload.notification?.body,
-    icon: payload.notification?.image || '/placeholder-icon.png',
+    body: payload.data?.body || payload.notification?.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/badge-96.png',
+    tag: tag || undefined,
+    renotify: Boolean(tag),
     data: { url: payload.data?.url || '/notifications' }
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
-  const targetUrl = new URL(event.notification.data?.url || '/notifications', self.location.origin).href;
+  const requestedPath = event.notification.data?.url;
+  const safePath = typeof requestedPath === 'string'
+    && requestedPath.startsWith('/')
+    && !requestedPath.startsWith('//')
+    ? requestedPath
+    : '/notifications';
+  const targetUrl = new URL(safePath, self.location.origin).href;
   
   // Open the app or specific URL
   event.waitUntil(clients.matchAll({

@@ -31,9 +31,12 @@ export type GradingItemStatus = "queued" | "running" | "completed" | "failed" | 
 
 export type NotificationType =
   | "exam_available"
+  | "exam_reminder"
   | "results_published"
   | "subscription_expiring"
-  | "inactivity_reminder";
+  | "subscription_lapsed"
+  | "inactivity_reminder"
+  | "practice_reminder";
 
 // ─── Database Row Types ───────────────────────────────────────────────────────
 
@@ -222,6 +225,9 @@ export interface Notification {
   type: NotificationType;
   title: string;
   message: string;
+  details: string | null;
+  action_url: string | null;
+  dedupe_key: string | null;
   is_read: boolean;
   created_at: string;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -24,8 +24,9 @@ import {
 } from "lucide-react";
 import type { Profile, Subscription } from "@/lib/types";
 import { messaging } from "@/lib/firebase";
-import { getToken } from "firebase/messaging";
+import { getToken, onMessage } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
+import { registerAppServiceWorker } from "@/lib/pwa";
 import { NavigationLoadingOverlay } from "@/components/ui/navigation-loading-overlay";
 import {
   parseStandaloneSession,
@@ -76,7 +77,7 @@ export default function MainShell({
 
   const [activeTestState, setActiveTestState] = useState<{ type: "test" | "exam", id: string, title: string, isPractice?: boolean } | null>(null);
 
-  async function loadNotifications() {
+  const loadNotifications = useCallback(async () => {
     try {
       const response = await fetch("/api/notifications/unread-count", { cache: "no-store" });
       if (!response.ok) return;
@@ -85,7 +86,7 @@ export default function MainShell({
     } catch {
       // Keep the last known count while offline.
     }
-  }
+  }, []);
 
   useEffect(() => {
     const refreshNotifications = () => {
@@ -158,20 +159,29 @@ export default function MainShell({
       window.removeEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
       window.removeEventListener("in_progress_exam_updated", checkTimer);
     };
-  }, []);
+  }, [loadNotifications]);
 
-  async function registerFCMToken() {
+  // State to track if we should show the notification banner
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
+
+  const syncFCMToken = useCallback(async (requestPermission: boolean) => {
     try {
-      if (typeof window === "undefined" || !("Notification" in window)) return;
-      
-      const permission = await Notification.requestPermission();
+      if (
+        typeof window === "undefined"
+        || !("Notification" in window)
+        || !("serviceWorker" in navigator)
+      ) return;
+
+      const permission = requestPermission && Notification.permission === "default"
+        ? await Notification.requestPermission()
+        : Notification.permission;
       // Reflect the browser's decision immediately. Token registration can take
       // longer or fail independently, but the permission banner is no longer relevant.
       setNotificationPermission(permission);
 
       if (permission !== "granted" || !messaging) return;
 
-      const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      const registration = await registerAppServiceWorker();
       const token = await getToken(messaging, {
         vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY, // User must provide this in .env.local
         serviceWorkerRegistration: registration
@@ -179,40 +189,61 @@ export default function MainShell({
 
       if (token) {
         const supabase = createClient();
-
-        // Get current tokens to prevent duplicates
-        const { data } = await supabase
-          .from('profiles')
-          .select('fcm_tokens')
-          .eq('id', profile?.id || "")
-          .single();
-          
-        const currentTokens = data?.fcm_tokens || [];
-
-        if (!currentTokens.includes(token)) {
-          await supabase
-            .from('profiles')
-            .update({ fcm_tokens: [...currentTokens, token] })
-            .eq('id', profile?.id || "");
-        }
+        const { error } = await supabase.rpc("register_fcm_token", { p_token: token });
+        if (error) throw error;
       }
     } catch (error) {
       console.error('Error registering FCM token:', error);
     }
-  }
-
-  // State to track if we should show the notification banner
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
+  }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    const timer = window.setTimeout(() => {
       setNotificationPermission(Notification.permission);
-    }
-  }, []);
+      if (Notification.permission === "granted") void syncFCMToken(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [syncFCMToken]);
+
+  useEffect(() => {
+    if (!messaging) return;
+    return onMessage(messaging, (payload) => {
+      void loadNotifications();
+      if (Notification.permission !== "granted" || !("serviceWorker" in navigator)) return;
+      void navigator.serviceWorker.ready.then((registration) => {
+        const title = payload.data?.title || payload.notification?.title || "IBA Written";
+        const tag = payload.data?.tag;
+        return registration.showNotification(title, {
+          body: payload.data?.body || payload.notification?.body || "",
+          icon: "/icons/icon-192.png",
+          badge: "/icons/badge-96.png",
+          tag,
+          data: { url: payload.data?.url || "/notifications" },
+        });
+      }).catch((error) => console.error("Unable to show foreground notification", error));
+    });
+  }, [loadNotifications]);
 
   async function handleLogout() {
     if (!window.confirm("Are you sure you want to log out?")) return;
     const supabase = createClient();
+    if (
+      messaging
+      && Notification.permission === "granted"
+      && "serviceWorker" in navigator
+    ) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const token = await getToken(messaging, {
+          vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+          serviceWorkerRegistration: registration,
+        });
+        if (token) await supabase.rpc("unregister_fcm_token", { p_token: token });
+      } catch (error) {
+        console.error("Unable to unregister this browser from push notifications", error);
+      }
+    }
     await supabase.auth.signOut();
     router.push("/login");
   }
@@ -242,10 +273,10 @@ export default function MainShell({
           <div className="m-3 p-3 bg-brand-50 border border-brand-200 rounded-lg shrink-0">
             <h3 className="text-xs font-semibold text-brand-800 mb-1">Stay Updated!</h3>
             <p className="text-[10px] text-brand-600 mb-2 leading-tight">
-              Enable notifications to know when new exams or results are available.
+              Enable notifications for practice, exams, results, and plan reminders.
             </p>
             <button
-              onClick={registerFCMToken}
+              onClick={() => void syncFCMToken(true)}
               className="w-full bg-brand-600 text-white rounded text-xs py-1.5 font-medium hover:bg-brand-700 transition-colors"
             >
               Enable Notifications
@@ -395,10 +426,10 @@ export default function MainShell({
           <div className="m-3 p-3 bg-brand-50 border border-brand-200 rounded-lg shrink-0">
             <h3 className="text-xs font-semibold text-brand-800 mb-1">Stay Updated!</h3>
             <p className="text-[10px] text-brand-600 mb-2 leading-tight">
-              Enable notifications to know when new exams or results are available.
+              Enable notifications for practice, exams, results, and plan reminders.
             </p>
             <button
-              onClick={registerFCMToken}
+              onClick={() => void syncFCMToken(true)}
               className="w-full bg-brand-600 text-white rounded text-xs py-1.5 font-medium hover:bg-brand-700 transition-colors"
             >
               Enable Notifications

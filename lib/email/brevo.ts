@@ -1,5 +1,5 @@
 import { PLAN_CONFIG, type PlanType } from "@/lib/types";
-import { createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 const DEFAULT_SITE_URL = "https://ibawritten.com";
@@ -16,6 +16,13 @@ export type PublishedExamEmailDetails = {
   totalMarks: number;
   deadline: string;
   durationMinutes: number;
+};
+
+export type SubscriptionRetentionEmailDetails = {
+  subject: string;
+  title: string;
+  message: string;
+  details: string;
 };
 
 function escapeHtml(value: string) {
@@ -291,6 +298,26 @@ export async function sendSlotsAddedEmail(userId: string, amount: number, slotTy
 <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;color:#166534;font-size:14px;line-height:1.5;margin:20px 0 0;padding:14px 16px;"><strong>Ready when you are:</strong> start a practice test and get AI-powered feedback.</div>`,
       ctaLabel: "Start practicing",
       ctaUrl: `${getSiteUrl()}/test`,
+    }),
+  );
+}
+
+export async function sendSubscriptionRetentionEmail(
+  userId: string,
+  content: SubscriptionRetentionEmailDetails,
+) {
+  return deliverAccountUpdate(
+    () => getRecipient(userId),
+    content.subject,
+    (recipient) => emailLayout({
+      preview: content.message,
+      title: content.title,
+      body: `<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;">Hi ${escapeHtml(recipient.name)},</p>
+<p style="color:#334155;font-size:16px;line-height:1.7;margin:0;">${escapeHtml(content.details)
+        .replace(/\r?\n\r?\n/g, "</p><p style=\"color:#334155;font-size:16px;line-height:1.7;margin:16px 0 0;\">")
+        .replace(/\r?\n/g, "<br>")}</p>`,
+      ctaLabel: "Continue my progress",
+      ctaUrl: `${getSiteUrl()}/subscription`,
     }),
   );
 }

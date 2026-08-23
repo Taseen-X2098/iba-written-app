@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export async function POST(_request?: Request) {
+export async function POST(_request: Request) {
   return NextResponse.json(
     {
       error: "This submission endpoint has been replaced by attempt completion.",

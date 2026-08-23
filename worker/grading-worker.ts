@@ -2,11 +2,17 @@ import { createServer } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { drainGradingQueue } from "../lib/grading/jobs";
 import { drainProgressionReportQueue } from "../lib/learning/report-jobs";
+import { runRetentionNotificationCycle } from "../lib/notifications/retention";
 
 const port = Number(process.env.PORT ?? 8080);
 const workerId = process.env.RAILWAY_REPLICA_ID ?? `railway-${randomUUID()}`;
 let running: Promise<void> | null = null;
 let rerunRequested = false;
+let retentionRunning: Promise<void> | null = null;
+const configuredRetentionPollInterval = Number(process.env.RETENTION_POLL_INTERVAL_MS ?? 60_000);
+const retentionPollInterval = Number.isFinite(configuredRetentionPollInterval)
+  ? Math.max(15_000, configuredRetentionPollInterval)
+  : 60_000;
 
 function authorized(header: string | undefined) {
   const secret = process.env.GRADING_WORKER_SECRET;
@@ -38,10 +44,32 @@ function wake() {
   return running;
 }
 
+function wakeRetention() {
+  if (retentionRunning) return retentionRunning;
+  retentionRunning = runRetentionNotificationCycle({
+    workerId: `${workerId}-retention`,
+    batchSize: Number(process.env.RETENTION_NOTIFICATION_CONCURRENCY ?? 20),
+  })
+    .then((totals) => {
+      if (totals.enqueued || totals.completed || totals.failed || totals.cancelled) {
+        console.log("Retention notification cycle", totals);
+      }
+    })
+    .catch((error) => console.error("Retention notification cycle failed", error))
+    .finally(() => {
+      retentionRunning = null;
+    });
+  return retentionRunning;
+}
+
 createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true, running: Boolean(running) }));
+    response.end(JSON.stringify({
+      ok: true,
+      gradingRunning: Boolean(running),
+      retentionRunning: Boolean(retentionRunning),
+    }));
     return;
   }
   if (request.method === "POST" && request.url === "/wake") {
@@ -60,4 +88,7 @@ createServer((request, response) => {
 }).listen(port, () => {
   console.log(`Grading worker listening on ${port}`);
   void wake();
+  void wakeRetention();
 });
+
+setInterval(() => void wakeRetention(), retentionPollInterval);
