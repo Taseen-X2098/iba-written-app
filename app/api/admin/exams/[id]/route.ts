@@ -5,6 +5,7 @@ import { examDefinitionSchema } from "@/lib/exams/admin-contracts";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseJsonRequest, parseRequestValue } from "@/lib/api/request";
 import { uuidSchema } from "@/lib/exams/contracts";
+import { sendExamPublishedEmails } from "@/lib/email/brevo";
 
 export async function PUT(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -16,6 +17,12 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
       message: "Invalid exam definition",
     });
     const admin = await createAdminClient();
+    const { data: existingExam, error: existingExamError } = await admin
+      .from("exams")
+      .select("is_published")
+      .eq("id", id)
+      .single();
+    if (existingExamError || !existingExam) throw existingExamError ?? new Error("Exam not found");
     const { error } = await admin.rpc("update_exam_definition", {
       p_exam_id: id,
       p_title: input.title,
@@ -29,6 +36,16 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     if (error) {
       if (error.message.includes("EXAM_ALREADY_STARTED")) throw new ApiError("ATTEMPT_ACTIVE", "The exam definition is locked after the first official start. Use Extend Timer for deadline changes.", 409);
       throw error;
+    }
+    if (input.isPublished && !existingExam.is_published) {
+      await sendExamPublishedEmails({
+        id,
+        title: input.title,
+        instructions: input.description,
+        totalMarks: input.questions.reduce((total, question) => total + question.marks, 0),
+        deadline: input.endsAt,
+        durationMinutes: input.timeLimitMinutes,
+      });
     }
     return NextResponse.json({ success: true, examId: id });
   } catch (error) {

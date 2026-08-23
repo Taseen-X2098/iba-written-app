@@ -9,6 +9,15 @@ type Recipient = {
   name: string;
 };
 
+export type PublishedExamEmailDetails = {
+  id: string;
+  title: string;
+  instructions: string | null;
+  totalMarks: number;
+  deadline: string;
+  durationMinutes: number;
+};
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;",
@@ -30,6 +39,25 @@ function formatDate(date: string) {
     year: "numeric",
     timeZone: "Asia/Dhaka",
   }).format(new Date(date));
+}
+
+function formatDateTime(date: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Dhaka",
+    timeZoneName: "short",
+  }).format(new Date(date));
+}
+
+function formatDuration(minutes: number) {
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours} ${hours === 1 ? "hour" : "hours"}${remainingMinutes ? ` ${remainingMinutes} minutes` : ""}`;
 }
 
 function emailLayout({ preview, title, body, ctaLabel, ctaUrl }: {
@@ -130,6 +158,101 @@ async function deliverAccountUpdate(recipientLoader: () => Promise<Recipient>, s
     // A notification failure must never undo a paid purchase or an admin-granted entitlement.
     console.error("Unable to send account-update email:", error);
     return { delivered: false, skipped: false };
+  }
+}
+
+function profileName(profile: unknown) {
+  if (profile && typeof profile === "object" && "name" in profile && typeof profile.name === "string") {
+    return profile.name;
+  }
+  if (Array.isArray(profile)) {
+    const first = profile[0];
+    if (first && typeof first === "object" && "name" in first && typeof first.name === "string") {
+      return first.name;
+    }
+  }
+  return "there";
+}
+
+async function getEligibleExamRecipients() {
+  const supabase = await createAdminClient();
+  const { data: subscriptions, error: subscriptionsError } = await supabase
+    .from("subscriptions")
+    .select("user_id, profiles(name)")
+    .eq("is_active", true)
+    .in("plan_type", ["plan_2", "plan_3"])
+    .gt("expires_at", new Date().toISOString());
+
+  if (subscriptionsError) throw subscriptionsError;
+
+  const namesByUserId = new Map<string, string>();
+  for (const subscription of subscriptions ?? []) {
+    namesByUserId.set(subscription.user_id, profileName(subscription.profiles));
+  }
+  if (namesByUserId.size === 0) return [] as Recipient[];
+
+  const recipients: Recipient[] = [];
+  const pageSize = 1_000;
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: pageSize });
+    if (error) throw error;
+
+    const users = data.users ?? [];
+    for (const user of users) {
+      const name = namesByUserId.get(user.id);
+      if (name && user.email) recipients.push({ email: user.email, name });
+    }
+    if (users.length < pageSize) break;
+  }
+  return recipients;
+}
+
+export async function sendExamPublishedEmails(exam: PublishedExamEmailDetails) {
+  if (!process.env.BREVO_API_KEY || !process.env.BREVO_SENDER_EMAIL) {
+    console.warn("Brevo exam-publication email skipped: set BREVO_API_KEY and BREVO_SENDER_EMAIL to enable email notifications.");
+    return { recipients: 0, delivered: 0, failed: 0, skipped: true };
+  }
+
+  try {
+    const recipients = await getEligibleExamRecipients();
+    const subject = `Exam started: ${exam.title}`;
+    const instructions = escapeHtml(exam.instructions?.trim() || "Please read each question carefully before submitting.")
+      .replace(/\r?\n/g, "<br>");
+    const htmlContent = (recipient: Recipient) => emailLayout({
+      preview: `${exam.title} has started. Complete it before the deadline.`,
+      title: "Your exam has started",
+      body: `<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;">Hi ${escapeHtml(recipient.name)},</p>
+<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;"><strong style="color:#15803d;">${escapeHtml(exam.title)}</strong> is now available.</p>
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;color:#166534;font-size:14px;line-height:1.7;margin:20px 0 0;padding:14px 16px;">
+  <strong>Instructions:</strong><br>${instructions}<br><br>
+  <strong>Total marks:</strong> ${exam.totalMarks}<br>
+  <strong>Deadline:</strong> ${formatDateTime(exam.deadline)}<br>
+  <strong>Duration:</strong> ${formatDuration(exam.durationMinutes)}
+</div>`,
+      ctaLabel: "Start exam",
+      ctaUrl: `${getSiteUrl()}/exams/${exam.id}`,
+    });
+
+    let delivered = 0;
+    let failed = 0;
+    const batchSize = 10;
+    for (let index = 0; index < recipients.length; index += batchSize) {
+      const outcomes = await Promise.all(recipients.slice(index, index + batchSize).map(async (recipient) => {
+        try {
+          await sendBrevoEmail(recipient, subject, htmlContent(recipient));
+          return true;
+        } catch (error) {
+          console.error("Unable to send exam-publication email:", error);
+          return false;
+        }
+      }));
+      delivered += outcomes.filter(Boolean).length;
+      failed += outcomes.filter((outcome) => !outcome).length;
+    }
+    return { recipients: recipients.length, delivered, failed, skipped: false };
+  } catch (error) {
+    console.error("Unable to prepare exam-publication emails:", error);
+    return { recipients: 0, delivered: 0, failed: 0, skipped: false };
   }
 }
 

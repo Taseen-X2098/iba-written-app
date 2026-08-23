@@ -119,7 +119,7 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
           timeLimitMinutes: timeLimit,
           startsAt: new Date(startsAt).toISOString(),
           endsAt: new Date(endsAt).toISOString(),
-          isPublished: initialExam ? initialExam.isPublished : publish,
+          isPublished: initialExam?.isPublished || publish,
           questions: finalQuestions
         })
       });
@@ -359,7 +359,7 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
             disabled={loading || locked}
             className="w-full bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-700 transition-colors flex items-center justify-center gap-2"
           >
-            <Save size={16} /> {initialExam ? "Save Changes" : "Save & Publish"}
+            <Save size={16} /> {initialExam?.isPublished ? "Save Changes" : "Save & Publish"}
           </button>
         </div>
       </div>

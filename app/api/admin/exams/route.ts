@@ -4,6 +4,7 @@ import { apiErrorResponse } from "@/lib/api/errors";
 import { examDefinitionSchema } from "@/lib/exams/admin-contracts";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseJsonRequest } from "@/lib/api/request";
+import { sendExamPublishedEmails } from "@/lib/email/brevo";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +25,16 @@ export async function POST(request: NextRequest) {
       p_questions: input.questions,
     });
     if (error) throw error;
+    if (input.isPublished) {
+      await sendExamPublishedEmails({
+        id: examId,
+        title: input.title,
+        instructions: input.description,
+        totalMarks: input.questions.reduce((total, question) => total + question.marks, 0),
+        deadline: input.endsAt,
+        durationMinutes: input.timeLimitMinutes,
+      });
+    }
     return NextResponse.json({ success: true, examId });
   } catch (error) {
     return apiErrorResponse(error);

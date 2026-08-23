@@ -24,6 +24,8 @@ const STATUS_LABELS: Record<ProgressionStatus, string> = {
   needs_attention: "Needs focused attention",
 };
 
+const REPORT_SUBMISSIONS_REQUIRED = 3;
+
 export default async function PersonalReportPage({
   searchParams,
 }: {
@@ -42,7 +44,7 @@ export default async function PersonalReportPage({
     <div className="mx-auto max-w-5xl px-4 py-6 lg:px-8">
       <header className="mb-8">
         <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
             <TrendingUp size={22} aria-hidden="true" />
           </span>
           <div>
@@ -55,13 +57,13 @@ export default async function PersonalReportPage({
       </header>
 
       {data.categories.length === 0 || !selected ? (
-        <section className="rounded-2xl border border-dashed border-violet-200 bg-violet-50/40 p-10 text-center">
-          <Sparkles className="mx-auto text-violet-400" size={42} aria-hidden="true" />
-          <h2 className="mt-4 text-lg font-bold">Your personal report is ready to begin</h2>
+        <section className="rounded-2xl border border-dashed border-brand-200 bg-brand-50/40 p-10 text-center">
+          <Sparkles className="mx-auto text-brand-500" size={42} aria-hidden="true" />
+          <h2 className="mt-4 text-lg font-bold">Your personal report is not ready yet</h2>
           <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
-            Complete a graded writing submission to establish your first type-specific strengths and priorities.
+            Submit and receive grades for three responses of the same writing type to form your first personal report. You have not submitted any graded responses yet.
           </p>
-          <Link href="/questions" prefetch={false} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white">
+          <Link href="/questions" prefetch={false} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700">
             Start practising <ArrowRight size={15} aria-hidden="true" />
           </Link>
         </section>
@@ -77,8 +79,8 @@ export default async function PersonalReportPage({
                   prefetch={false}
                   className={`whitespace-nowrap rounded-full border px-4 py-2 text-sm font-bold transition-colors ${
                     active
-                      ? "border-violet-600 bg-violet-600 text-white"
-                      : "border-border bg-card text-muted-foreground hover:border-violet-300 hover:text-violet-800"
+                      ? "border-brand-600 bg-brand-600 text-white"
+                      : "border-border bg-card text-muted-foreground hover:border-brand-300 hover:text-brand-800"
                   }`}
                 >
                   {category.submissionTypeLabel}
@@ -87,16 +89,16 @@ export default async function PersonalReportPage({
             })}
           </nav>
 
-          <section className="overflow-hidden rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-brand-50 shadow-sm">
-            <div className="border-b border-violet-100 p-6 sm:p-8">
+          <section className="overflow-hidden rounded-3xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-brand-50 shadow-sm">
+            <div className="border-b border-brand-100 p-6 sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-widest text-violet-700">{selected.submissionTypeLabel} only</p>
+                  <p className="text-xs font-bold uppercase tracking-widest text-brand-700">{selected.submissionTypeLabel}</p>
                   <h2 className="mt-2 text-2xl font-black text-foreground">
                     {selected.latestReport?.title ?? "Personal Progression Report"}
                   </h2>
                 </div>
-                <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1.5 text-xs font-bold text-violet-800">
+                <span className="rounded-full border border-brand-200 bg-brand-100 px-3 py-1.5 text-xs font-bold text-brand-800">
                   {STATUS_LABELS[selected.latestReport?.trajectory ?? selected.snapshot.status]}
                 </span>
               </div>
@@ -131,24 +133,14 @@ export default async function PersonalReportPage({
               <InsightSection
                 title="Resolved wins"
                 icon={<CheckCircle2 size={18} />}
-                tone="violet"
+                tone="brand"
                 insights={selected.latestReport.resolvedWins}
                 empty="A weakness will appear here only after later writing positively demonstrates that it has been fixed."
               />
               <NextStepsSection steps={selected.latestReport.nextSteps} />
             </div>
           ) : (
-            <section className="mt-6 rounded-2xl border border-border bg-card p-6">
-              <div className="flex items-start gap-3">
-                <Lightbulb className="mt-0.5 shrink-0 text-violet-600" size={22} aria-hidden="true" />
-                <div>
-                  <h2 className="font-bold text-foreground">Your report is learning from your work</h2>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    Your current personal snapshot is already available above. Deeper trends, recurring patterns, and demonstrated fixes will appear only when there is enough same-type evidence to support them reliably.
-                  </p>
-                </div>
-              </div>
-            </section>
+            <ReportPendingNotice totalGraded={selected.totalGraded} submissionTypeLabel={selected.submissionTypeLabel} />
           )}
         </>
       )}
@@ -159,7 +151,7 @@ export default async function PersonalReportPage({
 function LockedPersonalReport() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 lg:px-8">
-      <section className="relative overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-violet-50 p-7 shadow-sm sm:p-10">
+      <section className="relative overflow-hidden rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-brand-50 p-7 shadow-sm sm:p-10">
         <Crown className="absolute -right-8 -top-8 text-amber-200/60" size={180} aria-hidden="true" />
         <div className="relative max-w-2xl">
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-800">
@@ -189,10 +181,39 @@ function LockedPersonalReport() {
 
 function SnapshotCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-violet-100 bg-white/85 p-5">
-      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-violet-700">{icon}{label}</div>
+    <div className="rounded-2xl border border-brand-100 bg-white/85 p-5">
+      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-brand-700">{icon}{label}</div>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">{value}</p>
     </div>
+  );
+}
+
+function ReportPendingNotice({
+  totalGraded,
+  submissionTypeLabel,
+}: {
+  totalGraded: number;
+  submissionTypeLabel: string;
+}) {
+  const remaining = Math.max(REPORT_SUBMISSIONS_REQUIRED - totalGraded, 0);
+  const needsMoreSubmissions = remaining > 0;
+
+  return (
+    <section className="mt-6 rounded-2xl border border-brand-200 bg-brand-50/50 p-6">
+      <div className="flex items-start gap-3">
+        <Lightbulb className="mt-0.5 shrink-0 text-brand-600" size={22} aria-hidden="true" />
+        <div>
+          <h2 className="font-bold text-foreground">
+            {needsMoreSubmissions ? "Your full personal report is not ready yet" : "Your full personal report is being prepared"}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {needsMoreSubmissions
+              ? `You have ${totalGraded} of ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} submission${totalGraded === 1 ? "" : "s"}. Submit ${remaining} more graded response${remaining === 1 ? "" : "s"} of this same writing type before we can form a reliable personal report.`
+              : `You have submitted the ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} responses needed to form your report. It is being prepared now.`}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -205,14 +226,14 @@ function InsightSection({
 }: {
   title: string;
   icon: React.ReactNode;
-  tone: "emerald" | "amber" | "violet";
+  tone: "emerald" | "amber" | "brand";
   insights: ProgressionReportInsight[];
   empty: string;
 }) {
   const tones = {
     emerald: "border-emerald-200 bg-emerald-50/40 text-emerald-800",
     amber: "border-amber-200 bg-amber-50/40 text-amber-800",
-    violet: "border-violet-200 bg-violet-50/40 text-violet-800",
+    brand: "border-brand-200 bg-brand-50/40 text-brand-800",
   };
   return (
     <section className={`rounded-2xl border p-6 ${tones[tone]}`}>
