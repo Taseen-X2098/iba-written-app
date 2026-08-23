@@ -48,9 +48,9 @@ export default async function PersonalReportPage({
             <TrendingUp size={22} aria-hidden="true" />
           </span>
           <div>
-            <h1 className="text-2xl font-black text-foreground">Personal Report</h1>
+            <h1 className="text-2xl font-black text-foreground">Category Progress Reports</h1>
             <p className="text-sm text-muted-foreground">
-              Evidence-backed progression kept separate for every writing type.
+              Evidence-backed patterns kept separate for every question category.
             </p>
           </div>
         </div>
@@ -59,9 +59,9 @@ export default async function PersonalReportPage({
       {data.categories.length === 0 || !selected ? (
         <section className="rounded-2xl border border-dashed border-brand-200 bg-brand-50/40 p-10 text-center">
           <Sparkles className="mx-auto text-brand-500" size={42} aria-hidden="true" />
-          <h2 className="mt-4 text-lg font-bold">Your personal report is not ready yet</h2>
+          <h2 className="mt-4 text-lg font-bold">Your category reports are not ready yet</h2>
           <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
-            Submit and receive grades for three responses of the same writing type to form your first personal report. You have not submitted any graded responses yet.
+            Submit and receive grades for three responses in the same question category to reveal patterns that extend beyond any one answer. You have not submitted any graded responses yet.
           </p>
           <Link href="/questions" prefetch={false} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700">
             Start practising <ArrowRight size={15} aria-hidden="true" />
@@ -89,56 +89,74 @@ export default async function PersonalReportPage({
             })}
           </nav>
 
-          <section className="overflow-hidden rounded-3xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-brand-50 shadow-sm">
-            <div className="border-b border-brand-100 p-6 sm:p-8">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-widest text-brand-700">{selected.submissionTypeLabel}</p>
-                  <h2 className="mt-2 text-2xl font-black text-foreground">
-                    {selected.latestReport?.title ?? "Personal Progression Report"}
-                  </h2>
-                </div>
-                <span className="rounded-full border border-brand-200 bg-brand-100 px-3 py-1.5 text-xs font-bold text-brand-800">
-                  {STATUS_LABELS[selected.latestReport?.trajectory ?? selected.snapshot.status]}
-                </span>
-              </div>
-              <p className="mt-5 max-w-3xl text-sm leading-7 text-muted-foreground">
-                {selected.latestReport?.overview ?? selected.snapshot.headline}
-              </p>
-            </div>
-
-            <div className="grid gap-4 p-6 md:grid-cols-3 sm:p-8">
-              <SnapshotCard icon={<Sparkles size={17} />} label="Recent win" value={selected.snapshot.recentWin} />
-              <SnapshotCard icon={<Target size={17} />} label="Current focus" value={selected.snapshot.focusArea} />
-              <SnapshotCard icon={<ArrowRight size={17} />} label="Next action" value={selected.snapshot.nextStep} />
-            </div>
-          </section>
-
           {selected.latestReport ? (
-            <div className="mt-6 grid gap-6 lg:grid-cols-2">
-              <InsightSection
-                title="Strengths to preserve"
-                icon={<Sparkles size={18} />}
-                tone="emerald"
-                insights={selected.latestReport.strengths}
-                empty="Your next evaluated response will add more evidence about stable strengths."
-              />
-              <InsightSection
-                title="Growth areas"
-                icon={<Target size={18} />}
-                tone="amber"
-                insights={selected.latestReport.growthAreas}
-                empty="No established recurring weakness is strong enough to report yet."
-              />
-              <InsightSection
-                title="Resolved wins"
-                icon={<CheckCircle2 size={18} />}
-                tone="brand"
-                insights={selected.latestReport.resolvedWins}
-                empty="A weakness will appear here only after later writing positively demonstrates that it has been fixed."
-              />
-              <NextStepsSection steps={selected.latestReport.nextSteps} />
-            </div>
+            <>
+              <section className="overflow-hidden rounded-3xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-brand-50 shadow-sm">
+                <div className="border-b border-brand-100 p-6 sm:p-8">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-brand-700">{selected.submissionTypeLabel}</p>
+                      <h2 className="mt-2 text-2xl font-black text-foreground">
+                        {selected.submissionTypeLabel} Progress Report
+                      </h2>
+                    </div>
+                    <span className="rounded-full border border-brand-200 bg-brand-100 px-3 py-1.5 text-xs font-bold text-brand-800">
+                      {STATUS_LABELS[selected.latestReport.trajectory]}
+                    </span>
+                  </div>
+                  <p className="mt-5 max-w-3xl text-sm leading-7 text-muted-foreground">
+                    {selected.latestReport.overview}
+                  </p>
+                </div>
+
+                <div className="grid gap-4 p-6 md:grid-cols-3 sm:p-8">
+                  <SnapshotCard
+                    icon={<Sparkles size={17} />}
+                    label="Category strength"
+                    value={selected.latestReport.strengths[0]?.insight
+                      ?? selected.latestReport.resolvedWins[0]?.insight
+                      ?? "More graded responses will make your recurring strengths clearer."}
+                  />
+                  <SnapshotCard
+                    icon={<Target size={17} />}
+                    label="Recurring focus"
+                    value={selected.latestReport.growthAreas[0]?.insight
+                      ?? "No recurring weakness is established strongly enough to report yet."}
+                  />
+                  <SnapshotCard
+                    icon={<ArrowRight size={17} />}
+                    label="Practice priority"
+                    value={selected.latestReport.nextSteps[0]?.action
+                      ?? "Keep applying the category-level strengths identified in this report."}
+                  />
+                </div>
+              </section>
+
+              <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                <InsightSection
+                  title="Strengths across the category"
+                  icon={<Sparkles size={18} />}
+                  tone="emerald"
+                  insights={selected.latestReport.strengths}
+                  empty="Your next evaluated response will add more evidence about stable strengths."
+                />
+                <InsightSection
+                  title="Recurring growth areas"
+                  icon={<Target size={18} />}
+                  tone="amber"
+                  insights={selected.latestReport.growthAreas}
+                  empty="No established recurring weakness is strong enough to report yet."
+                />
+                <InsightSection
+                  title="Resolved patterns"
+                  icon={<CheckCircle2 size={18} />}
+                  tone="brand"
+                  insights={selected.latestReport.resolvedWins}
+                  empty="A weakness will appear here only after later writing positively demonstrates that it has been fixed."
+                />
+                <NextStepsSection steps={selected.latestReport.nextSteps} />
+              </div>
+            </>
           ) : (
             <ReportPendingNotice totalGraded={selected.totalGraded} submissionTypeLabel={selected.submissionTypeLabel} />
           )}
@@ -158,12 +176,12 @@ function LockedPersonalReport() {
             <Lock size={22} aria-hidden="true" />
           </span>
           <p className="mt-5 text-xs font-black uppercase tracking-widest text-amber-700">Subscriber feature</p>
-          <h1 className="mt-2 text-3xl font-black text-foreground">Personal Report</h1>
+          <h1 className="mt-2 text-3xl font-black text-foreground">Category Progress Reports</h1>
           <p className="mt-4 text-base leading-7 text-muted-foreground">
-            See a private report for each writing type, backed by quotations and patterns from your own work—not generic advice. It recognizes demonstrated improvements, flags repeated mistakes, and turns the evidence into a focused practice strategy.
+            See a private report for each question category, built from patterns across multiple responses rather than feedback on one answer. It recognizes demonstrated improvements, flags repeated mistakes, and turns the evidence into a focused practice strategy.
           </p>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {["Separate report for every writing type", "Evidence-backed strengths and weaknesses", "Recognition when an old problem is fixed", "A personal next-step practice plan"].map((benefit) => (
+            {["Separate report for every question category", "Patterns drawn from multiple responses", "Recognition when an old problem is fixed", "A category-level practice strategy"].map((benefit) => (
               <div key={benefit} className="flex items-start gap-2 rounded-xl border border-amber-100 bg-white/80 p-3 text-sm">
                 <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={16} aria-hidden="true" />
                 {benefit}
@@ -171,7 +189,7 @@ function LockedPersonalReport() {
             ))}
           </div>
           <Link href="/subscription" prefetch={false} className="mt-7 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-5 py-3 text-sm font-bold text-white hover:bg-amber-800">
-            Unlock your personal report <ArrowRight size={16} aria-hidden="true" />
+            Unlock category reports <ArrowRight size={16} aria-hidden="true" />
           </Link>
         </div>
       </section>
@@ -204,12 +222,12 @@ function ReportPendingNotice({
         <Lightbulb className="mt-0.5 shrink-0 text-brand-600" size={22} aria-hidden="true" />
         <div>
           <h2 className="font-bold text-foreground">
-            {needsMoreSubmissions ? "Your full personal report is not ready yet" : "Your full personal report is being prepared"}
+            {needsMoreSubmissions ? "Your category report is not ready yet" : "Your category report is being prepared"}
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {needsMoreSubmissions
-              ? `You have ${totalGraded} of ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} submission${totalGraded === 1 ? "" : "s"}. Submit ${remaining} more graded response${remaining === 1 ? "" : "s"} of this same writing type before we can form a reliable personal report.`
-              : `You have submitted the ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} responses needed to form your report. It is being prepared now.`}
+              ? `You have ${totalGraded} of ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} submission${totalGraded === 1 ? "" : "s"}. Submit ${remaining} more graded response${remaining === 1 ? "" : "s"} in this category before we can identify reliable patterns across different questions.`
+              : `You have submitted the ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} responses needed for a category-wide report. It is being prepared now.`}
           </p>
         </div>
       </div>
@@ -254,7 +272,7 @@ function InsightSection({
 function NextStepsSection({ steps }: { steps: ProgressionReportNextStep[] }) {
   return (
     <section className="rounded-2xl border border-sky-200 bg-sky-50/40 p-6">
-      <h2 className="flex items-center gap-2 font-bold text-sky-900"><Lightbulb size={18} />Your practice strategy</h2>
+      <h2 className="flex items-center gap-2 font-bold text-sky-900"><Lightbulb size={18} />Category practice strategy</h2>
       <ol className="mt-4 space-y-3">
         {steps.map((step, index) => (
           <li key={index} className="rounded-xl bg-white/85 p-4">

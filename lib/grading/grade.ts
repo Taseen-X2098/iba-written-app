@@ -7,6 +7,7 @@ import {
   formatScore,
   MARK_NORMALIZATION_VERSION,
 } from "./marks";
+import { formatNumberedImprovementList } from "./improvements";
 
 const MODEL = "gpt-5.6-luna";
 
@@ -83,7 +84,12 @@ const GRADING_RESULT_FORMAT = {
         properties: {
           score: { type: "string" }, // e.g. "8/10" — the only number a student sees
           remarks: { type: "string" },
-          ways_to_improve: { type: "string" },
+          ways_to_improve: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 2,
+            maxItems: 3,
+          },
           grammar_errors: {
             type: "array",
             items: {
@@ -358,7 +364,7 @@ export async function grade(
       score: string;
       summary?: string;
       remarks?: string;
-      ways_to_improve?: string;
+      ways_to_improve?: string | string[];
       grammar_errors?: unknown;
       highlights: Highlight[];
     };
@@ -387,8 +393,9 @@ export async function grade(
   const remarks = String(parsed.student_feedback.remarks ?? legacySummary).trim()
     || "Your response addresses the task, but the available feedback could not be expanded further.";
   const personalizedFeedback = `No previous ${taskTypeLabel(taskType)} records were found for personalized feedback yet. This feedback is based only on your current submission.`;
-  const waysToImprove = String(parsed.student_feedback.ways_to_improve ?? "").trim()
-    || "For your next submission, revise the weakest sentence for clarity, connect each supporting point directly to your main idea, and proofread once for grammar and punctuation.";
+  const waysToImprove = formatNumberedImprovementList(
+    parsed.student_feedback.ways_to_improve,
+  );
 
   return {
     internal: {

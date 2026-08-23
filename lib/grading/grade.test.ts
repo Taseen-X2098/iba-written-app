@@ -188,7 +188,10 @@ describe('AI Grading Utility', () => {
       student_feedback: {
         score: '6/10',
         remarks: 'The answer has a relevant position, but sentence accuracy weakens its authority.',
-        ways_to_improve: 'Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
+        ways_to_improve: [
+          'Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
+          'Read the revised sentence in context to confirm that its subject and verb still agree.',
+        ],
         grammar_errors: [
           {
             quote: 'People is affected',
@@ -216,8 +219,31 @@ describe('AI Grading Utility', () => {
     expect(result.studentFeedback.remarks).toContain('relevant position');
     expect(result.studentFeedback.personalizedFeedback).toContain('No previous Argumentative Essay records');
     expect(result.studentFeedback.waysToImprove).toContain('People are affected');
+    expect(result.studentFeedback.waysToImprove).toBe([
+      '1. Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
+      '2. Read the revised sentence in context to confirm that its subject and verb still agree.',
+    ].join('\n'));
     expect(result.studentFeedback.grammarErrors).toHaveLength(1);
     expect(result.studentFeedback.grammarErrors?.[0].corrections).toHaveLength(2);
     expect(result.studentFeedback.summary.split('\n\n')).toHaveLength(3);
+  });
+
+  it('normalizes legacy improvement text into a numbered list', async () => {
+    const mockResponse = JSON.stringify({
+      internal: { total: 6, max: 10, criteria: [] },
+      student_feedback: {
+        score: '6/10',
+        remarks: 'The response has a clear position but needs tighter support.',
+        ways_to_improve: '1. State the main claim precisely.\n2. Link each example back to that claim.',
+        grammar_errors: [],
+        highlights: [],
+      },
+    });
+
+    const result = await grade(createMockClient(mockResponse), 'Text.', 'essay', 10);
+
+    expect(result.studentFeedback.waysToImprove).toBe(
+      '1. State the main claim precisely.\n2. Link each example back to that claim.',
+    );
   });
 });

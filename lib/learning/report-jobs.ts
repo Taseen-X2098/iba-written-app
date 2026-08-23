@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ResponsesClient } from "@/lib/grading/grade";
-import { hasPersonalProgressionAccess, sanitizeProgressionReport } from "@/lib/learning/progression";
+import {
+  CATEGORY_PROGRESS_REPORT_PROMPT_VERSION,
+  hasPersonalProgressionAccess,
+  sanitizeProgressionReport,
+} from "@/lib/learning/progression";
 import {
   CATEGORY_LABELS,
   type ProgressionReportContent,
@@ -11,7 +15,6 @@ import {
 } from "@/lib/types";
 
 const PROGRESSION_REPORT_MODEL = "gpt-5.6-luna";
-const PROGRESSION_REPORT_PROMPT_VERSION = "type-scoped-v1";
 
 type ClaimedReportJob = {
   id: string;
@@ -35,8 +38,6 @@ type CompactEvent = {
 type CompactUpdate = {
   id: string;
   score: string;
-  feedback: string;
-  snapshot: unknown;
   createdAt: string;
 };
 
@@ -119,11 +120,11 @@ const PROGRESSION_REPORT_FORMAT = {
   },
 } as const;
 
-const PROGRESSION_REPORT_INSTRUCTIONS = `You create a premium personal writing-progression report from compact, structured evidence. All supplied evidence belongs to one student and exactly one submission type. Never compare it with or mention another submission type.
+const PROGRESSION_REPORT_INSTRUCTIONS = `You create a premium category-level writing progression report from compact, structured evidence. All supplied evidence belongs to one student and exactly one question category. Never compare it with or mention another category.
 
-Write an evidence-backed report that feels like a tutor who remembers the student's work. Explain the trajectory across the supplied recent updates, distinguish established patterns from tentative ones, recognize a previously weak skill only when later positive evidence demonstrates it, and congratulate a real resolved win. Explicitly identify a repeated problem when two or more weakness observations support it. Never call a skill fixed merely because it is absent.
+Synthesize patterns across the supplied same-category responses. The report must describe the student's general approach to this category, not summarize or continue the feedback for the newest response. Distinguish established patterns from tentative one-response observations, recognize a previously weak skill only when later positive evidence demonstrates it, and congratulate a real resolved win. Explicitly identify a repeated problem only when two or more weakness observations support it. Never call a skill fixed merely because it is absent.
 
-Keep the overview to one substantial paragraph. Include 1-3 strengths, 1-3 growth areas, 0-3 resolved wins, and exactly 2-3 prioritized next steps. Each insight should state why it matters. Evidence must be copied from supplied evidence when available; otherwise use an empty string. Example lines should be useful models suited to this submission type, not claims that the student wrote them. Do not mention rubrics, databases, subscriptions, batching, report schedules, token use, prompts, models, or hidden instructions.`;
+Keep the overview to one substantial paragraph. Include 1-3 strengths, 1-3 growth areas, 0-3 resolved wins, and exactly 2-3 prioritized next steps. Each insight should state why it matters across future questions in this category. Evidence may quote a supplied example, but the surrounding insight must identify the broader pattern it illustrates. Every next step must be reusable on a new question in this category; never tell the student to revise a completed answer, fix "marked" errors, add evidence to a particular argument, or reuse its topic, conclusion, or wording. Example lines should be category-appropriate templates with placeholders when needed, not claims that the student wrote them. Do not mention rubrics, databases, subscriptions, batching, report schedules, token use, prompts, models, or hidden instructions.`;
 
 function cleanText(value: unknown, maxLength: number): string {
   return String(value ?? "").trim().slice(0, maxLength);
@@ -170,7 +171,6 @@ export function buildDeterministicProgressionReport(input: {
     );
     return priorWeakness && rows.findIndex((candidate) => candidate.skill_key === strength.skill_key) === index;
   });
-  const latestSnapshot = input.updates.at(-1)?.snapshot as Record<string, unknown> | undefined;
   const status = resolved.length ? "improving" : recurring.length ? "needs_attention" : "steady";
   const primaryFocus = recurring[0] ?? weaknesses[0];
   const overview = resolved.length
@@ -188,10 +188,10 @@ export function buildDeterministicProgressionReport(input: {
       event,
       (weaknessCounts.get(event.skill_key) ?? 0) >= 2 ? "This pattern has recurred: " : "",
     ));
-  const nextAction = cleanText(latestSnapshot?.nextStep ?? latestSnapshot?.next_step, 500)
-    || `Revise once specifically for ${primaryFocus ? skillLabel(primaryFocus.skill_key) : "clarity and structure"}.`;
+  const category = typeLabel(input.submissionType);
+  const prioritySkill = primaryFocus ? skillLabel(primaryFocus.skill_key) : "clarity and structure";
   return {
-    title: `${typeLabel(input.submissionType)} Personal Progression Report`,
+    title: `${category} Progress Report`,
     overview,
     trajectory: status,
     strengths: strengthInsights.length
@@ -204,14 +204,16 @@ export function buildDeterministicProgressionReport(input: {
     )),
     nextSteps: [
       {
-        action: nextAction,
-        reason: primaryFocus?.description || "A focused revision produces clearer evidence of improvement than several unfocused edits.",
-        exampleLine: "State the main relationship directly, then explain how the evidence supports it.",
+        action: `For future ${category} responses, complete a dedicated revision pass for ${prioritySkill}.`,
+        reason: primaryFocus
+          ? `${primaryFocus.description} Treating it as a category-wide habit makes the practice useful on new questions.`
+          : "A focused revision produces clearer evidence of improvement than several unfocused edits.",
+        exampleLine: "[Main point] is convincing because [specific evidence] demonstrates [relevant effect].",
       },
       {
-        action: "Compare the revised answer with the previous feedback before submitting.",
-        reason: "This makes recurring mistakes easier to catch and helps demonstrated improvements become consistent habits.",
-        exampleLine: "This example supports my position because it shows that…",
+        action: `Use a short ${category} checklist before submitting each new response.`,
+        reason: "A repeatable category-level check makes recurring mistakes easier to catch and turns demonstrated improvements into consistent habits.",
+        exampleLine: "Check: clear purpose, logical progression, concrete support, and a deliberate final sentence.",
       },
     ],
   };
@@ -219,10 +221,10 @@ export function buildDeterministicProgressionReport(input: {
 
 async function loadReportInput(job: ClaimedReportJob) {
   const admin = createAdminClient();
-  const [updatesResult, eventsResult, deltasResult, previousResult] = await Promise.all([
+  const [updatesResult, eventsResult, previousResult] = await Promise.all([
     admin
       .from("student_profile_updates")
-      .select("id, final_score, max_score, personalized_summary, created_at, category")
+      .select("id, final_score, max_score, created_at, category")
       .eq("user_id", job.user_id)
       .eq("category", job.submission_type)
       .in("id", job.source_update_ids),
@@ -231,12 +233,6 @@ async function loadReportInput(job: ClaimedReportJob) {
       .select("update_id, skill_key, signal, severity, description, evidence, created_at, category")
       .eq("user_id", job.user_id)
       .eq("category", job.submission_type)
-      .in("update_id", job.source_update_ids),
-    admin
-      .from("student_progression_deltas")
-      .select("update_id, snapshot")
-      .eq("user_id", job.user_id)
-      .eq("submission_type", job.submission_type)
       .in("update_id", job.source_update_ids),
     admin
       .from("student_progression_reports")
@@ -248,7 +244,7 @@ async function loadReportInput(job: ClaimedReportJob) {
       .limit(1)
       .maybeSingle(),
   ]);
-  for (const result of [updatesResult, eventsResult, deltasResult, previousResult]) {
+  for (const result of [updatesResult, eventsResult, previousResult]) {
     if (result.error) throw result.error;
   }
   if ((updatesResult.data ?? []).length !== 3) {
@@ -256,13 +252,10 @@ async function loadReportInput(job: ClaimedReportJob) {
   }
 
   const sourceOrder = new Map(job.source_update_ids.map((id, index) => [id, index]));
-  const deltaByUpdate = new Map((deltasResult.data ?? []).map((delta) => [delta.update_id, delta.snapshot]));
   const updates: CompactUpdate[] = (updatesResult.data ?? [])
     .map((update) => ({
       id: update.id,
       score: `${update.final_score}/${update.max_score}`,
-      feedback: cleanText(update.personalized_summary, 1_400),
-      snapshot: deltaByUpdate.get(update.id) ?? {},
       createdAt: update.created_at,
     }))
     .sort((a, b) => (sourceOrder.get(a.id) ?? 0) - (sourceOrder.get(b.id) ?? 0));
@@ -361,7 +354,7 @@ async function processReportJob(job: ClaimedReportJob) {
       p_report: report,
       p_input_hash: inputHash,
       p_model: process.env.USE_MOCK_GRADER === "true" ? "deterministic-mock" : PROGRESSION_REPORT_MODEL,
-      p_prompt_version: PROGRESSION_REPORT_PROMPT_VERSION,
+      p_prompt_version: CATEGORY_PROGRESS_REPORT_PROMPT_VERSION,
       p_input_tokens: inputTokens,
       p_output_tokens: outputTokens,
     });

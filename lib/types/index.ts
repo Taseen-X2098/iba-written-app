@@ -249,15 +249,6 @@ export interface GrammarErrorFeedback {
 
 export type ProgressionStatus = "building" | "improving" | "steady" | "needs_attention";
 
-export interface ProgressionSnapshotDTO {
-  headline: string;
-  status: ProgressionStatus;
-  recentWin: string;
-  focusArea: string;
-  nextStep: string;
-  evidence: string;
-}
-
 export interface ProgressionReportInsight {
   skill: string;
   insight: string;
@@ -290,7 +281,7 @@ export type PersonalProgressionCardDTO =
       locked: false;
       submissionType: QuestionCategory;
       submissionTypeLabel: string;
-      snapshot: ProgressionSnapshotDTO;
+      totalGraded: number;
       latestReport: ProgressionReportContent | null;
     };
 

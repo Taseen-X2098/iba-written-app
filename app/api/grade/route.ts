@@ -147,7 +147,6 @@ export async function POST(request: NextRequest) {
       personalProgressionReport = await getPersonalProgressionCard({
         userId: user.id,
         submissionType: question.category,
-        currentSnapshot: profilePlan.progressionSnapshot,
       });
     } catch (progressionError) {
       console.error("Unable to load progression card after grade", progressionError);

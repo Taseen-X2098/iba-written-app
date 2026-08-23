@@ -1,5 +1,9 @@
 import { CheckCircle2, MessageSquareText, Route, Sparkles } from "lucide-react";
 import type { GradingResultJSON } from "@/lib/types";
+import {
+  DEFAULT_IMPROVEMENT_ACTIONS,
+  parseImprovementActions,
+} from "@/lib/grading/improvements";
 
 type StudentFeedback = GradingResultJSON["studentFeedback"];
 
@@ -7,9 +11,10 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
   const remarks = feedback.remarks?.trim() || feedback.summary?.trim() || "No remarks are available.";
   const personalizedFeedback = feedback.personalizedFeedback?.trim()
     || "Personalized feedback was not stored for this earlier submission. New submissions will include same-type personal insights and progress comparisons.";
-  const waysToImprove = feedback.waysToImprove?.trim()
-    || "Use the remarks above to revise the highest-impact weakness first, then proofread the revised answer once more for grammar and clarity.";
-  const improvementParagraphs = splitImprovementParagraphs(waysToImprove);
+  const parsedImprovementActions = parseImprovementActions(feedback.waysToImprove);
+  const improvementActions = parsedImprovementActions.length > 0
+    ? parsedImprovementActions
+    : DEFAULT_IMPROVEMENT_ACTIONS;
   const hasGrammarAudit = Array.isArray(feedback.grammarErrors);
   const grammarErrors = feedback.grammarErrors ?? [];
 
@@ -80,19 +85,12 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
           </span>
           <h3 className="font-bold text-foreground">3. Ways to improve next time</h3>
         </div>
-        <div className="space-y-3 text-sm leading-7 text-muted-foreground">
-          {improvementParagraphs.map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
+        <ol className="list-decimal space-y-3 pl-5 text-sm leading-7 text-muted-foreground marker:font-bold marker:text-sky-700">
+          {improvementActions.map((action, index) => (
+            <li key={index} className="pl-1">{action}</li>
           ))}
-        </div>
+        </ol>
       </article>
     </section>
   );
-}
-
-function splitImprovementParagraphs(value: string) {
-  return value
-    .split(/\n\s*\n|\n(?=\s*(?:[-*•]|\d+[.)])\s+)/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
 }

@@ -81,8 +81,11 @@ export function createMockClient(options: MockOptions): ResponsesClient {
           student_feedback: {
             score: `${mockScore}/${options.marks}`,
             remarks,
-            ways_to_improve:
-              "For the next answer, make the central point explicit, connect each example to it, and complete a final sentence-level proofread. A stronger transition would state how the next idea supports the main position.",
+            ways_to_improve: [
+              "Make the central point explicit so the reader can identify the answer's position immediately.",
+              "Connect each example to the central point; for example, use a transition that states how the next idea supports the main position.",
+              "Complete a final sentence-level proofread so grammar issues do not distract from the reasoning.",
+            ],
             grammar_errors: [],
             highlights: firstFewWords
               ? [

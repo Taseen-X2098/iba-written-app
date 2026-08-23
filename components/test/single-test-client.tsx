@@ -64,6 +64,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const secondsRef = useRef(0);
   const gradingRequestIdRef = useRef<string | null>(null);
+  const sessionEndedRef = useRef(true);
   
   // File upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -95,6 +96,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
         }
 
         if (parsed.questionId !== question.id) return;
+        sessionEndedRef.current = false;
         if (parsed.state === "running") {
           const currentElapsed = parsed.secondsElapsed + Math.floor((Date.now() - parsed.lastUpdatedAt) / 1000);
           if (!cancelled) {
@@ -140,6 +142,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   // running or editing checkpoint after a refresh.
   useEffect(() => {
     const persist = () => {
+      if (sessionEndedRef.current) return;
       if (state !== "running" && state !== "paused" && state !== "editing") return;
       const payload = {
         questionId: question.id,
@@ -201,7 +204,18 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       router.push("/subscription");
       return;
     }
+    sessionEndedRef.current = false;
     setState("running");
+  };
+
+  const clearPersistedSession = () => {
+    // Block any already-queued checkpoint before removing the saved session.
+    // Notify the persistent shell immediately; recovery cleanup is separate and
+    // must not prevent the shell from learning that the session has ended.
+    sessionEndedRef.current = true;
+    localStorage.removeItem("in_progress_test");
+    window.dispatchEvent(new Event("in_progress_test_updated"));
+    clearEncryptedRecovery(recoveryId);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -236,9 +250,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
 
   const handleCancelSession = () => {
     if (confirm("Are you sure you want to cancel this session? Your timer will be reset and removed from history.")) {
-      localStorage.removeItem("in_progress_test");
-      clearEncryptedRecovery(recoveryId);
-      window.dispatchEvent(new Event("in_progress_test_updated"));
+      clearPersistedSession();
       secondsRef.current = 0;
       setSecondsElapsed(0);
       setState("idle");
@@ -326,10 +338,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       gradingRequestIdRef.current = null;
       setState("feedback");
       
-      // Clear localStorage on success
-      localStorage.removeItem("in_progress_test");
-      clearEncryptedRecovery(recoveryId);
-      window.dispatchEvent(new Event("in_progress_test_updated"));
+      clearPersistedSession();
       
       // Tell Next.js router to refresh so the user's slot count updates
       router.refresh();

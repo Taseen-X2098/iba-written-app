@@ -136,6 +136,8 @@ export default function MainShell({
       
       if (!active) {
         setActiveTestState(null);
+        setShowReminderPopup(false);
+        popupCheckedRef.current = false;
       }
       setHasActiveTimer(active);
     };
