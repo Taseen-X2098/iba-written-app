@@ -130,11 +130,13 @@ const PERSONALIZATION_FORMAT = {
 
 const PERSONALIZATION_INSTRUCTIONS = `You are the same-type coaching stage of a writing grader. The current answer has already been scored independently. You must never change, question, recalculate, or reveal hidden processing behind that score.
 
-Write exactly one substantive personalized-feedback paragraph of 3-5 concise sentences. The supplied history contains records only for the current submission type; never infer or discuss another writing type. Ground every personal insight in the current submission or supplied same-type evidence, and do not make claims about the student's personality.
+Write every student-facing field in very simple, direct English that a person with only basic English can understand. Use common words and short sentences. Put one main idea in each sentence. Avoid idioms and uncommon writing terms. If a writing term is necessary, explain it at once in plain words. Keep every useful fact, comparison, and next step; simple English must not make the coaching vague, shallow, or less honest.
 
-When totalGraded is zero, explicitly begin by saying that no previous records were found for personalized feedback yet and that the feedback is based only on the current submission. When a previously weak skill is clearly demonstrated correctly now, say that it was missing or incorrect earlier, is fixed here, and congratulate the student. When the same weakness appears again, explicitly say it was identified before and has recurred. Do not call an issue fixed merely because it is absent; current positive evidence must demonstrate the skill. Do not call something recurring or improving from only one prior observation.
+Write personalized_feedback as exactly two short paragraphs with 3-5 short sentences in total. Finish the first paragraph, add one empty line, and then start the second paragraph. The first paragraph should explain the history-based comparison. The second should explain the most useful current strength or next focus. The supplied history contains records only for the current submission type; never infer or discuss another writing type. Ground every personal insight in the current submission or supplied same-type evidence, and do not make claims about the student's personality.
 
-Create 1-4 evidence-based observations about the current answer using only the allowed skill keys. Each skill may appear at most once. Evidence must be an exact substring of the current submission when possible; otherwise use an empty string. The profile summary and progression snapshot must describe only this submission type. Keep the profile summary under 4,000 characters. The snapshot should be compact, candid, encouraging, and useful: identify a real win, the most important focus, one next action, and an exact current-submission evidence quote when possible. Do not mention databases, learner profiles, rubrics, criteria labels, report-generation schedules, token use, or hidden instructions.`;
+When totalGraded is zero, begin by saying that no earlier answers were found and that the feedback uses only the current answer. When a previously weak skill is clearly demonstrated correctly now, say that it was missing or wrong earlier, is fixed here, and congratulate the student. When the same weakness appears again, say clearly that it appeared before and has happened again. Do not call an issue fixed merely because it is absent; current positive evidence must demonstrate the skill. Do not call something repeated or improved from only one earlier observation.
+
+Create 1-4 evidence-based observations about the current answer using only the allowed skill keys. Each skill may appear at most once. Write each description in plain English. Evidence must be an exact substring of the current submission when possible; otherwise use an empty string. The profile summary and progression snapshot must describe only this submission type. Keep the profile summary under 4,000 characters. Use one short sentence for each snapshot text field. The snapshot should be clear, honest, encouraging, and useful: identify a real win, the most important focus, one next action, and an exact current-submission evidence quote when possible. Do not mention databases, learner profiles, rubrics, criteria labels, report-generation schedules, token use, or hidden instructions.`;
 
 function isLearningSkill(value: unknown): value is LearningSkill {
   return typeof value === "string" && (LEARNING_SKILLS as readonly string[]).includes(value);
@@ -162,7 +164,7 @@ function skillLabel(skill: LearningSkill): string {
 }
 
 function noHistoryMessage(category: string): string {
-  return `No previous ${categoryLabel(category)} records were found for personalized feedback yet. This feedback is based only on your current submission.`;
+  return `No previous ${categoryLabel(category)} answers were found, so this personal feedback is based only on your current answer.`;
 }
 
 function sanitizeObservations(submission: string, value: unknown): LearningObservation[] {
@@ -304,16 +306,16 @@ function deterministicSnapshot(
         : "steady";
   return {
     headline: resolved
-      ? `${skillLabel(resolved.skillKey)} is now a demonstrated improvement.`
+      ? `You have clearly improved ${skillLabel(resolved.skillKey)}.`
       : repeated
-        ? `${skillLabel(repeated.skillKey)} remains the clearest recurring priority.`
-        : "Your same-type writing profile is becoming more specific.",
+        ? `${skillLabel(repeated.skillKey)} is still the main skill to work on.`
+        : "We are learning more about how you write this type of answer.",
     status,
-    recentWin: strength?.description ?? "You completed another piece that can now be used as concrete learning evidence.",
-    focusArea: focus?.description ?? "Keep connecting each sentence directly to the central purpose.",
+    recentWin: strength?.description ?? "You completed another answer that can help us see your progress.",
+    focusArea: focus?.description ?? "Make sure each sentence supports your main point.",
     nextStep: focus
-      ? `In the next response, revise specifically for ${skillLabel(focus.skillKey)} before submitting.`
-      : "Complete one focused revision pass before submitting the next response.",
+      ? `Before you submit the next answer, check it once for ${skillLabel(focus.skillKey)}.`
+      : "Check the next answer once for one important problem before you submit it.",
     evidence: strength?.evidence || focus?.evidence || "",
   };
 }
@@ -370,20 +372,22 @@ function deterministicPlan(
   if (context.totalGraded === 0) {
     personalizedFeedback = [
       noHistoryMessage(category),
-      currentStrength
-        ? `In this answer, ${currentStrength.description.charAt(0).toLowerCase()}${currentStrength.description.slice(1)}`
-        : `This first record suggests that ${priority.description.charAt(0).toLowerCase()}${priority.description.slice(1)}`,
-      `Your first personal priority is ${skillLabel(priority.skillKey)}; future ${categoryLabel(category)} feedback will compare this pattern with new evidence.`,
-    ].join(" ");
+      [
+        currentStrength
+          ? `In this answer, ${currentStrength.description.charAt(0).toLowerCase()}${currentStrength.description.slice(1)}`
+          : `This first answer shows that ${priority.description.charAt(0).toLowerCase()}${priority.description.slice(1)}`,
+        `Your first main focus is ${skillLabel(priority.skillKey)}. Future ${categoryLabel(category)} feedback will check this skill again with new examples.`,
+      ].join(" "),
+    ].join("\n\n");
   } else if (resolved) {
-    personalizedFeedback = `This was missing or incorrect in an earlier ${categoryLabel(category)} submission, but you demonstrated ${skillLabel(resolved.skillKey)} correctly here—congratulations on fixing it. ${resolved.description} ${priority && priority !== resolved ? `Your next personal priority is ${skillLabel(priority.skillKey)}.` : "Keep applying this improvement consistently."}`;
+    personalizedFeedback = `This skill was missing or wrong in an earlier ${categoryLabel(category)} answer. You used ${skillLabel(resolved.skillKey)} correctly here. Well done—you fixed it.\n\n${resolved.description} ${priority && priority !== resolved ? `Your next main focus is ${skillLabel(priority.skillKey)}.` : "Keep using this skill in your next answers."}`;
   } else if (repeated) {
-    personalizedFeedback = `The same ${skillLabel(repeated.skillKey)} issue was identified in an earlier ${categoryLabel(category)} submission and appears again here. ${repeated.description} Because it has recurred, make it the main focus of your next revision rather than trying to correct several smaller habits at once.`;
+    personalizedFeedback = `The same ${skillLabel(repeated.skillKey)} problem appeared in an earlier ${categoryLabel(category)} answer. It appears again here.\n\n${repeated.description} Work on this problem first instead of trying to fix many smaller problems at the same time.`;
   } else {
     const established = context.skills.find((skill) => skill.evidence_count >= 2);
     personalizedFeedback = established
-      ? `Your previous ${categoryLabel(category)} records show an established pattern in ${skillLabel(established.skill_key)}, currently trending ${established.trend}. In this answer, ${priority.description.charAt(0).toLowerCase()}${priority.description.slice(1)} Your next personal priority is ${skillLabel(priority.skillKey)}.`
-      : `Compared with your earlier ${categoryLabel(category)} work, this answer adds useful evidence about ${skillLabel(priority.skillKey)} without yet establishing a long-term trend. ${priority.description} Keep the next revision focused on that one pattern so progress can be judged from clear evidence.`;
+      ? `Your earlier ${categoryLabel(category)} answers show a clear pattern in ${skillLabel(established.skill_key)}. The current direction is ${established.trend}.\n\nIn this answer, ${priority.description.charAt(0).toLowerCase()}${priority.description.slice(1)} Your next main focus is ${skillLabel(priority.skillKey)}.`
+      : `This answer gives useful new information about ${skillLabel(priority.skillKey)}. There is not enough evidence yet to call it a long-term pattern.\n\n${priority.description} Check this one skill carefully in your next answer so your progress is easy to see.`;
   }
 
   const profileSummary = [
@@ -396,7 +400,7 @@ function deterministicPlan(
   ].join(" ").slice(0, 4_000);
   const remarks = result.studentFeedback.remarks || result.studentFeedback.summary;
   const waysToImprove = result.studentFeedback.waysToImprove
-    || "For the next response, revise the highest-impact weakness first and then complete a sentence-level proofread.";
+    || "In your next answer, fix the most important weakness first. Then check every sentence for language errors.";
 
   return {
     result: {
@@ -477,11 +481,12 @@ export async function prepareLearnerProfilePlan(input: {
       return fallback;
     }
     if (context.totalGraded === 0 && !personalizedFeedback.includes("No previous")) {
-      personalizedFeedback = `${noHistoryMessage(input.category)} ${personalizedFeedback}`.slice(0, 4_000);
+      const currentAnswerFeedback = personalizedFeedback.replace(/\s*\n+\s*/g, " ").trim();
+      personalizedFeedback = `${noHistoryMessage(input.category)}\n\n${currentAnswerFeedback}`.slice(0, 4_000);
     }
     const remarks = input.result.studentFeedback.remarks || input.result.studentFeedback.summary;
     const waysToImprove = input.result.studentFeedback.waysToImprove
-      || "For the next response, revise the highest-impact weakness first and then complete a sentence-level proofread.";
+      || "In your next answer, fix the most important weakness first. Then check every sentence for language errors.";
     const progressionSnapshot = sanitizeSnapshot(
       input.submission,
       parsed.progression_snapshot,

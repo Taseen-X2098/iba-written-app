@@ -18,6 +18,7 @@ import {
 import { WebcamCapture } from "@/components/ui/webcam-capture";
 import { QuestionPrompt } from "@/components/questions/question-prompt";
 import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
+import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
 import { countWords, getWordLimitViolation, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
@@ -510,7 +511,7 @@ export default function ExamTakerClient({
                     {result.studentFeedback.highlights.map((highlight, highlightIndex) => (
                       <div key={highlightIndex} className="rounded-lg border border-border bg-muted/20 p-3 text-xs">
                         <strong className="block">“{highlight.quote}”</strong>
-                        {highlight.comment}
+                        <FeedbackParagraphs text={highlight.comment} className="mt-1 space-y-2" />
                       </div>
                     ))}
                   </div>

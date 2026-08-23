@@ -217,7 +217,8 @@ describe('AI Grading Utility', () => {
     );
 
     expect(result.studentFeedback.remarks).toContain('relevant position');
-    expect(result.studentFeedback.personalizedFeedback).toContain('No previous Argumentative Essay records');
+    expect(result.studentFeedback.personalizedFeedback).toContain('No previous Argumentative Essay answers');
+    expect(result.studentFeedback.personalizedFeedback?.split('\n\n')).toHaveLength(2);
     expect(result.studentFeedback.waysToImprove).toContain('People are affected');
     expect(result.studentFeedback.waysToImprove).toBe([
       '1. Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
@@ -225,7 +226,7 @@ describe('AI Grading Utility', () => {
     ].join('\n'));
     expect(result.studentFeedback.grammarErrors).toHaveLength(1);
     expect(result.studentFeedback.grammarErrors?.[0].corrections).toHaveLength(2);
-    expect(result.studentFeedback.summary.split('\n\n')).toHaveLength(3);
+    expect(result.studentFeedback.summary.split('\n\n')).toHaveLength(4);
   });
 
   it('normalizes legacy improvement text into a numbered list', async () => {

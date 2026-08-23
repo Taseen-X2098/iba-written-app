@@ -16,6 +16,7 @@ import type {
   ProgressionReportNextStep,
   ProgressionStatus,
 } from "@/lib/types";
+import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 
 const STATUS_LABELS: Record<ProgressionStatus, string> = {
   building: "Building your baseline",
@@ -104,9 +105,10 @@ export default async function PersonalReportPage({
                       {STATUS_LABELS[selected.latestReport.trajectory]}
                     </span>
                   </div>
-                  <p className="mt-5 max-w-3xl text-sm leading-7 text-muted-foreground">
-                    {selected.latestReport.overview}
-                  </p>
+                  <FeedbackParagraphs
+                    text={selected.latestReport.overview}
+                    className="mt-5 max-w-3xl space-y-3 text-sm leading-7 text-muted-foreground"
+                  />
                 </div>
 
                 <div className="grid gap-4 p-6 md:grid-cols-3 sm:p-8">
@@ -201,7 +203,10 @@ function SnapshotCard({ icon, label, value }: { icon: React.ReactNode; label: st
   return (
     <div className="rounded-2xl border border-brand-100 bg-white/85 p-5">
       <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-brand-700">{icon}{label}</div>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">{value}</p>
+      <FeedbackParagraphs
+        text={value}
+        className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+      />
     </div>
   );
 }
@@ -260,7 +265,10 @@ function InsightSection({
         {insights.length ? insights.map((insight, index) => (
           <div key={`${insight.skill}-${index}`} className="rounded-xl bg-white/85 p-4 text-foreground">
             <h3 className="text-sm font-bold capitalize">{insight.skill}</h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">{insight.insight}</p>
+            <FeedbackParagraphs
+              text={insight.insight}
+              className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+            />
             {insight.evidence ? <p className="mt-2 text-xs italic text-muted-foreground">“{insight.evidence}”</p> : null}
           </div>
         )) : <p className="text-sm leading-6 text-muted-foreground">{empty}</p>}
@@ -280,7 +288,10 @@ function NextStepsSection({ steps }: { steps: ProgressionReportNextStep[] }) {
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-black text-white">{index + 1}</span>
               <div>
                 <h3 className="text-sm font-bold">{step.action}</h3>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">{step.reason}</p>
+                <FeedbackParagraphs
+                  text={step.reason}
+                  className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+                />
                 {step.exampleLine ? <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900"><strong>Try:</strong> {step.exampleLine}</p> : null}
               </div>
             </div>

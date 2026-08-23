@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import type { Highlight } from "@/lib/types";
+import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 
 interface ActiveHighlight {
   highlight: Highlight;
@@ -101,7 +102,7 @@ function HighlightTooltip({ activeHighlight }: { activeHighlight: ActiveHighligh
       <div className="mb-1 font-semibold uppercase tracking-wide opacity-80">
         {highlight.type === "strength" ? "Good" : "Improvement"}
       </div>
-      {highlight.comment}
+      <FeedbackParagraphs text={highlight.comment} className="space-y-2" />
       <div
         className={`absolute left-1/2 -translate-x-1/2 border-4 border-transparent ${
           placeBelow
@@ -139,7 +140,10 @@ export function MobileHighlightDetails({ highlights }: { highlights: Highlight[]
           <blockquote className="break-words font-semibold text-foreground">
             “{highlight.quote}”
           </blockquote>
-          <p className="mt-2 leading-relaxed text-muted-foreground">{highlight.comment}</p>
+          <FeedbackParagraphs
+            text={highlight.comment}
+            className="mt-2 space-y-2 leading-relaxed text-muted-foreground"
+          />
         </div>
       ))}
     </div>

@@ -392,7 +392,7 @@ export async function grade(
   const legacySummary = String(parsed.student_feedback.summary ?? "").trim();
   const remarks = String(parsed.student_feedback.remarks ?? legacySummary).trim()
     || "Your response addresses the task, but the available feedback could not be expanded further.";
-  const personalizedFeedback = `No previous ${taskTypeLabel(taskType)} records were found for personalized feedback yet. This feedback is based only on your current submission.`;
+  const personalizedFeedback = `No previous ${taskTypeLabel(taskType)} answers were found.\n\nThis personal feedback is based only on your current answer.`;
   const waysToImprove = formatNumberedImprovementList(
     parsed.student_feedback.ways_to_improve,
   );

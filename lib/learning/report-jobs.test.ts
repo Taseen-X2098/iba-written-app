@@ -21,7 +21,8 @@ describe("type-scoped progression reports", () => {
     expect(report.title).toContain("Argumentative Essay");
     expect(report.growthAreas.some((item) => item.skill === "grammar accuracy")).toBe(true);
     expect(report.resolvedWins.some((item) => item.skill === "thesis clarity")).toBe(true);
-    expect(report.resolvedWins[0].insight).toContain("congratulations");
+    expect(report.resolvedWins[0].insight).toContain("Congratulations");
+    expect(report.overview.split("\n\n")).toHaveLength(2);
     expect(report.trajectory).toBe("improving");
     expect(report.title).toBe("Argumentative Essay Progress Report");
     expect(report.nextSteps[0].action).toContain("future Argumentative Essay responses");

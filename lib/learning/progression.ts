@@ -12,7 +12,12 @@ import {
 const REPORTABLE_TYPES = Object.keys(CATEGORY_LABELS)
   .filter((category) => category !== "translation") as QuestionCategory[];
 
-export const CATEGORY_PROGRESS_REPORT_PROMPT_VERSION = "category-patterns-v2";
+export const CATEGORY_PROGRESS_REPORT_PROMPT_VERSION = "category-patterns-v3-simple-english";
+
+const CATEGORY_SCOPED_PROMPT_VERSIONS = new Set([
+  "category-patterns-v2",
+  CATEGORY_PROGRESS_REPORT_PROMPT_VERSION,
+]);
 
 function isQuestionCategory(value: string): value is QuestionCategory {
   return REPORTABLE_TYPES.includes(value as QuestionCategory);
@@ -73,7 +78,7 @@ export function sanitizeProgressionReport(
     resolvedWins: sanitizeInsights(row.resolvedWins ?? row.resolved_wins),
     nextSteps: sanitizeNextSteps(row.nextSteps ?? row.next_steps),
   };
-  if (!options || options.promptVersion === CATEGORY_PROGRESS_REPORT_PROMPT_VERSION) {
+  if (!options || (options.promptVersion && CATEGORY_SCOPED_PROMPT_VERSIONS.has(options.promptVersion))) {
     return report;
   }
 

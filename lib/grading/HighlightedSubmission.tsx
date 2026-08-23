@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { splitFeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 
 export interface Highlight {
   quote: string;
@@ -106,7 +107,11 @@ export function HighlightedSubmission({ submission, highlights }: HighlightedSub
                   >
                     {BADGE_LABEL[seg.highlight.type]}
                   </span>
-                  <span className="block">{seg.highlight.comment}</span>
+                  <span className="block space-y-2">
+                    {splitFeedbackParagraphs(seg.highlight.comment).map((paragraph, paragraphIndex) => (
+                      <span key={paragraphIndex} className="block">{paragraph}</span>
+                    ))}
+                  </span>
                 </span>
               )}
             </span>

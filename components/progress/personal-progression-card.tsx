@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Crown, Lock, Sparkles, Target, TrendingUp } from "lucide-react";
 import type { PersonalProgressionCardDTO, ProgressionStatus } from "@/lib/types";
+import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 
 const STATUS_LABELS: Record<ProgressionStatus, string> = {
   building: "Building your baseline",
@@ -106,7 +107,10 @@ export function PersonalProgressionCard({
             {STATUS_LABELS[categoryReport.trajectory]}
           </span>
         </div>
-        <p className="mt-4 text-sm leading-6 text-muted-foreground">{categoryReport.overview}</p>
+        <FeedbackParagraphs
+          text={categoryReport.overview}
+          className="mt-4 space-y-3 text-sm leading-6 text-muted-foreground"
+        />
       </div>
 
       <div className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
@@ -154,7 +158,10 @@ function ProgressItem({
       <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-brand-700">
         {icon} {label}
       </div>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{value}</p>
+      <FeedbackParagraphs
+        text={value}
+        className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+      />
     </div>
   );
 }

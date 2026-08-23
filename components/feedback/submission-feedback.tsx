@@ -4,6 +4,7 @@ import {
   DEFAULT_IMPROVEMENT_ACTIONS,
   parseImprovementActions,
 } from "@/lib/grading/improvements";
+import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 
 type StudentFeedback = GradingResultJSON["studentFeedback"];
 
@@ -27,7 +28,10 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
           </span>
           <h3 className="font-bold text-foreground">1. Remarks on this submission</h3>
         </div>
-        <p className="text-sm leading-7 text-muted-foreground">{remarks}</p>
+        <FeedbackParagraphs
+          text={remarks}
+          className="space-y-3 text-sm leading-7 text-muted-foreground"
+        />
 
         <div className="mt-5 border-t border-border pt-4">
           <h4 className="text-sm font-bold text-foreground">Complete grammar corrections</h4>
@@ -50,7 +54,10 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
                     </span>
                   </div>
                   <p className="mt-2 text-sm font-semibold text-amber-950">“{error.quote}”</p>
-                  <p className="mt-1 text-sm leading-6 text-amber-900">{error.explanation}</p>
+                  <FeedbackParagraphs
+                    text={error.explanation}
+                    className="mt-1 space-y-2 text-sm leading-6 text-amber-900"
+                  />
                   <div className="mt-3 space-y-1.5">
                     {error.corrections.slice(0, 2).map((correction, correctionIndex) => (
                       <p key={correctionIndex} className="rounded-lg bg-white/80 px-3 py-2 text-sm text-foreground">
@@ -75,7 +82,10 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
           </span>
           <h3 className="font-bold text-foreground">2. Personalized feedback</h3>
         </div>
-        <p className="text-sm leading-7 text-muted-foreground">{personalizedFeedback}</p>
+        <FeedbackParagraphs
+          text={personalizedFeedback}
+          className="space-y-3 text-sm leading-7 text-muted-foreground"
+        />
       </article>
 
       <article className="rounded-2xl border border-sky-200 bg-sky-50/40 p-5 sm:p-6">
@@ -87,7 +97,9 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
         </div>
         <ol className="list-decimal space-y-3 pl-5 text-sm leading-7 text-muted-foreground marker:font-bold marker:text-sky-700">
           {improvementActions.map((action, index) => (
-            <li key={index} className="pl-1">{action}</li>
+            <li key={index} className="pl-1">
+              <FeedbackParagraphs text={action} className="space-y-2" />
+            </li>
           ))}
         </ol>
       </article>

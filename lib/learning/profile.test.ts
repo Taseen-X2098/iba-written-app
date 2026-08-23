@@ -73,8 +73,9 @@ describe("structured learner profiles", () => {
     expect(plan.result.studentFeedback.score).toBe("5.5/10");
     expect(plan.result.studentFeedback.summary).toContain("grammar accuracy");
     expect(plan.result.studentFeedback.personalizedFeedback).toContain(
-      "No previous Essay records were found for personalized feedback yet",
+      "No previous Essay answers were found",
     );
+    expect(plan.result.studentFeedback.personalizedFeedback?.split("\n\n")).toHaveLength(2);
     expect(plan.observations[0].skillKey).toBe("grammar_accuracy");
   });
 
@@ -107,7 +108,7 @@ describe("structured learner profiles", () => {
       result: baseResult,
     });
 
-    expect(plan.result.studentFeedback.personalizedFeedback).toContain("identified in an earlier Argumentative Essay submission");
+    expect(plan.result.studentFeedback.personalizedFeedback).toContain("appeared in an earlier Argumentative Essay answer");
     expect(plan.result.studentFeedback.personalizedFeedback).toContain("appears again here");
     expect(plan.progressionSnapshot.status).toBe("needs_attention");
   });
@@ -151,7 +152,7 @@ describe("structured learner profiles", () => {
       result: fixedResult,
     });
 
-    expect(plan.result.studentFeedback.personalizedFeedback).toContain("congratulations on fixing it");
+    expect(plan.result.studentFeedback.personalizedFeedback).toContain("Well done—you fixed it");
     expect(plan.result.studentFeedback.personalizedFeedback).not.toContain("Paragraph Writing");
     expect(plan.progressionSnapshot.status).toBe("improving");
     const profileChain = (from.mock.results.find((result) => result.type === "return")?.value) as Record<string, jest.Mock>;
@@ -169,7 +170,7 @@ describe("structured learner profiles", () => {
     });
 
     expect(plan.result.internal.total).toBe(baseResult.internal.total);
-    expect(plan.result.studentFeedback.personalizedFeedback).toContain("No previous Essay records");
+    expect(plan.result.studentFeedback.personalizedFeedback).toContain("No previous Essay answers");
     expect(plan.result.studentFeedback.summary).toContain(baseResult.studentFeedback.summary);
     expect(plan.observations).toHaveLength(1);
   });

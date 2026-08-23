@@ -124,7 +124,9 @@ const PROGRESSION_REPORT_INSTRUCTIONS = `You create a premium category-level wri
 
 Synthesize patterns across the supplied same-category responses. The report must describe the student's general approach to this category, not summarize or continue the feedback for the newest response. Distinguish established patterns from tentative one-response observations, recognize a previously weak skill only when later positive evidence demonstrates it, and congratulate a real resolved win. Explicitly identify a repeated problem only when two or more weakness observations support it. Never call a skill fixed merely because it is absent.
 
-Keep the overview to one substantial paragraph. Include 1-3 strengths, 1-3 growth areas, 0-3 resolved wins, and exactly 2-3 prioritized next steps. Each insight should state why it matters across future questions in this category. Evidence may quote a supplied example, but the surrounding insight must identify the broader pattern it illustrates. Every next step must be reusable on a new question in this category; never tell the student to revise a completed answer, fix "marked" errors, add evidence to a particular argument, or reuse its topic, conclusion, or wording. Example lines should be category-appropriate templates with placeholders when needed, not claims that the student wrote them. Do not mention rubrics, databases, subscriptions, batching, report schedules, token use, prompts, models, or hidden instructions.`;
+Write every field that the student will see in very simple, direct English. Assume the student knows only basic English. Use common words, short sentences, and one main idea per sentence. Avoid idioms and uncommon writing terms. If a writing term is necessary, explain it at once in plain words. Keep all useful evidence, careful comparisons, and important advice; simple English must not make the report vague, shallow, or less honest.
+
+Write the overview as exactly two short paragraphs. Finish the first paragraph, add one empty line, and then start the second paragraph. Use the first paragraph for the main pattern or progress. Use the second for the main focus and why it matters. Include 1-3 strengths, 1-3 growth areas, 0-3 resolved wins, and exactly 2-3 next steps in their separate fields. Write each insight in 1-3 short sentences and explain why it matters in future questions from this category. Write each action as one short, direct sentence. Write each reason in 1-2 short sentences. Evidence may quote a supplied example, but the insight around it must explain the wider pattern. Every next step must work on a new question in this category; never tell the student to revise a completed answer, fix "marked" errors, add evidence to a particular argument, or reuse its topic, conclusion, or wording. Example lines should be simple templates with placeholders when needed, not claims that the student wrote them. Do not mention rubrics, databases, subscriptions, batching, report schedules, token use, prompts, models, or hidden instructions.`;
 
 function cleanText(value: unknown, maxLength: number): string {
   return String(value ?? "").trim().slice(0, maxLength);
@@ -174,10 +176,10 @@ export function buildDeterministicProgressionReport(input: {
   const status = resolved.length ? "improving" : recurring.length ? "needs_attention" : "steady";
   const primaryFocus = recurring[0] ?? weaknesses[0];
   const overview = resolved.length
-    ? `Your recent ${typeLabel(input.submissionType)} work shows a demonstrated improvement in ${skillLabel(resolved[0].skill_key)}, while ${primaryFocus ? skillLabel(primaryFocus.skill_key) : "consistency"} remains the next priority. The strongest progress is supported by a change from earlier weakness evidence to a current strength, so it is worth preserving deliberately in the next response.`
+    ? `You have clearly improved ${skillLabel(resolved[0].skill_key)} in your recent ${typeLabel(input.submissionType)} answers. Earlier answers showed a weakness, but a newer answer shows this skill as a strength.\n\n${primaryFocus ? `${skillLabel(primaryFocus.skill_key)} is now the main skill to work on.` : "Your next goal is to use this improvement every time."} Keep using the improved skill in your next answer.`
     : recurring.length
-      ? `Your recent ${typeLabel(input.submissionType)} work shows a recurring ${skillLabel(recurring[0].skill_key)} problem across more than one submission. Addressing that pattern first will improve the writing more than spreading revision time across several smaller concerns.`
-      : `Your recent ${typeLabel(input.submissionType)} submissions are building a clearer personal baseline. The evidence is not yet strong enough for broad claims, but it identifies a concrete strength and a focused next step.`;
+      ? `The same ${skillLabel(recurring[0].skill_key)} problem appears in more than one recent ${typeLabel(input.submissionType)} answer. This is a clear pattern, not a one-time mistake.\n\nWork on this problem first. It will help more than trying to fix many smaller problems at the same time.`
+      : `Your recent ${typeLabel(input.submissionType)} answers give us a useful starting point. There is not enough evidence yet to make a strong claim about a long-term pattern.\n\nWe can still see a clear strength and one skill to practise next. More answers will show whether these points happen often.`;
   const strengthInsights = strengths
     .filter((event, index, rows) => rows.findIndex((candidate) => candidate.skill_key === event.skill_key) === index)
     .slice(0, 3)
@@ -186,7 +188,7 @@ export function buildDeterministicProgressionReport(input: {
     .slice(0, 3)
     .map((event) => insightFromEvent(
       event,
-      (weaknessCounts.get(event.skill_key) ?? 0) >= 2 ? "This pattern has recurred: " : "",
+      (weaknessCounts.get(event.skill_key) ?? 0) >= 2 ? "This has happened more than once: " : "",
     ));
   const category = typeLabel(input.submissionType);
   const prioritySkill = primaryFocus ? skillLabel(primaryFocus.skill_key) : "clarity and structure";
@@ -196,24 +198,24 @@ export function buildDeterministicProgressionReport(input: {
     trajectory: status,
     strengths: strengthInsights.length
       ? strengthInsights
-      : [{ skill: "completed practice", insight: "These submissions establish concrete evidence for future comparison.", evidence: "" }],
+      : [{ skill: "completed practice", insight: "These answers give us clear examples to compare with future work.", evidence: "" }],
     growthAreas,
     resolvedWins: resolved.slice(0, 3).map((event) => insightFromEvent(
       event,
-      "This was weak earlier but is demonstrated correctly now—congratulations: ",
+      "This was weak before, but it is correct now. Congratulations: ",
     )),
     nextSteps: [
       {
-        action: `For future ${category} responses, complete a dedicated revision pass for ${prioritySkill}.`,
+        action: `For future ${category} responses, check ${prioritySkill} once before you submit.`,
         reason: primaryFocus
-          ? `${primaryFocus.description} Treating it as a category-wide habit makes the practice useful on new questions.`
-          : "A focused revision produces clearer evidence of improvement than several unfocused edits.",
+          ? `${primaryFocus.description} This check will help on every new question in this category.`
+          : "One careful check makes progress easier to see than many quick changes.",
         exampleLine: "[Main point] is convincing because [specific evidence] demonstrates [relevant effect].",
       },
       {
-        action: `Use a short ${category} checklist before submitting each new response.`,
-        reason: "A repeatable category-level check makes recurring mistakes easier to catch and turns demonstrated improvements into consistent habits.",
-        exampleLine: "Check: clear purpose, logical progression, concrete support, and a deliberate final sentence.",
+        action: `Use a short ${category} checklist before you submit each new answer.`,
+        reason: "The same checklist helps you catch repeated mistakes and keep improvements.",
+        exampleLine: "Check: clear main point, ideas in a good order, specific support, and a clear final sentence.",
       },
     ],
   };

@@ -325,4 +325,11 @@ describe("SYSTEM_PROMPT", () => {
   it("instructs never to grade from memory", () => {
     expect(SYSTEM_PROMPT).toContain("Never grade from memory");
   });
+
+  it("requires simple English without losing feedback quality", () => {
+    expect(SYSTEM_PROMPT).toContain("very simple, direct English");
+    expect(SYSTEM_PROMPT).toContain("must not remove important reasoning");
+    expect(SYSTEM_PROMPT).toContain("exactly two short paragraphs");
+    expect(SYSTEM_PROMPT).toContain("add one empty line");
+  });
 });
