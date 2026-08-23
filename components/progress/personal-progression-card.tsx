@@ -55,11 +55,11 @@ export function PersonalProgressionCard({
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-brand-50">
-      <div className="border-b border-violet-100 p-5 sm:p-6">
+    <section className="overflow-hidden rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50 via-white to-brand-50">
+      <div className="border-b border-brand-100 p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
               <TrendingUp size={20} aria-hidden="true" />
             </span>
             <div>
@@ -67,7 +67,7 @@ export function PersonalProgressionCard({
               <p className="text-xs font-medium text-muted-foreground">{report.submissionTypeLabel} only</p>
             </div>
           </div>
-          <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-xs font-bold text-violet-800">
+          <span className="rounded-full border border-brand-200 bg-brand-100 px-3 py-1 text-xs font-bold text-brand-800">
             {STATUS_LABELS[report.snapshot.status]}
           </span>
         </div>
@@ -84,17 +84,17 @@ export function PersonalProgressionCard({
       </div>
 
       {report.snapshot.evidence ? (
-        <div className="mx-5 mb-5 rounded-xl border border-violet-100 bg-white/80 p-3 text-sm sm:mx-6 sm:mb-6">
-          <span className="font-bold text-violet-800">Evidence from your writing: </span>
+        <div className="mx-5 mb-5 rounded-xl border border-brand-100 bg-white/80 p-3 text-sm sm:mx-6 sm:mb-6">
+          <span className="font-bold text-brand-800">Evidence from your writing: </span>
           <span className="text-muted-foreground">“{report.snapshot.evidence}”</span>
         </div>
       ) : null}
 
-      <div className="border-t border-violet-100 px-5 py-4 text-right sm:px-6">
+      <div className="border-t border-brand-100 px-5 py-4 text-right sm:px-6">
         <Link
           href={`/personal-report?type=${encodeURIComponent(report.submissionType)}`}
           prefetch={false}
-          className="inline-flex items-center gap-1.5 text-sm font-bold text-violet-700 hover:text-violet-900"
+          className="inline-flex items-center gap-1.5 text-sm font-bold text-brand-700 hover:text-brand-900"
         >
           Open full personal report <ArrowRight size={15} aria-hidden="true" />
         </Link>
@@ -113,8 +113,8 @@ function ProgressItem({
   value: string;
 }) {
   return (
-    <div className="rounded-xl border border-violet-100 bg-white/80 p-4">
-      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-700">
+    <div className="rounded-xl border border-brand-100 bg-white/80 p-4">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-brand-700">
         {icon} {label}
       </div>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">{value}</p>
