@@ -19,7 +19,6 @@ import {
   ChevronRight,
   ExternalLink,
   Play,
-  AlertTriangle,
   Lock,
   TrendingUp,
 } from "lucide-react";
@@ -28,6 +27,13 @@ import { messaging } from "@/lib/firebase";
 import { getToken } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
 import { NavigationLoadingOverlay } from "@/components/ui/navigation-loading-overlay";
+import { clearEncryptedRecovery } from "@/lib/exams/recovery-client";
+import {
+  parseStandaloneSession,
+  removeStandaloneSession,
+  STANDALONE_SESSION_KEY,
+  STANDALONE_SESSION_UPDATED_EVENT,
+} from "@/lib/exams/standalone-session";
 
 // ─── Tab Configuration ────────────────────────────────────────────────────
 
@@ -75,6 +81,17 @@ export default function MainShell({
   const [showReminderPopup, setShowReminderPopup] = useState(false);
   const popupCheckedRef = React.useRef(false);
 
+  async function loadNotifications() {
+    try {
+      const response = await fetch("/api/notifications/unread-count", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setUnreadCount(data.count ?? 0);
+    } catch {
+      // Keep the last known count while offline.
+    }
+  }
+
   useEffect(() => {
     const refreshNotifications = () => {
       if (document.visibilityState === "visible") void loadNotifications();
@@ -107,10 +124,10 @@ export default function MainShell({
         }
 
         if (!active) {
-          const saved = localStorage.getItem("in_progress_test");
+          const saved = localStorage.getItem(STANDALONE_SESSION_KEY);
           if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed && parsed.lastUpdatedAt && Date.now() - parsed.lastUpdatedAt <= 3600000) {
+            const parsed = parseStandaloneSession(saved);
+            if (parsed) {
               setActiveTestState({
                 type: "test",
                 id: parsed.questionId,
@@ -118,10 +135,12 @@ export default function MainShell({
               });
               testId = parsed.questionId;
               active = true;
+            } else {
+              localStorage.removeItem(STANDALONE_SESSION_KEY);
             }
           }
         }
-      } catch (e) {
+      } catch {
         // ignore
       }
       
@@ -143,32 +162,34 @@ export default function MainShell({
     };
     
     checkTimer();
+    const timerCheckpoint = setInterval(checkTimer, 15_000);
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "in_progress_test" || e.key === "in_progress_exam") checkTimer();
+      if (e.key === STANDALONE_SESSION_KEY || e.key === "in_progress_exam" || e.key === null) checkTimer();
     };
     window.addEventListener("storage", handleStorage);
-    window.addEventListener("in_progress_test_updated", checkTimer);
+    window.addEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
     window.addEventListener("in_progress_exam_updated", checkTimer);
     
     return () => {
       clearInterval(interval);
+      clearInterval(timerCheckpoint);
       window.removeEventListener("focus", refreshNotifications);
       window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("in_progress_test_updated", checkTimer);
+      window.removeEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
       window.removeEventListener("in_progress_exam_updated", checkTimer);
     };
   }, []);
 
-  async function loadNotifications() {
-    try {
-      const response = await fetch("/api/notifications/unread-count", { cache: "no-store" });
-      if (!response.ok) return;
-      const data = await response.json();
-      setUnreadCount(data.count ?? 0);
-    } catch {
-      // Keep the last known count while offline.
-    }
-  }
+  const endStandaloneSession = () => {
+    if (activeTestState?.type !== "test") return;
+    removeStandaloneSession(localStorage);
+    clearEncryptedRecovery(`standalone:${activeTestState.id}`);
+    window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
+    setActiveTestState(null);
+    setHasActiveTimer(false);
+    setShowReminderPopup(false);
+    popupCheckedRef.current = false;
+  };
 
   async function registerFCMToken() {
     try {
@@ -672,7 +693,7 @@ export default function MainShell({
             </div>
             <h2 className="text-xl font-bold text-center text-foreground mb-2">Ongoing Session Found</h2>
             <p className="text-center text-sm text-muted-foreground mb-6">
-              You left a session for <strong className="text-foreground">{activeTestState.title}</strong> running. Would you like to resume it?
+              You have an unfinished session for <strong className="text-foreground">{activeTestState.title}</strong>. Would you like to resume it?
             </p>
             <div className="flex flex-col gap-3">
               <Link
@@ -685,11 +706,19 @@ export default function MainShell({
               >
                 Resume {activeTestState.type === "exam" ? "Exam" : "Test"} <ChevronRight size={16} />
               </Link>
+              {activeTestState.type === "test" && (
+                <button
+                  onClick={endStandaloneSession}
+                  className="w-full rounded-xl bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive hover:bg-destructive/20 transition-all"
+                >
+                  End and remove saved test
+                </button>
+              )}
               <button
                 onClick={() => setShowReminderPopup(false)}
                 className="w-full rounded-xl bg-muted px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground transition-all"
               >
-                Dismiss
+                Keep session and dismiss
               </button>
             </div>
           </div>

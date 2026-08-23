@@ -4,58 +4,46 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Clock, PlayCircle, ArrowRight } from "lucide-react";
 import { CATEGORY_LABELS } from "@/lib/types";
+import {
+  parseStandaloneSession,
+  type StandaloneSessionRecord,
+  STANDALONE_SESSION_KEY,
+  STANDALONE_SESSION_UPDATED_EVENT,
+} from "@/lib/exams/standalone-session";
 
 export function InProgressPin() {
-  const [inProgress, setInProgress] = useState<any>(null);
-
-  const checkLocalStorage = () => {
-    try {
-      const saved = localStorage.getItem("in_progress_test");
-      console.log("InProgressPin mounted. Found in localStorage:", saved);
-      
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (!parsed || !parsed.lastUpdatedAt || Date.now() - parsed.lastUpdatedAt > 3600000) {
-          console.log("Timer expired or invalid. Removing.");
-          localStorage.removeItem("in_progress_test");
-          setInProgress(null);
-        } else {
-          setInProgress(parsed);
-        }
-      } else {
-        setInProgress(null);
-      }
-    } catch (e) {
-      console.error("Error reading from localStorage:", e);
-      setInProgress(null);
-    }
-  };
+  const [inProgress, setInProgress] = useState<StandaloneSessionRecord | null>(null);
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
+    const checkLocalStorage = () => {
+      const saved = localStorage.getItem(STANDALONE_SESSION_KEY);
+      const parsed = parseStandaloneSession(saved);
+      if (saved && !parsed) {
+        localStorage.removeItem(STANDALONE_SESSION_KEY);
+        window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
+      }
+      setInProgress(parsed);
+      setNow(Date.now());
+    };
     checkLocalStorage();
 
     // Listen for cross-tab changes
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "in_progress_test") {
+      if (e.key === STANDALONE_SESSION_KEY || e.key === null) {
         checkLocalStorage();
       }
     };
-    
-    // Also set up a custom interval to update the elapsed time live if running
-    const interval = setInterval(() => {
-      if (inProgress?.state === "running") {
-        setInProgress({ ...inProgress }); // trigger re-render for timer
-      }
-    }, 1000);
+    const interval = setInterval(checkLocalStorage, 1000);
 
     window.addEventListener("storage", handleStorage);
-    window.addEventListener("in_progress_test_updated", checkLocalStorage);
+    window.addEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkLocalStorage);
     return () => {
       window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("in_progress_test_updated", checkLocalStorage);
+      window.removeEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkLocalStorage);
       clearInterval(interval);
     };
-  }, [inProgress?.state]);
+  }, []);
 
   if (!inProgress) return null;
 
@@ -67,7 +55,7 @@ export function InProgressPin() {
 
   // Calculate current elapsed time if it was running
   const currentElapsed = (inProgress.state === "running" && inProgress.lastUpdatedAt)
-    ? (inProgress.secondsElapsed || 0) + Math.floor((Date.now() - inProgress.lastUpdatedAt) / 1000)
+    ? (inProgress.secondsElapsed || 0) + Math.floor((now - inProgress.lastUpdatedAt) / 1000)
     : (inProgress.secondsElapsed || 0);
 
   return (

@@ -12,6 +12,13 @@ import {
   loadEncryptedRecovery,
   saveEncryptedRecovery,
 } from "@/lib/exams/recovery-client";
+import {
+  isOwnedStandaloneSession,
+  parseStandaloneSession,
+  removeStandaloneSession,
+  STANDALONE_SESSION_KEY,
+  STANDALONE_SESSION_UPDATED_EVENT,
+} from "@/lib/exams/standalone-session";
 import { countWords, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import {
@@ -65,6 +72,8 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const secondsRef = useRef(0);
   const gradingRequestIdRef = useRef<string | null>(null);
   const sessionEndedRef = useRef(true);
+  const sessionIdRef = useRef<string | null>(null);
+  const hasPersistedSessionRef = useRef(false);
   
   // File upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -83,20 +92,20 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     let cancelled = false;
     const restore = async () => {
       try {
-        const saved = localStorage.getItem("in_progress_test");
+        const saved = localStorage.getItem(STANDALONE_SESSION_KEY);
         if (!saved) return;
-        const parsed = JSON.parse(saved);
-
-        // Expire after 1 hour (3600000 ms) of inactivity.
-        if (Date.now() - parsed.lastUpdatedAt > 3600000) {
-          localStorage.removeItem("in_progress_test");
+        const parsed = parseStandaloneSession(saved);
+        if (!parsed) {
+          localStorage.removeItem(STANDALONE_SESSION_KEY);
           clearEncryptedRecovery(recoveryId);
-          window.dispatchEvent(new Event("in_progress_test_updated"));
+          window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
           return;
         }
 
         if (parsed.questionId !== question.id) return;
         sessionEndedRef.current = false;
+        sessionIdRef.current = parsed.sessionId ?? crypto.randomUUID();
+        hasPersistedSessionRef.current = true;
         if (parsed.state === "running") {
           const currentElapsed = parsed.secondsElapsed + Math.floor((Date.now() - parsed.lastUpdatedAt) / 1000);
           if (!cancelled) {
@@ -144,7 +153,25 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     const persist = () => {
       if (sessionEndedRef.current) return;
       if (state !== "running" && state !== "paused" && state !== "editing") return;
+      if (hasPersistedSessionRef.current) {
+        const current = parseStandaloneSession(localStorage.getItem(STANDALONE_SESSION_KEY));
+        if (!current || !isOwnedStandaloneSession(current, question.id, sessionIdRef.current)) {
+          // The user or another tab cleared/replaced this record. Relinquish
+          // ownership so this mounted page cannot recreate a dismissed session.
+          sessionEndedRef.current = true;
+          hasPersistedSessionRef.current = false;
+          sessionIdRef.current = null;
+          clearEncryptedRecovery(recoveryId);
+          secondsRef.current = 0;
+          setSecondsElapsed(0);
+          setState("idle");
+          window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
+          return;
+        }
+      }
+      if (!sessionIdRef.current) sessionIdRef.current = crypto.randomUUID();
       const payload = {
+        sessionId: sessionIdRef.current,
         questionId: question.id,
         prompt: question.prompt,
         category: question.category,
@@ -153,13 +180,33 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
         state,
         lastUpdatedAt: Date.now()
       };
-      localStorage.setItem("in_progress_test", JSON.stringify(payload));
-      window.dispatchEvent(new Event("in_progress_test_updated"));
+      localStorage.setItem(STANDALONE_SESSION_KEY, JSON.stringify(payload));
+      hasPersistedSessionRef.current = true;
+      window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
     };
     persist();
     const checkpoint = window.setInterval(persist, 15_000);
     return () => window.clearInterval(checkpoint);
-  }, [state, question]);
+  }, [recoveryId, state, question]);
+
+  // Native storage events cover deletion or replacement from another tab.
+  // Same-tab DevTools deletion is caught by the ownership check above.
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if ((event.key !== STANDALONE_SESSION_KEY && event.key !== null) || sessionEndedRef.current) return;
+      const current = parseStandaloneSession(event.newValue);
+      if (current && isOwnedStandaloneSession(current, question.id, sessionIdRef.current)) return;
+      sessionEndedRef.current = true;
+      hasPersistedSessionRef.current = false;
+      sessionIdRef.current = null;
+      clearEncryptedRecovery(recoveryId);
+      secondsRef.current = 0;
+      setSecondsElapsed(0);
+      setState("idle");
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [question.id, recoveryId]);
 
   // Keep answer text out of plaintext localStorage. The encrypted payload is
   // recoverable across refreshes in this tab because its key lives only in
@@ -204,6 +251,8 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       router.push("/subscription");
       return;
     }
+    sessionIdRef.current = crypto.randomUUID();
+    hasPersistedSessionRef.current = false;
     sessionEndedRef.current = false;
     setState("running");
   };
@@ -213,8 +262,12 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     // Notify the persistent shell immediately; recovery cleanup is separate and
     // must not prevent the shell from learning that the session has ended.
     sessionEndedRef.current = true;
-    localStorage.removeItem("in_progress_test");
-    window.dispatchEvent(new Event("in_progress_test_updated"));
+    // Cancellation and successful submission both terminate the global
+    // standalone session unconditionally. No saved session should survive.
+    removeStandaloneSession(localStorage);
+    hasPersistedSessionRef.current = false;
+    sessionIdRef.current = null;
+    window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
     clearEncryptedRecovery(recoveryId);
   };
 
