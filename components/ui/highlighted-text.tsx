@@ -1,22 +1,29 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
+import type { Highlight } from "@/lib/types";
 
-export function HighlightedText({ text, highlights }: { text: string; highlights: any[] }) {
-  const [activeHighlight, setActiveHighlight] = useState<number | null>(null);
+interface ActiveHighlight {
+  highlight: Highlight;
+  rect: DOMRect;
+}
+
+export function HighlightedText({ text, highlights }: { text: string; highlights: Highlight[] }) {
+  const [activeHighlight, setActiveHighlight] = useState<ActiveHighlight | null>(null);
 
   // Simple string search implementation. 
   // For a robust implementation, we'd need to find all overlapping indices.
   // Assuming non-overlapping highlights for this MVP.
   
-  let result: React.ReactNode[] = [];
+  const result: React.ReactNode[] = [];
   let currentIndex = 0;
 
   // Sort highlights by their position in text
   const sortedHighlights = [...highlights]
-    .map((h, i) => {
+    .map((h) => {
       const index = text.indexOf(h.quote);
-      return { ...h, originalIndex: i, startIndex: index, endIndex: index + h.quote.length };
+      return { ...h, startIndex: index, endIndex: index + h.quote.length };
     })
     .filter(h => h.startIndex !== -1)
     .sort((a, b) => a.startIndex - b.startIndex);
@@ -30,25 +37,25 @@ export function HighlightedText({ text, highlights }: { text: string; highlights
     // Add highlighted section
     if (h.startIndex >= currentIndex) {
       result.push(
-        <span key={`highlight-wrapper-${i}`} className="relative inline-block group">
+        <span key={`highlight-wrapper-${i}`} className="inline-block">
           <mark 
             data-type={h.type}
-            onMouseEnter={() => setActiveHighlight(i)}
+            tabIndex={0}
+            onMouseEnter={(event) => {
+              if (window.matchMedia("(min-width: 1024px)").matches) {
+                setActiveHighlight({ highlight: h, rect: event.currentTarget.getBoundingClientRect() });
+              }
+            }}
             onMouseLeave={() => setActiveHighlight(null)}
+            onFocus={(event) => {
+              if (window.matchMedia("(min-width: 1024px)").matches) {
+                setActiveHighlight({ highlight: h, rect: event.currentTarget.getBoundingClientRect() });
+              }
+            }}
+            onBlur={() => setActiveHighlight(null)}
           >
             {text.slice(h.startIndex, h.endIndex)}
           </mark>
-          
-          {/* Tooltip */}
-          {activeHighlight === i && (
-            <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-foreground text-background text-xs rounded-lg shadow-xl animate-fade-in pointer-events-none">
-              <div className="font-semibold mb-1 uppercase tracking-wide opacity-80">
-                {h.type === "strength" ? "Good" : "Improvement"}
-              </div>
-              {h.comment}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-foreground" />
-            </div>
-          )}
         </span>
       );
       currentIndex = h.endIndex;
@@ -65,5 +72,76 @@ export function HighlightedText({ text, highlights }: { text: string; highlights
     return <span>{text}</span>;
   }
 
-  return <>{result}</>;
+  return (
+    <>
+      {result}
+      {activeHighlight ? createPortal(
+        <HighlightTooltip activeHighlight={activeHighlight} />,
+        document.body,
+      ) : null}
+    </>
+  );
+}
+
+function HighlightTooltip({ activeHighlight }: { activeHighlight: ActiveHighlight }) {
+  const { highlight, rect } = activeHighlight;
+  const placeBelow = rect.top < 180;
+  const center = Math.min(Math.max(rect.left + rect.width / 2, 136), window.innerWidth - 136);
+
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none fixed z-[100] w-64 rounded-lg bg-foreground p-3 text-xs text-background shadow-xl animate-fade-in"
+      style={{
+        left: center,
+        top: placeBelow ? rect.bottom + 8 : rect.top - 8,
+        transform: placeBelow ? "translateX(-50%)" : "translate(-50%, -100%)",
+      }}
+    >
+      <div className="mb-1 font-semibold uppercase tracking-wide opacity-80">
+        {highlight.type === "strength" ? "Good" : "Improvement"}
+      </div>
+      {highlight.comment}
+      <div
+        className={`absolute left-1/2 -translate-x-1/2 border-4 border-transparent ${
+          placeBelow
+            ? "bottom-full border-b-foreground"
+            : "top-full border-t-foreground"
+        }`}
+      />
+    </div>
+  );
+}
+
+export function MobileHighlightDetails({ highlights }: { highlights: Highlight[] }) {
+  if (highlights.length === 0) return null;
+
+  return (
+    <div className="mt-5 space-y-3 lg:hidden" aria-label="Highlight details">
+      <h5 className="text-sm font-semibold text-foreground">Highlight details</h5>
+      {highlights.map((highlight, index) => (
+        <div
+          key={`${highlight.quote}-${index}`}
+          className="rounded-xl border border-border bg-card p-4 text-sm"
+        >
+          <div className="mb-2 flex items-center gap-2">
+            <span
+              className={`h-2.5 w-2.5 shrink-0 rounded-sm ${
+                highlight.type === "strength"
+                  ? "bg-[var(--color-highlight-strength-border)]"
+                  : "bg-[var(--color-highlight-improvement-border)]"
+              }`}
+            />
+            <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              {highlight.type === "strength" ? "Strength" : "Area for improvement"}
+            </span>
+          </div>
+          <blockquote className="break-words font-semibold text-foreground">
+            “{highlight.quote}”
+          </blockquote>
+          <p className="mt-2 leading-relaxed text-muted-foreground">{highlight.comment}</p>
+        </div>
+      ))}
+    </div>
+  );
 }

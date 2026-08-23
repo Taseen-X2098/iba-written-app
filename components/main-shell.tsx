@@ -27,10 +27,8 @@ import { messaging } from "@/lib/firebase";
 import { getToken } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
 import { NavigationLoadingOverlay } from "@/components/ui/navigation-loading-overlay";
-import { clearEncryptedRecovery } from "@/lib/exams/recovery-client";
 import {
   parseStandaloneSession,
-  removeStandaloneSession,
   STANDALONE_SESSION_KEY,
   STANDALONE_SESSION_UPDATED_EVENT,
 } from "@/lib/exams/standalone-session";
@@ -76,10 +74,7 @@ export default function MainShell({
   const subscription = initialSubscription;
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
 
-  const [hasActiveTimer, setHasActiveTimer] = useState(false);
   const [activeTestState, setActiveTestState] = useState<{ type: "test" | "exam", id: string, title: string, isPractice?: boolean } | null>(null);
-  const [showReminderPopup, setShowReminderPopup] = useState(false);
-  const popupCheckedRef = React.useRef(false);
 
   async function loadNotifications() {
     try {
@@ -103,7 +98,6 @@ export default function MainShell({
     // Check for active timer
     const checkTimer = () => {
       let active = false;
-      let testId = "";
       try {
         const savedExam = localStorage.getItem("in_progress_exam");
         if (savedExam) {
@@ -118,7 +112,6 @@ export default function MainShell({
               title: parsed.title,
               isPractice: parsed.isPractice
             });
-            testId = parsed.examId;
             active = true;
           }
         }
@@ -133,7 +126,6 @@ export default function MainShell({
                 id: parsed.questionId,
                 title: parsed.prompt
               });
-              testId = parsed.questionId;
               active = true;
             } else {
               localStorage.removeItem(STANDALONE_SESSION_KEY);
@@ -144,21 +136,9 @@ export default function MainShell({
         // ignore
       }
       
-      if (active && !popupCheckedRef.current) {
-        popupCheckedRef.current = true;
-        // Only show popup if they are not already on the active test page
-        const isAlreadyOnPage = window.location.pathname.startsWith(`/test/${testId}`) || window.location.pathname.startsWith(`/exams/${testId}`);
-        if (!isAlreadyOnPage) {
-          setShowReminderPopup(true);
-        }
-      }
-      
       if (!active) {
         setActiveTestState(null);
-        setShowReminderPopup(false);
-        popupCheckedRef.current = false;
       }
-      setHasActiveTimer(active);
     };
     
     checkTimer();
@@ -179,17 +159,6 @@ export default function MainShell({
       window.removeEventListener("in_progress_exam_updated", checkTimer);
     };
   }, []);
-
-  const endStandaloneSession = () => {
-    if (activeTestState?.type !== "test") return;
-    removeStandaloneSession(localStorage);
-    clearEncryptedRecovery(`standalone:${activeTestState.id}`);
-    window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
-    setActiveTestState(null);
-    setHasActiveTimer(false);
-    setShowReminderPopup(false);
-    popupCheckedRef.current = false;
-  };
 
   async function registerFCMToken() {
     try {
@@ -290,7 +259,6 @@ export default function MainShell({
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {SIDENAV_LINKS.map((link) => {
             const active = isActiveTab(link.href);
-            const showPin = link.href === "/history" && hasActiveTimer;
             
             return (
               <Link
@@ -304,15 +272,7 @@ export default function MainShell({
                       : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   }`}
               >
-                <div className="relative">
-                  <link.icon size={18} />
-                  {showPin && (
-                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-brand-500"></span>
-                    </span>
-                  )}
-                </div>
+                <link.icon size={18} />
                 {link.label}
                 {link.href === "/personal-report" && personalReportLocked && (
                   <Lock size={13} className="ml-auto text-amber-600" aria-label="Subscriber feature" />
@@ -616,29 +576,6 @@ export default function MainShell({
           </div>
         </header>
 
-        {/* Active Test Banner */}
-        {activeTestState && 
-         !pathname.startsWith(`/test/${activeTestState.id}`) && 
-         !pathname.startsWith(`/exams/${activeTestState.id}`) && (
-          <div className="bg-brand-600 text-white px-4 py-2 flex items-center justify-between sticky top-14 lg:top-14 z-10 shadow-md">
-            <div className="flex items-center gap-2 text-sm font-medium flex-1 min-w-0">
-              <span className="animate-pulse h-2 w-2 bg-white rounded-full shrink-0" />
-              <span className="truncate">
-                Active {activeTestState.type === "exam" ? "Exam" : "Test"}: {activeTestState.title}
-              </span>
-            </div>
-            <Link
-              href={activeTestState.type === "exam" 
-                ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
-                : `/test/${activeTestState.id}`}
-              prefetch={false}
-              className="ml-4 shrink-0 bg-white/20 hover:bg-white/30 transition-colors px-3 py-1 rounded text-xs font-bold whitespace-nowrap flex items-center gap-1"
-            >
-              Return <ChevronRight size={14} />
-            </Link>
-          </div>
-        )}
-
         {/* Page Content */}
         <main className="flex-1 pb-20 lg:pb-6">{children}</main>
 
@@ -684,46 +621,6 @@ export default function MainShell({
         </nav>
       </div>
 
-      {/* Reminder Popup */}
-      {showReminderPopup && activeTestState && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-card w-full max-w-sm rounded-2xl p-6 shadow-2xl scale-in-center">
-            <div className="mx-auto h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 mb-4">
-              <Play size={24} className="ml-1" />
-            </div>
-            <h2 className="text-xl font-bold text-center text-foreground mb-2">Ongoing Session Found</h2>
-            <p className="text-center text-sm text-muted-foreground mb-6">
-              You have an unfinished session for <strong className="text-foreground">{activeTestState.title}</strong>. Would you like to resume it?
-            </p>
-            <div className="flex flex-col gap-3">
-              <Link
-                href={activeTestState.type === "exam" 
-                  ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
-                  : `/test/${activeTestState.id}`}
-                prefetch={false}
-                onClick={() => setShowReminderPopup(false)}
-                className="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-bold text-white text-center hover:bg-brand-700 shadow-md shadow-brand-200 transition-all flex items-center justify-center gap-2"
-              >
-                Resume {activeTestState.type === "exam" ? "Exam" : "Test"} <ChevronRight size={16} />
-              </Link>
-              {activeTestState.type === "test" && (
-                <button
-                  onClick={endStandaloneSession}
-                  className="w-full rounded-xl bg-destructive/10 px-4 py-3 text-sm font-bold text-destructive hover:bg-destructive/20 transition-all"
-                >
-                  End and remove saved test
-                </button>
-              )}
-              <button
-                onClick={() => setShowReminderPopup(false)}
-                className="w-full rounded-xl bg-muted px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground transition-all"
-              >
-                Keep session and dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

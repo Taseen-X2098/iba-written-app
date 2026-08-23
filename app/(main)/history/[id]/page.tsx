@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { FileText, Clock, Calendar, ArrowLeft } from "lucide-react";
-import { HighlightedText } from "@/components/ui/highlighted-text";
+import { HighlightedText, MobileHighlightDetails } from "@/components/ui/highlighted-text";
 import { CATEGORY_LABELS } from "@/lib/types";
 import { formatStoredScore } from "@/lib/grading/marks";
 import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
@@ -60,7 +60,7 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
   };
 
   return (
-    <div className="px-4 py-6 lg:px-8 max-w-3xl mx-auto animate-fade-in">
+    <div className="mx-auto max-w-3xl px-4 py-6 animate-fade-in lg:mx-0 lg:max-w-none lg:px-8">
       <Link 
         href="/history"
         className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-6"
@@ -124,7 +124,7 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
             <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
               <FileText size={16} /> Your Annotated Submission
             </h4>
-            <div className="bg-muted/30 border border-border rounded-xl p-4 sm:p-5 text-sm leading-loose overflow-x-hidden">
+            <div className="bg-muted/30 border border-border rounded-xl p-4 sm:p-5 text-sm leading-loose break-words">
               <HighlightedText 
                 text={sub.edited_text || sub.ocr_text || "No submission text available."} 
                 highlights={studentFeedback.highlights} 
@@ -140,6 +140,7 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
                 <span className="text-muted-foreground">Areas for Improvement</span>
               </div>
             </div>
+            <MobileHighlightDetails highlights={studentFeedback.highlights} />
           </div>
         ) : (
           <div className="bg-muted/30 border border-border rounded-xl p-5 text-sm text-muted-foreground text-center">

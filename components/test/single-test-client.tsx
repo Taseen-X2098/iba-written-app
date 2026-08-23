@@ -28,7 +28,7 @@ import {
   type PersonalProgressionCardDTO,
   type QuestionCategory,
 } from "@/lib/types";
-import { HighlightedText } from "@/components/ui/highlighted-text";
+import { HighlightedText, MobileHighlightDetails } from "@/components/ui/highlighted-text";
 import { QuestionPrompt } from "@/components/questions/question-prompt";
 import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
 import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
@@ -392,9 +392,6 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       setState("feedback");
       
       clearPersistedSession();
-      
-      // Tell Next.js router to refresh so the user's slot count updates
-      router.refresh();
     } catch (err: any) {
       // If the connection died after the server committed, retain the key so
       // the next click retrieves the existing grade without another charge.
@@ -773,6 +770,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                   <span className="text-muted-foreground">Areas for Improvement</span>
                 </div>
               </div>
+              <MobileHighlightDetails highlights={gradingResult.studentFeedback.highlights} />
             </div>
 
             <div className="pt-4 sm:pt-6 border-t border-border flex flex-col sm:flex-row sm:justify-end">
