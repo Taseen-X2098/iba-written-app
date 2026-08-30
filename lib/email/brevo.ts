@@ -16,6 +16,7 @@ export type PublishedExamEmailDetails = {
   totalMarks: number;
   deadline: string;
   durationMinutes: number;
+  isMagnusOnly: boolean;
 };
 
 export type SubscriptionRetentionEmailDetails = {
@@ -71,8 +72,8 @@ function emailLayout({ preview, title, body, ctaLabel, ctaUrl }: {
   preview: string;
   title: string;
   body: string;
-  ctaLabel: string;
-  ctaUrl: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
 }) {
   return `<!doctype html>
 <html lang="en">
@@ -92,9 +93,9 @@ function emailLayout({ preview, title, body, ctaLabel, ctaUrl }: {
           <tr><td style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:36px 32px;box-shadow:0 1px 2px rgba(15,23,42,.04);">
             <h1 style="color:#0f172a;font-size:26px;line-height:1.25;letter-spacing:-.4px;margin:0 0 16px;">${title}</h1>
             ${body}
-            <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:28px 0 4px;"><tr><td style="border-radius:8px;background:#16a34a;">
+            ${ctaLabel && ctaUrl ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:28px 0 4px;"><tr><td style="border-radius:8px;background:#16a34a;">
               <a href="${ctaUrl}" style="display:inline-block;border-radius:8px;color:#ffffff;font-size:15px;font-weight:700;padding:13px 20px;text-decoration:none;">${ctaLabel}</a>
-            </td></tr></table>
+            </td></tr></table>` : ""}
           </td></tr>
           <tr><td style="color:#64748b;font-size:12px;line-height:1.5;padding:20px 16px 0;text-align:center;">
             You received this account update because you have an IBA Written account.<br>
@@ -181,7 +182,7 @@ function profileName(profile: unknown) {
   return "there";
 }
 
-async function getEligibleExamRecipients() {
+async function getEligibleExamRecipients(isMagnusOnly: boolean) {
   const supabase = await createAdminClient();
   const { data: subscriptions, error: subscriptionsError } = await supabase
     .from("subscriptions")
@@ -197,6 +198,25 @@ async function getEligibleExamRecipients() {
     namesByUserId.set(subscription.user_id, profileName(subscription.profiles));
   }
   if (namesByUserId.size === 0) return [] as Recipient[];
+
+  if (isMagnusOnly) {
+    const approvedUserIds = new Set<string>();
+    const userIds = [...namesByUserId.keys()];
+    const membershipBatchSize = 1_000;
+    for (let index = 0; index < userIds.length; index += membershipBatchSize) {
+      const { data, error } = await supabase
+        .from("magnus_memberships")
+        .select("user_id")
+        .eq("status", "approved")
+        .in("user_id", userIds.slice(index, index + membershipBatchSize));
+      if (error) throw error;
+      for (const membership of data ?? []) approvedUserIds.add(membership.user_id);
+    }
+    for (const userId of userIds) {
+      if (!approvedUserIds.has(userId)) namesByUserId.delete(userId);
+    }
+    if (namesByUserId.size === 0) return [] as Recipient[];
+  }
 
   const recipients: Recipient[] = [];
   const pageSize = 1_000;
@@ -221,7 +241,7 @@ export async function sendExamPublishedEmails(exam: PublishedExamEmailDetails) {
   }
 
   try {
-    const recipients = await getEligibleExamRecipients();
+    const recipients = await getEligibleExamRecipients(exam.isMagnusOnly);
     const subject = `Exam started: ${exam.title}`;
     const instructions = escapeHtml(exam.instructions?.trim() || "Please read each question carefully before submitting.")
       .replace(/\r?\n/g, "<br>");
@@ -278,6 +298,19 @@ export async function sendPlanActivatedEmail(userId: string, planType: PlanType,
 <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;color:#166534;font-size:14px;line-height:1.5;margin:20px 0 0;padding:14px 16px;"><strong>Plan valid until:</strong> ${formatDate(expiresAt)}</div>`,
       ctaLabel: "View my plan",
       ctaUrl: `${getSiteUrl()}/subscription`,
+    }),
+  );
+}
+
+export async function sendMagnusApprovedEmail(userId: string) {
+  return deliverAccountUpdate(
+    () => getRecipient(userId),
+    "Welcome to IBA Written",
+    () => emailLayout({
+      preview: "You have been approved as a magnus student with our Full Preparation plan.",
+      title: "Welcome to IBA Written,",
+      body: `<p style="color:#334155;font-size:16px;line-height:1.7;margin:0 0 16px;">You have been approved as magnus student with our Full Preparation plan. For Magnus students specifically, we have prepared 3 IBA Standard Written Exams each month in addition to 600+ written questions, 300 graded written tests for practice and 4 IBA Standard Weekly Exams. We hope to provide you with practice tests, feedback and overall guidance to help you develop the skills and aptitude to ace the written part in main exam.</p>
+<p style="color:#334155;font-size:16px;line-height:1.7;margin:0;">Regards,<br>IBA Written</p>`,
     }),
   );
 }

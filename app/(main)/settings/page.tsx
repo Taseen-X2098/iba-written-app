@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Settings, User, Lock, Lightbulb, Loader2 } from "lucide-react";
-import type { Profile } from "@/lib/types";
+import { BadgeCheck, KeyRound, Settings, User, Lock, Loader2 } from "lucide-react";
+import type { MagnusMembershipStatus, Profile } from "@/lib/types";
 import { profileFieldsSchema } from "@/lib/validation/profile";
+import { submitMagnusPromoCode } from "./actions";
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -12,27 +13,58 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: "", institute: "", phone: "" });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [magnusStatus, setMagnusStatus] = useState<MagnusMembershipStatus | null>(null);
+  const [promoCode, setPromoCode] = useState("");
+  const [submittingPromo, setSubmittingPromo] = useState(false);
+  const [promoMessage, setPromoMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
-
-  async function loadProfile() {
+  const loadProfile = useCallback(async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .single();
+    const [{ data }, { data: membership }] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", user.id).single(),
+      supabase
+        .from("magnus_memberships")
+        .select("status")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    ]);
 
     if (data) {
       setProfile(data);
       setForm({ name: data.name, institute: data.institute, phone: data.phone ?? "" });
     }
+    setMagnusStatus((membership?.status as MagnusMembershipStatus | undefined) ?? null);
     setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
+
+  async function handleSubmitPromo(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmittingPromo(true);
+    setPromoMessage(null);
+    const result = await submitMagnusPromoCode(promoCode);
+    if (result.success) {
+      setMagnusStatus(result.status);
+      setPromoCode("");
+      setPromoMessage({
+        type: "success",
+        text: result.status === "approved"
+          ? "Your Magnus student status is already approved."
+          : "Promocode accepted. Your status is awaiting admin approval.",
+      });
+    } else {
+      setPromoMessage({ type: "error", text: result.error });
+    }
+    setSubmittingPromo(false);
   }
 
   async function handleSaveProfile(e: React.FormEvent) {
@@ -163,8 +195,64 @@ export default function SettingsPage() {
         </form>
       </section>
 
+      <section className="border-t border-border pt-8">
+        <div className="flex items-center gap-2 mb-4">
+          <KeyRound size={16} className="text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Magnus Academy</h3>
+        </div>
+
+        {magnusStatus === "approved" ? (
+          <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-green-800">
+            <BadgeCheck size={21} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">Approved Magnus student</p>
+              <p className="mt-1 text-sm">Your Magnus-only exams and benefits are enabled.</p>
+            </div>
+          </div>
+        ) : magnusStatus === "pending" ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+            <p className="font-semibold">Awaiting approval</p>
+            <p className="mt-1 text-sm">Your promocode was accepted. An admin still needs to approve your Magnus student status.</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmitPromo} className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Magnus Academy students can submit their promocode for verification.
+            </p>
+            <label htmlFor="settings-magnus-promo" className="sr-only">Magnus Academy promocode</label>
+            <input
+              id="settings-magnus-promo"
+              value={promoCode}
+              onChange={(event) => setPromoCode(event.target.value)}
+              maxLength={100}
+              autoComplete="off"
+              placeholder="Enter your promocode"
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+            />
+            <button
+              type="submit"
+              disabled={submittingPromo}
+              className="flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submittingPromo && <Loader2 size={16} className="animate-spin" />}
+              {submittingPromo ? "Submitting…" : "Submit promocode"}
+            </button>
+          </form>
+        )}
+
+        {promoMessage && (
+          <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+            promoMessage.type === "success"
+              ? "border-green-200 bg-green-50 text-green-700"
+              : "border-destructive/20 bg-destructive/10 text-destructive"
+          }`}>
+            {promoMessage.text}
+          </div>
+        )}
+      </section>
+
       {/* Change Password */}
-      <section>
+      <section className="border-t border-border pt-8">
         <div className="flex items-center gap-2 mb-4">
           <Lock size={16} className="text-muted-foreground" />
           <h3 className="text-sm font-semibold text-foreground">Password</h3>

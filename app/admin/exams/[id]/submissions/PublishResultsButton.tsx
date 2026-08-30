@@ -1,29 +1,50 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, UploadCloud } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle, Loader2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function PublishResultsButton({
   examId,
   allGraded,
   examEnded = true,
+  endsAt,
   hasSubmissions = true,
-  isRepublish,
+  isPublished = false,
 }: {
   examId: string;
   allGraded: boolean;
   examEnded?: boolean;
+  endsAt?: string;
   hasSubmissions?: boolean;
-  isRepublish?: boolean;
+  isPublished?: boolean;
 }) {
   const [publishing, setPublishing] = useState(false);
+  const [elapsedDeadline, setElapsedDeadline] = useState<string | null>(null);
   const router = useRouter();
-  const disabledReason = !hasSubmissions
+
+  useEffect(() => {
+    if (!endsAt) return;
+
+    const deadline = new Date(endsAt).getTime();
+    if (!Number.isFinite(deadline)) return;
+
+    const timer = window.setTimeout(
+      () => setElapsedDeadline(endsAt),
+      Math.max(0, Math.min(deadline - Date.now(), 2_147_483_647)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [endsAt]);
+
+  const deadlinePassed = examEnded || (Boolean(endsAt) && elapsedDeadline === endsAt);
+
+  const disabledReason = isPublished
+    ? "Results have already been published. Extend the deadline to reopen publication."
+    : !hasSubmissions
     ? "At least one official submission is required before results can be published."
     : !allGraded
       ? "Publication is blocked until every answer has a final grade."
-      : !examEnded
+      : !deadlinePassed
         ? "Results cannot be published before the exam ends."
         : null;
 
@@ -32,7 +53,7 @@ export default function PublishResultsButton({
       alert(disabledReason);
       return;
     }
-    if (!confirm(isRepublish ? "Recalculate and republish results? Rankings will be rebuilt from the latest final grades." : "Publish final results and notify students?")) {
+    if (!confirm("Publish final results and notify students?")) {
       return;
     }
 
@@ -58,10 +79,14 @@ export default function PublishResultsButton({
       onClick={handlePublish}
       disabled={publishing || Boolean(disabledReason)}
       title={disabledReason ?? undefined}
-      className={`${isRepublish ? 'bg-brand-100 text-brand-700 hover:bg-brand-200 border-brand-300' : 'bg-brand-600 text-white hover:bg-brand-700'} border px-5 py-2.5 rounded-xl font-bold shadow transition-colors flex items-center gap-2 disabled:opacity-50`}
+      className={`${isPublished ? 'bg-green-100 text-green-700 border-green-300' : 'bg-brand-600 text-white hover:bg-brand-700'} border px-5 py-2.5 rounded-xl font-bold shadow transition-colors flex items-center gap-2 disabled:opacity-50`}
     >
-      {publishing ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
-      {publishing ? (isRepublish ? "Republishing..." : "Publishing...") : (isRepublish ? "Recalculate & Republish" : "Publish Results")}
+      {publishing
+        ? <Loader2 size={16} className="animate-spin" />
+        : isPublished
+          ? <CheckCircle size={16} />
+          : <UploadCloud size={16} />}
+      {publishing ? "Publishing..." : isPublished ? "Results Published" : "Publish Results"}
     </button>
   );
 }

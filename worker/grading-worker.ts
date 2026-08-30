@@ -9,7 +9,7 @@ const workerId = process.env.RAILWAY_REPLICA_ID ?? `railway-${randomUUID()}`;
 let running: Promise<void> | null = null;
 let rerunRequested = false;
 let retentionRunning: Promise<void> | null = null;
-const configuredRetentionPollInterval = Number(process.env.RETENTION_POLL_INTERVAL_MS ?? 60_000);
+const configuredRetentionPollInterval = Number(process.env.RETENTION_POLL_INTERVAL_MS ?? 300_000);
 const retentionPollInterval = Number.isFinite(configuredRetentionPollInterval)
   ? Math.max(15_000, configuredRetentionPollInterval)
   : 60_000;

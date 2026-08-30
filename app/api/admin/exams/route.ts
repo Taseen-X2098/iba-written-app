@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       p_starts_at: input.startsAt,
       p_ends_at: input.endsAt,
       p_is_published: input.isPublished,
+      p_is_magnus_only: input.isMagnusOnly,
       p_questions: input.questions,
     });
     if (error) throw error;
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
         totalMarks: input.questions.reduce((total, question) => total + question.marks, 0),
         deadline: input.endsAt,
         durationMinutes: input.timeLimitMinutes,
+        isMagnusOnly: input.isMagnusOnly,
       });
     }
     return NextResponse.json({ success: true, examId });

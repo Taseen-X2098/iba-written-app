@@ -45,6 +45,7 @@ export default async function ExamResultsPage({
       <header className="mb-10 text-center">
         <h1 className="text-2xl font-black">{results.exam.title} — Results</h1>
         <p className="mt-2 text-muted-foreground">Final scores, shared competition ranks, and your detailed feedback.</p>
+        <p className="mt-1 text-sm font-semibold text-brand-700">{results.totalCount} participant{results.totalCount === 1 ? "" : "s"}</p>
       </header>
 
       {results.myResult ? (
@@ -68,20 +69,21 @@ export default async function ExamResultsPage({
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border bg-muted/40">
-              <tr><th className="px-5 py-4">Rank</th><th className="px-5 py-4">Student</th><th className="px-5 py-4 text-right">Score</th></tr>
+              <tr><th className="px-5 py-4">Rank</th><th className="px-5 py-4">Student</th><th className="px-5 py-4 text-right">Score</th><th className="px-5 py-4 text-right">Percentage</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
               {results.leaderboard.map((row) => {
                 const mine = row.user_id === user.id;
                 return (
-                  <tr key={row.user_id} className={mine ? "bg-brand-50/60" : ""}>
-                    <td className="px-5 py-4 font-black">#{row.rank}</td>
+                  <tr key={row.user_id} className={`${topRankClass(row.rank)} ${mine ? "ring-1 ring-inset ring-brand-300" : ""}`}>
+                    <td className="px-5 py-4 font-black">{row.rank <= 3 ? <span aria-label={`Rank ${row.rank}`}>{["🥇", "🥈", "🥉"][row.rank - 1]} #{row.rank}</span> : `#${row.rank}`}</td>
                     <td className="px-5 py-4"><p className="font-bold">{row.student_name}{mine ? " (You)" : ""}</p><p className="text-xs text-muted-foreground">{row.institute}</p></td>
                     <td className="px-5 py-4 text-right font-black">{row.total_score}<span className="text-xs text-muted-foreground"> / {row.max_score}</span></td>
+                    <td className="px-5 py-4 text-right font-black">{row.percentage.toFixed(2)}%</td>
                   </tr>
                 );
               })}
-              {!results.leaderboard.length && <tr><td colSpan={3} className="p-10 text-center text-muted-foreground">No ranked results.</td></tr>}
+              {!results.leaderboard.length && <tr><td colSpan={4} className="p-10 text-center text-muted-foreground">No ranked results.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -121,6 +123,13 @@ export default async function ExamResultsPage({
       )}
     </div>
   );
+}
+
+function topRankClass(rank: number) {
+  if (rank === 1) return "bg-amber-50/80";
+  if (rank === 2) return "bg-slate-50/80";
+  if (rank === 3) return "bg-orange-50/70";
+  return "";
 }
 
 function StatusCard({ title, message }: { title: string; message: string }) {

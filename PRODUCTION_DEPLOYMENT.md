@@ -75,7 +75,7 @@ The server-only key bypasses Row Level Security. It must never be placed in a
 ### 3.1 Apply database migrations
 
 All SQL files in `supabase/migrations` must be applied in numeric order, from
-`001_schema.sql` through `028_retention_notifications.sql`. The migrations create
+`001_schema.sql` through `032_repair_result_publication.sql`. The migrations create
 the schema, RLS policies, triggers, RPCs, grading queues, and production question
 bank.
 
@@ -95,10 +95,11 @@ production, and do not use `--include-seed` on a production database.
 
 After migrations, verify that these representative objects exist:
 
-- Tables: `profiles`, `questions`, `exams`, `notifications`, `exam_attempts`,
+- Tables: `profiles`, `magnus_memberships`, `questions`, `exams`, `notifications`, `exam_attempts`,
   `grading_jobs`, `grading_job_items`, `student_profile_summaries`,
   `student_skill_state`, and `student_learning_events`.
-- Functions: `public.is_admin()` and
+- Publication link: `notifications.exam_id` exists and references `exams.id`.
+- Functions: `public.is_admin()`, `public.is_magnus_student(uuid)`, and
   `public.record_student_learning_profile_update(...)`.
 - Trigger: `on_auth_user_created`.
 - RLS enabled on application tables.
@@ -454,7 +455,7 @@ and health-checks `/api/health`.
    PORT=8080
    GRADING_CONCURRENCY=4
    RETENTION_NOTIFICATION_CONCURRENCY=20
-   RETENTION_POLL_INTERVAL_MS=60000
+   RETENTION_POLL_INTERVAL_MS=300000
    ```
 
 The worker exposes `/health` privately and accepts authenticated `POST /wake`
@@ -520,6 +521,9 @@ Optional web variables:
 ```dotenv
 SUPABASE_WEBHOOK_SECRET=
 
+# Optional server-only override. Defaults to MAGNUS-IBAWRITTEN when omitted.
+MAGNUS_PROMO_CODE=
+
 # Required to send plan-activation and test-slot emails through Brevo.
 BREVO_API_KEY=
 BREVO_SENDER_EMAIL=
@@ -553,13 +557,13 @@ USE_MOCK_GRADER=false
 
 GRADING_WORKER_SECRET=
 
-# Required here for the five-day post-expiry retention email.
+# Required here for Magnus welcome emails and the five-day post-expiry retention email.
 BREVO_API_KEY=
 BREVO_SENDER_EMAIL=
 BREVO_SENDER_NAME=IBA Written
 
 RETENTION_NOTIFICATION_CONCURRENCY=20
-RETENTION_POLL_INTERVAL_MS=60000
+RETENTION_POLL_INTERVAL_MS=300000
 ```
 
 Railway supplies `RAILWAY_REPLICA_ID` automatically. Do not configure
@@ -616,9 +620,11 @@ Run locally before releasing:
 npm run check
 ```
 
-Run `supabase/tests/exam_reliability.sql` only against a disposable or staging
-database. It deliberately creates test identities and records inside a rollback
-transaction.
+Run `supabase/tests/exam_reliability.sql` and
+`supabase/tests/magnus_reliability.sql` only against a disposable or staging
+database. They deliberately create test identities and records inside rollback
+transactions. `supabase/tests/local_auth_bootstrap.sql` is only for a disposable
+plain-PostgreSQL test cluster and must never be run against Supabase.
 
 Verify all of the following:
 

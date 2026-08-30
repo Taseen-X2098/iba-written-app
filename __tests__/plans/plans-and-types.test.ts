@@ -116,6 +116,7 @@ describe("Type shape validation", () => {
       is_published: true,
       results_published: false,
       results_version: 0,
+      is_magnus_only: false,
       created_by: "admin-id",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

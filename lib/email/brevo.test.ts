@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   sendExamPublishedEmails,
+  sendMagnusApprovedEmail,
   sendPlanActivatedEmail,
   sendSlotsAddedEmail,
   sendSubscriptionRetentionEmail,
@@ -76,6 +77,64 @@ describe("Brevo account-update emails", () => {
     expect(request.htmlContent).toContain("https://example.com/test");
   });
 
+  it("filters Magnus exam publication email to approved members", async () => {
+    const listUsers = jest.fn().mockResolvedValue({
+      data: {
+        users: [
+          { id: "approved", email: "approved@example.com" },
+          { id: "pending", email: "pending@example.com" },
+        ],
+      },
+      error: null,
+    });
+    const from = jest.fn((table: string) => {
+      if (table === "subscriptions") {
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({
+              in: jest.fn(() => ({
+                gt: jest.fn().mockResolvedValue({
+                  data: [
+                    { user_id: "approved", profiles: { name: "Approved" } },
+                    { user_id: "pending", profiles: { name: "Pending" } },
+                  ],
+                  error: null,
+                }),
+              })),
+            })),
+          })),
+        };
+      }
+      return {
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            in: jest.fn().mockResolvedValue({ data: [{ user_id: "approved" }], error: null }),
+          })),
+        })),
+      };
+    });
+    jest.mocked(createAdminClient).mockReturnValue({
+      auth: { admin: { listUsers } },
+      from,
+    } as unknown as ReturnType<typeof createAdminClient>);
+
+    await expect(sendExamPublishedEmails({
+      id: "10000000-0000-4000-8000-000000000002",
+      title: "Magnus Standard Exam",
+      instructions: "Answer every question.",
+      totalMarks: 30,
+      deadline: "2026-09-20T12:30:00.000Z",
+      durationMinutes: 90,
+      isMagnusOnly: true,
+    })).resolves.toEqual({ recipients: 1, delivered: 1, failed: 0, skipped: false });
+
+    expect(from).toHaveBeenCalledWith("magnus_memberships");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).to).toEqual([
+      { email: "approved@example.com", name: "Approved" },
+    ]);
+  });
+
   it("sends escaped, personalized subscription-retention content", async () => {
     await expect(sendSubscriptionRetentionEmail("student-id", {
       subject: "Your progress is waiting",
@@ -123,6 +182,7 @@ describe("Brevo account-update emails", () => {
       totalMarks: 25,
       deadline: "2026-09-20T12:30:00.000Z",
       durationMinutes: 90,
+      isMagnusOnly: false,
     })).resolves.toEqual({ recipients: 1, delivered: 1, failed: 0, skipped: false });
 
     expect(active).toHaveBeenCalledWith("is_active", true);
@@ -139,5 +199,17 @@ describe("Brevo account-update emails", () => {
     expect(request.htmlContent).toContain("Deadline:</strong>");
     expect(request.htmlContent).toContain("Duration:</strong> 1 hour 30 minutes");
     expect(request.htmlContent).not.toContain("Question 1");
+  });
+
+  it("sends the supplied Magnus welcome copy without a CTA", async () => {
+    await expect(sendMagnusApprovedEmail("student-id"))
+      .resolves.toEqual({ delivered: true, skipped: false });
+
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request.subject).toBe("Welcome to IBA Written");
+    expect(request.htmlContent).toContain("Welcome to IBA Written,");
+    expect(request.htmlContent).toContain("You have been approved as magnus student with our Full Preparation plan. For Magnus students specifically, we have prepared 3 IBA Standard Written Exams each month in addition to 600+ written questions, 300 graded written tests for practice and 4 IBA Standard Weekly Exams. We hope to provide you with practice tests, feedback and overall guidance to help you develop the skills and aptitude to ace the written part in main exam.");
+    expect(request.htmlContent).toContain("Regards,<br>IBA Written");
+    expect(request.htmlContent).not.toContain('href="https://example.com');
   });
 });

@@ -130,8 +130,9 @@ export default async function AdminExamSubmissionsPage({
             examId={id}
             allGraded={allGraded}
             examEnded={examHasEnded(exam.ends_at)}
+            endsAt={exam.ends_at}
             hasSubmissions={students.length > 0}
-            isRepublish={exam.results_published}
+            isPublished={exam.results_published}
           />
         </div>
       </div>

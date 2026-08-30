@@ -70,7 +70,7 @@ BEGIN
   ) THEN RAISE EXCEPTION 'ASSERT: blanks must have explicit admin zero grades'; END IF;
 
   BEGIN
-    PERFORM publish_exam_results(v_exam);
+    PERFORM publish_exam_results_once(v_exam);
     RAISE EXCEPTION 'ASSERT: early publication was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE '%EXAM_NOT_ENDED%' THEN RAISE; END IF;
@@ -78,7 +78,7 @@ BEGIN
 
   UPDATE exams SET ends_at = now() - interval '1 second' WHERE id = v_exam;
   BEGIN
-    PERFORM publish_exam_results(v_exam);
+    PERFORM publish_exam_results_once(v_exam);
     RAISE EXCEPTION 'ASSERT: incomplete publication was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE '%GRADING_INCOMPLETE%' THEN RAISE; END IF;
@@ -88,13 +88,33 @@ BEGIN
     (SELECT id FROM exam_submissions WHERE attempt_id = v_attempt_2.id AND question_id = v_eq),
     '{"internal":{"total":0,"max":10,"criteria":[]},"studentFeedback":{"score":"0/10","summary":"Reviewed","highlights":[]}}'::jsonb
   );
-  SELECT publish_exam_results(v_exam) INTO v_version;
+  SELECT publish_exam_results_once(v_exam) INTO v_version;
   IF v_version <> 1 THEN RAISE EXCEPTION 'ASSERT: first publication version must be 1'; END IF;
   IF (SELECT count(DISTINCT rank) FROM exam_results WHERE exam_id = v_exam) <> 1 THEN
     RAISE EXCEPTION 'ASSERT: equal scores must share a rank';
   END IF;
-  SELECT publish_exam_results(v_exam) INTO v_version;
-  IF v_version <> 2 THEN RAISE EXCEPTION 'ASSERT: republish must increment the version'; END IF;
+  BEGIN
+    PERFORM publish_exam_results_once(v_exam);
+    RAISE EXCEPTION 'ASSERT: published results were publishable twice';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%RESULTS_ALREADY_PUBLISHED%' THEN RAISE; END IF;
+  END;
+
+  PERFORM extend_exam_deadline(v_exam, 1);
+  IF (SELECT results_published FROM exams WHERE id = v_exam) THEN
+    RAISE EXCEPTION 'ASSERT: deadline extension did not reopen publication';
+  END IF;
+  BEGIN
+    PERFORM publish_exam_results_once(v_exam);
+    RAISE EXCEPTION 'ASSERT: results were publishable before the extended deadline';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%EXAM_NOT_ENDED%' THEN RAISE; END IF;
+  END;
+  UPDATE exams SET ends_at = now() - interval '1 second' WHERE id = v_exam;
+  SELECT publish_exam_results_once(v_exam) INTO v_version;
+  IF v_version <> 2 THEN
+    RAISE EXCEPTION 'ASSERT: publication after an extension must increment the version';
+  END IF;
 
   SELECT * INTO v_practice_1 FROM start_exam_attempt(
     v_exam, v_user_1, 'practice', now() + interval '30 minutes', 'practice-writer-1'

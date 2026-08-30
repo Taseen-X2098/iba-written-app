@@ -17,13 +17,15 @@ export async function POST(request: NextRequest) {
     });
 
     const admin = await createAdminClient();
-    const { data: version, error } = await admin.rpc("publish_exam_results", {
+    const { data: version, error } = await admin.rpc("publish_exam_results_once", {
       p_exam_id: input.examId,
     });
     if (error) {
       if (error.message.includes("EXAM_NOT_ENDED")) throw new ApiError("EXAM_NOT_AVAILABLE", "Results cannot be published before the exam ends", 409);
+      if (error.message.includes("RESULTS_ALREADY_PUBLISHED")) throw new ApiError("CONFLICT", "Results have already been published. Extend the deadline to reopen publication.", 409);
       if (error.message.includes("ATTEMPTS_NOT_FINALIZED")) throw new ApiError("GRADING_INCOMPLETE", "Some attempts still need finalization", 409);
       if (error.message.includes("GRADING_INCOMPLETE")) throw new ApiError("GRADING_INCOMPLETE", "Every answer must have a final grade before publication", 409);
+      if (error.message.includes("NO_PARTICIPANTS")) throw new ApiError("GRADING_INCOMPLETE", "Results cannot be published because no students participated", 409);
       throw error;
     }
 

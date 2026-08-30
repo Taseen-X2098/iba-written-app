@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Plus, Clock, FileText } from "lucide-react";
+import { Plus, Clock, FileText, BadgeCheck } from "lucide-react";
 import type { Exam } from "@/lib/types";
 import { ForceGradeButton } from "./ForceGradeButton";
 import { ExtendTimerButton } from "./ExtendTimerButton";
@@ -54,7 +54,16 @@ export default async function AdminExamsPage() {
             <tbody className="divide-y divide-border">
               {safeExams.map((exam: Exam) => (
                 <tr key={exam.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-6 py-4 font-medium text-foreground">{exam.title}</td>
+                  <td className="px-6 py-4 font-medium text-foreground">
+                    <div className="flex items-center gap-2">
+                      <span>{exam.title}</span>
+                      {exam.is_magnus_only && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700">
+                          <BadgeCheck size={12} /> Magnus
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
                       exam.is_published ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'

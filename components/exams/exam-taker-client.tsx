@@ -23,6 +23,7 @@ import { PersonalProgressionCard } from "@/components/progress/personal-progress
 import { countWords, getWordLimitViolation, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
+import { IN_PROGRESS_EXAM_KEY, IN_PROGRESS_EXAM_UPDATED_EVENT } from "@/lib/exams/in-progress-exam";
 import type {
   AttemptDrafts,
   AttemptQuestion,
@@ -272,8 +273,8 @@ export default function ExamTakerClient({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Submission failed");
 
-      localStorage.removeItem("in_progress_exam");
-      window.dispatchEvent(new Event("in_progress_exam_updated"));
+      localStorage.removeItem(IN_PROGRESS_EXAM_KEY);
+      window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
       if (isPractice) {
         setSelection(data as PracticeSelection);
         setSelectedIds(new Set());
@@ -317,7 +318,8 @@ export default function ExamTakerClient({
     };
     tick();
     const timer = window.setInterval(tick, 1_000);
-    localStorage.setItem("in_progress_exam", JSON.stringify({
+    localStorage.setItem(IN_PROGRESS_EXAM_KEY, JSON.stringify({
+      userId: attempt.user_id,
       examId: exam.id,
       attemptId: attempt.id,
       title: exam.title,
@@ -325,9 +327,9 @@ export default function ExamTakerClient({
       expiresAt: attempt.expires_at,
       lastUpdatedAt: Date.now(),
     }));
-    window.dispatchEvent(new Event("in_progress_exam_updated"));
+    window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
     return () => window.clearInterval(timer);
-  }, [attempt.expires_at, attempt.id, exam.id, exam.title, isPractice]);
+  }, [attempt.expires_at, attempt.id, attempt.user_id, exam.id, exam.title, isPractice]);
 
   async function handleFileUpload(questionId: string, files: FileList | File[]) {
     const question = examQuestions.find((item) => item.id === questionId);

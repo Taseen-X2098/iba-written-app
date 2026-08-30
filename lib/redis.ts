@@ -163,8 +163,8 @@ export const CacheTTL = {
   /** Single test drafts expire after 48 hours to match exam start TTL */
   TEST_DRAFT: 172800, // 48 hours in seconds
 
-  /** Durable attempt drafts/results outlive the three-minute submission grace. */
-  ATTEMPT: 172800,
+  /** Durable attempt drafts/results remain available for admin finalization for 72 hours. */
+  ATTEMPT: 259200,
 
   /** Leaderboard cache: 1 hour (re-cached on first hit after invalidation) */
   LEADERBOARD: 3600,

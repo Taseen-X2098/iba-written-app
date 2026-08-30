@@ -187,8 +187,9 @@ function ExamQueueCard({ exam }: { exam: AdminQueueExam }) {
               examId={exam.id}
               allGraded={exam.allGraded}
               examEnded={exam.examEnded}
+              endsAt={exam.endsAt}
               hasSubmissions={exam.studentCount > 0}
-              isRepublish={exam.resultsPublished}
+              isPublished={exam.resultsPublished}
             />
           </div>
         </div>

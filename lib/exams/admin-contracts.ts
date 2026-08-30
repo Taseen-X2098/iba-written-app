@@ -7,6 +7,7 @@ export const examDefinitionSchema = z.object({
   startsAt: z.string().datetime(),
   endsAt: z.string().datetime(),
   isPublished: z.boolean(),
+  isMagnusOnly: z.boolean().default(false),
   questions: z.array(z.object({
     questionId: z.string().uuid(),
     orderIndex: z.number().int().min(0),
@@ -20,4 +21,3 @@ export const examDefinitionSchema = z.object({
     context.addIssue({ code: "custom", message: "An exam cannot contain duplicate questions", path: ["questions"] });
   }
 });
-

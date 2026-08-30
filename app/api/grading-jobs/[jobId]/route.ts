@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { parseRequestValue } from "@/lib/api/request";
 import { uuidSchema } from "@/lib/exams/contracts";
 import { getPersonalProgressionCard, hasPersonalProgressionAccess } from "@/lib/learning/progression";
+import { assertExamAudienceAccess } from "@/lib/exams/access";
 
 function joinedQuestionCategory(row: unknown): string | null {
   if (!row || typeof row !== "object") return null;
@@ -29,7 +30,12 @@ export async function GET(_request: Request, context: { params: Promise<{ jobId:
     if (error || !job) throw new ApiError("GRADING_INCOMPLETE", "Grading job not found", 404);
 
     const { data: profile } = await admin.from("profiles").select("is_admin").eq("id", user.id).single();
-    if (job.requested_by !== user.id && !profile?.is_admin) throw new ApiError("FORBIDDEN", "Forbidden", 403);
+    if (!profile?.is_admin) {
+      await assertExamAudienceAccess({ examId: job.exam_id, userId: user.id });
+      if (job.requested_by !== user.id) {
+        throw new ApiError("GRADING_INCOMPLETE", "Grading job not found", 404);
+      }
+    }
 
     const { data: items, error: itemsError } = await admin
       .from("grading_job_items")

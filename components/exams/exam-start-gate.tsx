@@ -5,16 +5,18 @@ import { AlertTriangle, Clock, Loader2, Play, RefreshCw } from "lucide-react";
 import ExamTakerClient from "@/components/exams/exam-taker-client";
 import type { AttemptStartResponse, Exam, ExamAttemptMode } from "@/lib/types";
 
-function sessionKey(examId: string, mode: ExamAttemptMode) {
-  return `exam-attempt-session:${examId}:${mode}`;
+function sessionKey(userId: string, examId: string, mode: ExamAttemptMode) {
+  return `exam-attempt-session:${userId}:${examId}:${mode}`;
 }
 
 export default function ExamStartGate({
   exam,
+  userId,
   mode,
   hasResumableAttempt = false,
 }: {
   exam: Exam;
+  userId: string;
   mode: ExamAttemptMode;
   hasResumableAttempt?: boolean;
 }) {
@@ -29,7 +31,7 @@ export default function ExamStartGate({
     try {
       let stored: { attemptId: string; writerToken: string } | null = null;
       try {
-        stored = JSON.parse(sessionStorage.getItem(sessionKey(exam.id, mode)) ?? "null");
+        stored = JSON.parse(sessionStorage.getItem(sessionKey(userId, exam.id, mode)) ?? "null");
       } catch {
         stored = null;
       }
@@ -40,7 +42,7 @@ export default function ExamStartGate({
         const takeoverData = await takeoverResponse.json();
         if (!takeoverResponse.ok) throw new Error(takeoverData.error ?? "Takeover failed");
         stored = { attemptId: activeAttemptId, writerToken: takeoverData.writerToken };
-        sessionStorage.setItem(sessionKey(exam.id, mode), JSON.stringify(stored));
+        sessionStorage.setItem(sessionKey(userId, exam.id, mode), JSON.stringify(stored));
       }
 
       const response = await fetch(`/api/exams/${exam.id}/attempts/start`, {
@@ -57,7 +59,7 @@ export default function ExamStartGate({
       }
 
       sessionStorage.setItem(
-        sessionKey(exam.id, mode),
+        sessionKey(userId, exam.id, mode),
         JSON.stringify({ attemptId: data.attempt.id, writerToken: data.writerToken }),
       );
       setStarted(data as AttemptStartResponse);

@@ -33,6 +33,12 @@ import {
   STANDALONE_SESSION_KEY,
   STANDALONE_SESSION_UPDATED_EVENT,
 } from "@/lib/exams/standalone-session";
+import {
+  IN_PROGRESS_EXAM_KEY,
+  IN_PROGRESS_EXAM_UPDATED_EVENT,
+  clearExamBrowserStateOnSignOut,
+  parseOwnedInProgressExam,
+} from "@/lib/exams/in-progress-exam";
 
 // ─── Tab Configuration ────────────────────────────────────────────────────
 
@@ -100,13 +106,10 @@ export default function MainShell({
     const checkTimer = () => {
       let active = false;
       try {
-        const savedExam = localStorage.getItem("in_progress_exam");
+        const savedExam = localStorage.getItem(IN_PROGRESS_EXAM_KEY);
         if (savedExam) {
-          const parsed = JSON.parse(savedExam);
-          const examStillActive = parsed?.expiresAt
-            ? Date.now() <= new Date(parsed.expiresAt).getTime() + 3 * 60 * 1000
-            : parsed?.lastUpdatedAt && Date.now() - parsed.lastUpdatedAt <= 3600000;
-          if (parsed && examStillActive) {
+          const parsed = parseOwnedInProgressExam(savedExam, profile.id);
+          if (parsed) {
             setActiveTestState({
               type: "exam",
               id: parsed.examId,
@@ -114,6 +117,8 @@ export default function MainShell({
               isPractice: parsed.isPractice
             });
             active = true;
+          } else {
+            localStorage.removeItem(IN_PROGRESS_EXAM_KEY);
           }
         }
 
@@ -145,11 +150,11 @@ export default function MainShell({
     checkTimer();
     const timerCheckpoint = setInterval(checkTimer, 15_000);
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === STANDALONE_SESSION_KEY || e.key === "in_progress_exam" || e.key === null) checkTimer();
+      if (e.key === STANDALONE_SESSION_KEY || e.key === IN_PROGRESS_EXAM_KEY || e.key === null) checkTimer();
     };
     window.addEventListener("storage", handleStorage);
     window.addEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
-    window.addEventListener("in_progress_exam_updated", checkTimer);
+    window.addEventListener(IN_PROGRESS_EXAM_UPDATED_EVENT, checkTimer);
     
     return () => {
       clearInterval(interval);
@@ -157,9 +162,9 @@ export default function MainShell({
       window.removeEventListener("focus", refreshNotifications);
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
-      window.removeEventListener("in_progress_exam_updated", checkTimer);
+      window.removeEventListener(IN_PROGRESS_EXAM_UPDATED_EVENT, checkTimer);
     };
-  }, [loadNotifications]);
+  }, [loadNotifications, profile.id]);
 
   // State to track if we should show the notification banner
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
@@ -244,6 +249,7 @@ export default function MainShell({
         console.error("Unable to unregister this browser from push notifications", error);
       }
     }
+    clearExamBrowserStateOnSignOut(localStorage, sessionStorage);
     await supabase.auth.signOut();
     router.push("/login");
   }

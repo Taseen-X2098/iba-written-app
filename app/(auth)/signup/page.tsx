@@ -3,9 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Eye, EyeOff, UserPlus, Loader2 } from "lucide-react";
 import { signupSchema } from "@/lib/validation/profile";
+import { signup } from "./actions";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -16,6 +16,7 @@ export default function SignupPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    promoCode: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,23 +38,9 @@ export default function SignupPage() {
 
     setLoading(true);
 
-    const supabase = createClient();
-    const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://iba-written.netlify.app";
-    const { error } = await supabase.auth.signUp({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      options: {
-        data: {
-          name: parsed.data.name,
-          institute: parsed.data.institute,
-          phone: parsed.data.phone || null,
-        },
-        emailRedirectTo: `${SITE_URL}/auth/callback`,
-      },
-    });
-
-    if (error) {
-      setError(error.message);
+    const result = await signup(parsed.data);
+    if (!result.success) {
+      setError(result.error);
       setLoading(false);
       return;
     }
@@ -224,6 +211,32 @@ export default function SignupPage() {
                        focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
                        transition-shadow"
           />
+        </div>
+
+        <div>
+          <label
+            htmlFor="signup-promo-code"
+            className="block text-sm font-medium text-foreground mb-1.5"
+          >
+            Magnus Academy promocode{" "}
+            <span className="text-muted-foreground font-normal">(optional)</span>
+          </label>
+          <input
+            id="signup-promo-code"
+            type="text"
+            value={form.promoCode}
+            onChange={(e) => updateField("promoCode", e.target.value)}
+            placeholder="Enter your promocode"
+            maxLength={100}
+            autoComplete="off"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm
+                       placeholder:text-muted-foreground
+                       focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent
+                       transition-shadow"
+          />
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            A valid code submits your Magnus status for admin approval.
+          </p>
         </div>
 
         {/* Error */}

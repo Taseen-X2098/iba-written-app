@@ -10,6 +10,7 @@ export const signupSchema = profileFieldsSchema.extend({
   email: z.string().trim().email("Enter a valid email address").max(320),
   password: z.string().min(6, "Password must be at least 6 characters").max(128, "Password is too long"),
   confirmPassword: z.string(),
+  promoCode: z.string().trim().max(100, "Promocode is too long").optional().default(""),
 }).superRefine((value, context) => {
   if (value.password !== value.confirmPassword) {
     context.addIssue({ code: "custom", path: ["confirmPassword"], message: "Passwords do not match" });

@@ -33,6 +33,7 @@ describe('Redis Cache Client', () => {
   it('should expose correct Cache TTL constants', () => {
     expect(CacheTTL.LEADERBOARD).toBe(3600);
     expect(CacheTTL.TEST_DRAFT).toBe(172800);
+    expect(CacheTTL.ATTEMPT).toBe(259200);
   });
 
   it('should support del in memory fallback', async () => {

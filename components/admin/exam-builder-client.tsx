@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown } from "lucide-react";
+import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown, BadgeCheck } from "lucide-react";
 import type { Question, QuestionCategory, Difficulty } from "@/lib/types";
 import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "@/lib/types";
 import { STORY_COMPLETION_MARKS } from "@/lib/questions/story-completion";
@@ -17,6 +17,7 @@ interface Props {
     startsAt: string;
     endsAt: string;
     isPublished: boolean;
+    isMagnusOnly: boolean;
     questions: { q: Question; marks: number }[];
   };
   locked?: boolean;
@@ -36,6 +37,7 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
   const [timeLimit, setTimeLimit] = useState(initialExam?.timeLimitMinutes ?? 30);
   const [startsAt, setStartsAt] = useState(toLocalInput(initialExam?.startsAt));
   const [endsAt, setEndsAt] = useState(toLocalInput(initialExam?.endsAt));
+  const [isMagnusOnly, setIsMagnusOnly] = useState(initialExam?.isMagnusOnly ?? false);
   
   // Selected questions with order and marks
   const [selectedQuestions, setSelectedQuestions] = useState<{q: Question, marks: number}[]>(initialExam?.questions ?? []);
@@ -120,6 +122,7 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
           startsAt: new Date(startsAt).toISOString(),
           endsAt: new Date(endsAt).toISOString(),
           isPublished: initialExam?.isPublished || publish,
+          isMagnusOnly,
           questions: finalQuestions
         })
       });
@@ -342,6 +345,21 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
               Total marks: {selectedQuestions.reduce((sum, item) => sum + item.marks, 0)}
             </p>
           </div>
+          <label className={`mt-5 flex items-start gap-3 rounded-xl border p-3 ${initialExam?.isPublished ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
+            <input
+              type="checkbox"
+              checked={isMagnusOnly}
+              onChange={(event) => setIsMagnusOnly(event.target.checked)}
+              disabled={locked || initialExam?.isPublished}
+              className="mt-1"
+            />
+            <span>
+              <span className="flex items-center gap-1.5 text-sm font-semibold"><BadgeCheck size={15} className="text-brand-600" /> Magnus students only</span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Completely hidden from normal and pending students. Audience is locked after first publication.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 space-y-3">

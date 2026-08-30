@@ -2,6 +2,9 @@
 
 export type PlanType = "plan_1" | "plan_2" | "plan_3";
 
+export type MagnusMembershipStatus = "pending" | "approved";
+export type MagnusMembershipSource = "promo" | "admin";
+
 export type QuestionCategory =
   | "argumentative_essay"
   | "basic_paragraph"
@@ -49,6 +52,17 @@ export interface Profile {
   tips_enabled: boolean;
   is_admin: boolean;
   last_active_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MagnusMembership {
+  user_id: string;
+  status: MagnusMembershipStatus;
+  source: MagnusMembershipSource;
+  requested_at: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -115,6 +129,7 @@ export interface Exam {
   is_published: boolean;
   results_published: boolean;
   results_version: number;
+  is_magnus_only: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;

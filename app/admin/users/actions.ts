@@ -1,7 +1,7 @@
 "use server";
 
-import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { sendPlanActivatedEmail, sendSlotsAddedEmail } from "@/lib/email/brevo";
 import type { PlanType } from "@/lib/types";
@@ -30,12 +30,102 @@ async function verifyAdmin() {
 
   const { data: profile } = await supabase.from("profiles").select("is_admin").eq("id", user.id).single();
   if (!profile?.is_admin) throw new Error("Forbidden: Admin access required");
+  return { supabase, user };
 }
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseAdmin = createAdminClient();
+
+const magnusApprovalInputSchema = z.array(userIdSchema).min(1).max(2_000);
+
+export async function approveMagnusStudents(userIds: string[]) {
+  try {
+    const { supabase } = await verifyAdmin();
+    const parsed = magnusApprovalInputSchema.safeParse(userIds);
+    if (!parsed.success) throw new Error(validationError(parsed.error));
+    const deduplicated = [...new Set(parsed.data)];
+    if (deduplicated.length > 500) throw new Error("Select no more than 500 students at once");
+
+    // Use the signed-in server client so the SECURITY DEFINER RPC can verify
+    // auth.uid(); entitlement changes remain atomic inside the database.
+    const { data, error } = await supabase.rpc("approve_magnus_students", {
+      p_user_ids: deduplicated,
+    });
+    if (error) throw error;
+
+    const newlyApproved = (data ?? []).map((row: { approved_user_id: string }) => row.approved_user_id);
+    revalidatePath("/admin/users");
+    return {
+      success: true as const,
+      newlyApproved,
+      alreadyApproved: deduplicated.filter((userId) => !newlyApproved.includes(userId)),
+    };
+  } catch (error: unknown) {
+    return { success: false as const, error: errorMessage(error) };
+  }
+}
+
+export async function retryMagnusWelcomeEmail(userId: string) {
+  try {
+    await verifyAdmin();
+    const parsedUserId = userIdSchema.safeParse(userId);
+    if (!parsedUserId.success) throw new Error(validationError(parsedUserId.error));
+
+    const { data: membership, error: membershipError } = await supabaseAdmin
+      .from("magnus_memberships")
+      .select("status")
+      .eq("user_id", parsedUserId.data)
+      .maybeSingle();
+    if (membershipError) throw membershipError;
+    if (membership?.status !== "approved") throw new Error("Student is not an approved Magnus student");
+
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from("retention_notification_jobs")
+      .select("id, status")
+      .eq("user_id", parsedUserId.data)
+      .eq("kind", "magnus_approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (jobError) throw jobError;
+    if (!job) {
+      const { error: insertError } = await supabaseAdmin
+        .from("retention_notification_jobs")
+        .insert({
+          user_id: parsedUserId.data,
+          kind: "magnus_approved",
+          event_key: `magnus-approved:${parsedUserId.data}`,
+          scheduled_for: new Date().toISOString(),
+          requires_email: true,
+          next_attempt_at: new Date().toISOString(),
+        });
+      if (insertError) throw insertError;
+      revalidatePath("/admin/users");
+      return { success: true as const };
+    }
+    if (!["failed", "cancelled"].includes(job.status)) {
+      throw new Error("There is no failed Magnus welcome email to requeue");
+    }
+
+    const { error } = await supabaseAdmin
+      .from("retention_notification_jobs")
+      .update({
+        status: "queued",
+        attempt_count: 0,
+        claimed_by: null,
+        claimed_at: null,
+        next_attempt_at: new Date().toISOString(),
+        last_error: null,
+        completed_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+    if (error) throw error;
+    revalidatePath("/admin/users");
+    return { success: true as const };
+  } catch (error: unknown) {
+    return { success: false as const, error: errorMessage(error) };
+  }
+}
 
 export async function adminActivateSubscription(userId: string, planType: string) {
   try {

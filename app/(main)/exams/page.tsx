@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Clock, FileText, Lock, ChevronRight, Trophy } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import type { Exam } from "@/lib/types";
 import { getMainUserContext } from "@/lib/main-user-context";
 
@@ -103,7 +104,10 @@ export default async function StudentExamsPage() {
                   </div>
                 )}
 
-                <h3 className="text-lg font-bold text-foreground mb-2 pr-16">{exam.title}</h3>
+                <div className="mb-2 flex items-center gap-3 pr-16">
+                  {exam.is_magnus_only && <MagnusExamLogo />}
+                  <h3 className="text-lg font-bold text-foreground">{exam.title}</h3>
+                </div>
                 {exam.description && (
                   <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
                 )}
@@ -204,7 +208,10 @@ export default async function StudentExamsPage() {
                   </div>
                 </div>
 
-                <h3 className="text-lg font-bold text-foreground mb-2 pr-16">{exam.title}</h3>
+                <div className="mb-2 flex items-center gap-3 pr-16">
+                  {exam.is_magnus_only && <MagnusExamLogo />}
+                  <h3 className="text-lg font-bold text-foreground">{exam.title}</h3>
+                </div>
                 {exam.description && (
                   <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
                 )}
@@ -252,5 +259,13 @@ function CalendarIcon({ size, className }: { size: number, className?: string })
       <line x1="8" x2="8" y1="2" y2="6"/>
       <line x1="3" x2="21" y1="10" y2="10"/>
     </svg>
+  );
+}
+
+function MagnusExamLogo() {
+  return (
+    <span className="flex h-12 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-900 p-1" title="Magnus Academy exam">
+      <Image src="/magnus/magnus-transparent.png" alt="Magnus Academy" width={28} height={44} className="h-10 w-auto object-contain" />
+    </span>
   );
 }

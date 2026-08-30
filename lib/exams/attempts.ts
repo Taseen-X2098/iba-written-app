@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
 import { getWordLimitViolation } from "@/lib/answers/word-limit";
+import { assertExamAudienceAccess } from "@/lib/exams/access";
 import type {
   AttemptDrafts,
   AttemptQuestion,
@@ -108,6 +109,7 @@ export async function getAttempt(attemptId: string, userId?: string) {
 
 export async function requireAttemptWriter(attemptId: string, userId: string, token: string) {
   const attempt = await getAttempt(attemptId, userId);
+  await assertExamAudienceAccess({ examId: attempt.exam_id, userId });
   if (!writerTokenMatches(token, attempt.writer_token_hash)) {
     throw new ApiError(
       "WRITER_REVOKED",
@@ -135,6 +137,11 @@ export async function startAttempt(input: {
 
   if (examError || !examData) throw new ApiError("EXAM_NOT_FOUND", "Exam not found", 404);
   const exam = examData as Exam;
+  await assertExamAudienceAccess({
+    examId: input.examId,
+    userId: input.userId,
+    isMagnusOnly: (examData as { is_magnus_only?: boolean }).is_magnus_only === true,
+  });
   const now = Date.now();
   const startsAt = new Date(exam.starts_at).getTime();
   const endsAt = new Date(exam.ends_at).getTime();
@@ -224,6 +231,8 @@ export async function startAttempt(input: {
 
 export async function takeOverAttempt(attemptId: string, userId: string) {
   const admin = await createAdminClient();
+  const existing = await getAttempt(attemptId, userId);
+  await assertExamAudienceAccess({ examId: existing.exam_id, userId });
   const writerToken = createWriterToken();
   const { data, error } = await admin.rpc("take_over_exam_attempt", {
     p_attempt_id: attemptId,

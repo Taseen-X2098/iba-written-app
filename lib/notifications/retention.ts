@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { sendSubscriptionRetentionEmail } from "@/lib/email/brevo";
+import { sendMagnusApprovedEmail, sendSubscriptionRetentionEmail } from "@/lib/email/brevo";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CATEGORY_LABELS, type NotificationType, type QuestionCategory } from "@/lib/types";
 
@@ -8,7 +8,7 @@ const MAX_ATTEMPTS = 8;
 type RetentionJobKind = Extract<
   NotificationType,
   "practice_reminder" | "exam_reminder" | "subscription_expiring" | "subscription_lapsed"
->;
+> | "magnus_approved";
 
 type RetentionJob = {
   id: string;
@@ -221,6 +221,22 @@ async function buildJobCopy(job: RetentionJob): Promise<RetentionCopy | null> {
   if (profileError) throw profileError;
   if (!profile) return null;
 
+  if (job.kind === "magnus_approved") {
+    const { data: membership, error: membershipError } = await admin
+      .from("magnus_memberships")
+      .select("status")
+      .eq("user_id", job.user_id)
+      .maybeSingle();
+    if (membershipError) throw membershipError;
+    if (membership?.status !== "approved") return null;
+    return {
+      title: "Welcome to IBA Written",
+      message: "You have been approved as magnus student with our Full Preparation plan.",
+      details: null,
+      actionUrl: "/exams",
+    };
+  }
+
   if (job.kind === "practice_reminder") {
     if (!await hasLivePlan(job.user_id, ["plan_1", "plan_2"])) return null;
     const { data: hooks, error } = await admin
@@ -244,11 +260,21 @@ async function buildJobCopy(job: RetentionJob): Promise<RetentionCopy | null> {
     if (!job.exam_id || !await hasLivePlan(job.user_id, ["plan_2", "plan_3"])) return null;
     const { data: exam, error } = await admin
       .from("exams")
-      .select("title, starts_at, ends_at, time_limit_minutes, is_published")
+      .select("title, starts_at, ends_at, time_limit_minutes, is_published, is_magnus_only")
       .eq("id", job.exam_id)
       .maybeSingle();
     if (error) throw error;
     if (!exam?.is_published || new Date(exam.ends_at).getTime() <= Date.now()) return null;
+    if (exam.is_magnus_only) {
+      const { data: membership, error: membershipError } = await admin
+        .from("magnus_memberships")
+        .select("user_id")
+        .eq("user_id", job.user_id)
+        .eq("status", "approved")
+        .maybeSingle();
+      if (membershipError) throw membershipError;
+      if (!membership) return null;
+    }
     const startTime = new Intl.DateTimeFormat("en-GB", {
       day: "numeric",
       month: "short",
@@ -371,22 +397,26 @@ async function processJob(job: RetentionJob) {
       return "cancelled" as const;
     }
 
-    const notificationId = job.notification_id ?? await ensureNotification(job, copy);
     const admin = createAdminClient();
-    const { error: linkError } = await admin
-      .from("retention_notification_jobs")
-      .update({ notification_id: notificationId, updated_at: new Date().toISOString() })
-      .eq("id", job.id);
-    if (linkError) throw linkError;
+    if (job.kind !== "magnus_approved") {
+      const notificationId = job.notification_id ?? await ensureNotification(job, copy);
+      const { error: linkError } = await admin
+        .from("retention_notification_jobs")
+        .update({ notification_id: notificationId, updated_at: new Date().toISOString() })
+        .eq("id", job.id);
+      if (linkError) throw linkError;
+    }
 
     let emailSentAt = job.email_sent_at;
     if (job.requires_email && !emailSentAt) {
-      const outcome = await sendSubscriptionRetentionEmail(job.user_id, {
-        subject: "Your personal IBA Written progress plan is waiting",
-        title: copy.title,
-        message: copy.message,
-        details: copy.details ?? copy.message,
-      });
+      const outcome = job.kind === "magnus_approved"
+        ? await sendMagnusApprovedEmail(job.user_id)
+        : await sendSubscriptionRetentionEmail(job.user_id, {
+            subject: "Your personal IBA Written progress plan is waiting",
+            title: copy.title,
+            message: copy.message,
+            details: copy.details ?? copy.message,
+          });
       if (!outcome.delivered) {
         throw new Error(outcome.skipped
           ? "Brevo retention email is not configured"

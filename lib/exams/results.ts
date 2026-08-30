@@ -14,6 +14,7 @@ export type LeaderboardRow = {
   total_score: number;
   max_score: number;
   rank: number;
+  percentage: number;
 };
 
 export async function getPublishedExamResults(examId: string, userId: string, page: number) {
@@ -29,33 +30,70 @@ export async function getPublishedExamResults(examId: string, userId: string, pa
   const safePage = Number.isInteger(page) && page > 0 ? page : 1;
   const redis = getRedis();
   const cacheKey = CacheKeys.leaderboard(examId, exam.results_version, safePage);
-  let cached = await redis.get<{ rows: LeaderboardRow[]; totalCount: number }>(cacheKey);
+  let cached = await redis.get<{ rows: LeaderboardRow[]; totalCount: number; resultsVersion?: number }>(cacheKey);
+  if (cached && safePage > 1 && cached.totalCount === 0) cached = null;
   if (!cached) {
-    const { data, error } = await supabase.rpc("get_published_leaderboard", {
+    const { data, error } = await supabase.rpc("get_published_leaderboard_page", {
       p_exam_id: examId,
       p_page: safePage,
       p_page_size: 100,
     });
-    if (error) throw error;
-    const raw = data ?? [];
+    if (error) {
+      if (error.message.includes("INVALID_PAGE")) {
+        throw new ApiError("VALIDATION_ERROR", "Leaderboard page is out of range", 404);
+      }
+      if (error.message.includes("EXAM_NOT_FOUND")) {
+        throw new ApiError("EXAM_NOT_FOUND", "Exam not found", 404);
+      }
+      throw error;
+    }
+    const pageData = (data ?? {}) as {
+      rows?: Array<Record<string, unknown>>;
+      total_count?: number | string;
+      results_version?: number | string;
+    };
+    const raw = pageData.rows ?? [];
     cached = {
-      rows: raw.map((row: any) => ({
-        user_id: row.user_id,
-        student_name: row.student_name,
-        institute: row.institute,
+      rows: raw.map((row) => ({
+        user_id: String(row.user_id),
+        student_name: String(row.student_name ?? "Student"),
+        institute: String(row.institute ?? ""),
         total_score: Number(row.total_score),
         max_score: Number(row.max_score),
         rank: Number(row.rank),
+        percentage: Number(row.percentage ?? (Number(row.max_score) > 0 ? Number(row.total_score) * 100 / Number(row.max_score) : 0)),
       })),
-      totalCount: Number(raw[0]?.total_count ?? 0),
+      totalCount: Number(pageData.total_count ?? 0),
+      resultsVersion: Number(pageData.results_version ?? exam.results_version),
     };
-    await redis.set(cacheKey, cached, { ex: CacheTTL.LEADERBOARD });
+    await redis.set(
+      CacheKeys.leaderboard(examId, cached.resultsVersion ?? exam.results_version, safePage),
+      cached,
+      { ex: CacheTTL.LEADERBOARD },
+    );
   }
 
   const totalPages = Math.max(1, Math.ceil(cached.totalCount / 100));
   if (cached.totalCount > 0 && safePage > totalPages) {
     throw new ApiError("VALIDATION_ERROR", "Leaderboard page is out of range", 404);
   }
+
+  const { data: officialAttempt } = await supabase
+    .from("exam_attempts")
+    .select("id")
+    .eq("exam_id", examId)
+    .eq("user_id", userId)
+    .eq("mode", "official")
+    .eq("status", "finalized")
+    .maybeSingle();
+  let detailsQuery = supabase
+    .from("exam_submissions")
+    .select("id, edited_text, grading_result, question_id, exam_questions(marks, order_index, questions(prompt, category))")
+    .eq("exam_id", examId)
+    .eq("user_id", userId);
+  detailsQuery = officialAttempt
+    ? detailsQuery.eq("attempt_id", officialAttempt.id)
+    : detailsQuery.is("attempt_id", null);
 
   const [{ data: myResult }, { data: details, error: detailsError }] = await Promise.all([
     supabase
@@ -64,11 +102,7 @@ export async function getPublishedExamResults(examId: string, userId: string, pa
       .eq("exam_id", examId)
       .eq("user_id", userId)
       .maybeSingle(),
-    supabase
-      .from("exam_submissions")
-      .select("id, edited_text, grading_result, question_id, exam_questions(marks, order_index, questions(prompt, category))")
-      .eq("exam_id", examId)
-      .eq("user_id", userId),
+    detailsQuery,
   ]);
   if (detailsError) throw detailsError;
 
