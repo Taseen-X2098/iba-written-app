@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -22,7 +23,7 @@ import {
   Lock,
   TrendingUp,
 } from "lucide-react";
-import type { Profile, Subscription } from "@/lib/types";
+import type { MagnusMembershipStatus, Profile, Subscription } from "@/lib/types";
 import { messaging } from "@/lib/firebase";
 import { getToken, onMessage } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
@@ -68,17 +69,20 @@ export default function MainShell({
   initialProfile,
   initialSubscription,
   initialUnreadCount,
+  initialMagnusStatus,
 }: {
   children: React.ReactNode;
   initialProfile: Profile;
   initialSubscription: Subscription | null;
   initialUnreadCount: number;
+  initialMagnusStatus: MagnusMembershipStatus | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidenavOpen, setSidenavOpen] = useState(false);
   const profile = initialProfile;
   const subscription = initialSubscription;
+  const isApprovedMagnusStudent = initialMagnusStatus === "approved";
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
 
   const [activeTestState, setActiveTestState] = useState<{ type: "test" | "exam", id: string, title: string, isPractice?: boolean } | null>(null);
@@ -290,7 +294,7 @@ export default function MainShell({
           </div>
         )}
 
-        <CurrentPlanIndicator planName={usageInfo.label} />
+        <CurrentPlanIndicator planName={usageInfo.label} isApprovedMagnusStudent={isApprovedMagnusStudent} />
 
         {/* Nav Links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
@@ -443,7 +447,11 @@ export default function MainShell({
           </div>
         )}
 
-        <CurrentPlanIndicator planName={usageInfo.label} onClick={() => setSidenavOpen(false)} />
+        <CurrentPlanIndicator
+          planName={usageInfo.label}
+          isApprovedMagnusStudent={isApprovedMagnusStudent}
+          onClick={() => setSidenavOpen(false)}
+        />
 
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {SIDENAV_LINKS.map((link) => {
@@ -664,26 +672,53 @@ export default function MainShell({
 
 function CurrentPlanIndicator({
   planName,
+  isApprovedMagnusStudent,
   onClick,
 }: {
   planName: string;
+  isApprovedMagnusStudent: boolean;
   onClick?: () => void;
 }) {
+  const magnus = isApprovedMagnusStudent;
   return (
     <Link
       href="/subscription"
       prefetch={false}
       onClick={onClick}
-      className="mx-3 mt-3 flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2.5 text-brand-800 transition-colors hover:bg-brand-100"
+      className={`mx-3 mt-3 flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
+        magnus
+          ? "border-[#900304]/30 bg-[#900304]/5 text-[#900304] hover:bg-[#900304]/10"
+          : "border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100"
+      }`}
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
-        <Crown size={16} aria-hidden="true" />
+      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+        magnus ? "border border-[#900304]/20 bg-white p-1" : "bg-brand-600 text-white"
+      }`}>
+        {magnus ? (
+          <Image
+            src="/magnus/magnus-transparent.png"
+            alt="Magnus Academy"
+            width={24}
+            height={24}
+            className="h-6 w-6 object-contain"
+          />
+        ) : (
+          <Crown size={16} aria-hidden="true" />
+        )}
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-brand-600">Current plan</p>
+        <p className={`text-[10px] font-semibold uppercase tracking-wider ${
+          magnus ? "text-[#900304]" : "text-brand-600"
+        }`}>
+          {magnus ? "Plan Magnus" : "Current plan"}
+        </p>
         <p className="truncate text-sm font-bold">{planName}</p>
       </div>
-      <ChevronRight size={16} className="ml-auto shrink-0 text-brand-600" aria-hidden="true" />
+      <ChevronRight
+        size={16}
+        className={`ml-auto shrink-0 ${magnus ? "text-[#900304]" : "text-brand-600"}`}
+        aria-hidden="true"
+      />
     </Link>
   );
 }

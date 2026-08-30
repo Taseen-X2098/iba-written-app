@@ -1,6 +1,6 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, Trophy } from "lucide-react";
 import PublishResultsButton from "./PublishResultsButton";
 import { ForceGradeButton } from "../../ForceGradeButton";
 import { listExpiredOfficialAttempts } from "@/lib/exams/finalize";
@@ -119,12 +119,20 @@ export default async function AdminExamSubmissionsPage({
           </p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <ForceGradeButton examId={id} />
           {exam.results_published && (
-            <div className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
-              <CheckCircle size={16} /> Results Published
-            </div>
+            <>
+              <div className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
+                <CheckCircle size={16} /> Results Published
+              </div>
+              <Link
+                href={`/admin/exams/${id}/leaderboard`}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-100 px-4 py-2 text-sm font-bold text-amber-800 transition-colors hover:bg-amber-200"
+              >
+                <Trophy size={16} /> View Leaderboard
+              </Link>
+            </>
           )}
           <PublishResultsButton
             examId={id}

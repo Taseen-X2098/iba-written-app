@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Plus, Clock, FileText, BadgeCheck } from "lucide-react";
+import { Plus, Clock, FileText, BadgeCheck, Trophy } from "lucide-react";
 import type { Exam } from "@/lib/types";
 import { ForceGradeButton } from "./ForceGradeButton";
 import { ExtendTimerButton } from "./ExtendTimerButton";
@@ -96,6 +96,14 @@ export default async function AdminExamsPage() {
                       <Link href={`/admin/exams/${exam.id}/submissions`} className="text-brand-600 font-medium hover:underline text-sm">
                         Submissions
                       </Link>
+                      {exam.results_published && (
+                        <Link
+                          href={`/admin/exams/${exam.id}/leaderboard`}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-amber-100 px-2.5 py-1.5 text-sm font-bold text-amber-800 transition-colors hover:bg-amber-200"
+                        >
+                          <Trophy size={14} /> Leaderboard
+                        </Link>
+                      )}
                       <div className="flex justify-end gap-2 mt-1">
                         <ExtendTimerButton examId={exam.id} />
                         <ForceGradeButton examId={exam.id} />

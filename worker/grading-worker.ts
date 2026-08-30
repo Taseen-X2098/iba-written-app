@@ -78,9 +78,17 @@ createServer((request, response) => {
       response.end("Unauthorized");
       return;
     }
+    // A single authenticated wake drains every durable background queue. This
+    // lets user-facing mutations (including Magnus approval) trigger delivery
+    // immediately while the polling interval remains a reliability fallback.
     void wake();
+    void wakeRetention();
     response.writeHead(202, { "content-type": "application/json" });
-    response.end(JSON.stringify({ accepted: true, running: true }));
+    response.end(JSON.stringify({
+      accepted: true,
+      gradingRunning: true,
+      retentionRunning: true,
+    }));
     return;
   }
   response.writeHead(404);

@@ -4,6 +4,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { sendPlanActivatedEmail, sendSlotsAddedEmail } from "@/lib/email/brevo";
+import { wakeGradingWorker } from "@/lib/grading/jobs";
 import type { PlanType } from "@/lib/types";
 import { z } from "zod";
 
@@ -37,6 +38,15 @@ const supabaseAdmin = createAdminClient();
 
 const magnusApprovalInputSchema = z.array(userIdSchema).min(1).max(2_000);
 
+async function wakeMagnusEmailWorker() {
+  const woke = await wakeGradingWorker();
+  if (!woke) {
+    // The durable queue and periodic worker poll still guarantee retries, but
+    // this warning makes a missing worker URL/secret visible in web logs.
+    console.warn("Magnus welcome email queued, but the background worker could not be woken immediately.");
+  }
+}
+
 export async function approveMagnusStudents(userIds: string[]) {
   try {
     const { supabase } = await verifyAdmin();
@@ -53,6 +63,7 @@ export async function approveMagnusStudents(userIds: string[]) {
     if (error) throw error;
 
     const newlyApproved = (data ?? []).map((row: { approved_user_id: string }) => row.approved_user_id);
+    if (newlyApproved.length > 0) await wakeMagnusEmailWorker();
     revalidatePath("/admin/users");
     return {
       success: true as const,
@@ -99,6 +110,7 @@ export async function retryMagnusWelcomeEmail(userId: string) {
           next_attempt_at: new Date().toISOString(),
         });
       if (insertError) throw insertError;
+      await wakeMagnusEmailWorker();
       revalidatePath("/admin/users");
       return { success: true as const };
     }
@@ -120,6 +132,7 @@ export async function retryMagnusWelcomeEmail(userId: string) {
       })
       .eq("id", job.id);
     if (error) throw error;
+    await wakeMagnusEmailWorker();
     revalidatePath("/admin/users");
     return { success: true as const };
   } catch (error: unknown) {

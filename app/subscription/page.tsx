@@ -31,6 +31,7 @@ export default async function SubscriptionPage({
       initialProfile={context.profile}
       initialSubscription={context.subscription}
       initialUnreadCount={context.unreadCount}
+      initialMagnusStatus={context.magnusStatus}
     >
       {subscriptionPage}
     </MainShell>

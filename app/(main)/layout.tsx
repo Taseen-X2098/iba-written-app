@@ -11,6 +11,7 @@ export default async function MainLayout({ children }: { children: React.ReactNo
       initialProfile={context.profile}
       initialSubscription={context.subscription}
       initialUnreadCount={context.unreadCount}
+      initialMagnusStatus={context.magnusStatus}
     >
       {children}
     </MainShell>

@@ -5,8 +5,10 @@ jest.mock("@/lib/email/brevo", () => ({
 }));
 jest.mock("@/lib/supabase/server", () => ({ createClient: jest.fn() }));
 jest.mock("@/lib/supabase/admin", () => ({ createAdminClient: jest.fn() }));
+jest.mock("@/lib/grading/jobs", () => ({ wakeGradingWorker: jest.fn() }));
 
 import { createClient } from "@/lib/supabase/server";
+import { wakeGradingWorker } from "@/lib/grading/jobs";
 import { approveMagnusStudents } from "./actions";
 
 const USER_1 = "40000000-0000-4000-8000-000000000001";
@@ -30,6 +32,7 @@ function signedInClient(options?: { admin?: boolean; rpcData?: unknown[] }) {
 describe("Magnus admin approval action", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(wakeGradingWorker).mockResolvedValue(true);
   });
 
   it("deduplicates UUIDs before the atomic approval RPC", async () => {
@@ -43,6 +46,19 @@ describe("Magnus admin approval action", () => {
     expect(client.rpc).toHaveBeenCalledWith("approve_magnus_students", {
       p_user_ids: [USER_1],
     });
+    expect(wakeGradingWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wake the email worker when every selected student was already approved", async () => {
+    const client = signedInClient({ rpcData: [] });
+    jest.mocked(createClient).mockResolvedValue(client as unknown as Awaited<ReturnType<typeof createClient>>);
+
+    await expect(approveMagnusStudents([USER_1])).resolves.toEqual({
+      success: true,
+      newlyApproved: [],
+      alreadyApproved: [USER_1],
+    });
+    expect(wakeGradingWorker).not.toHaveBeenCalled();
   });
 
   it("rejects a non-admin before calling the approval RPC", async () => {
