@@ -1,10 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { adminMessaging } from "@/lib/firebase-admin";
-import { createClient } from "@supabase/supabase-js"; // Use pure supabase-js to bypass auth context for webhooks
 import { z } from "zod";
 import { parseJsonRequest, parseRequestValue } from "@/lib/api/request";
 import { ApiError, apiErrorResponse } from "@/lib/api/errors";
+import { deliverPushNotification } from "@/lib/notifications/push";
 
 const webhookEnvelopeSchema = z.object({
   type: z.string().max(30),
@@ -30,11 +29,6 @@ const notificationRecordSchema = z.object({
   message: z.string().trim().min(1).max(4_000),
   action_url: z.string().trim().max(500).regex(/^\/(?!\/)/).nullable().optional(),
 });
-
-const PERMANENT_FCM_ERRORS = new Set([
-  "messaging/registration-token-not-registered",
-  "messaging/invalid-registration-token",
-]);
 
 function hasValidWebhookSecret(request: NextRequest, expectedSecret: string) {
   const suppliedSecret = request.headers.get("x-supabase-signature");
@@ -65,86 +59,26 @@ export async function POST(req: NextRequest) {
     
     // Payload from Supabase Webhook (INSERT on notifications table)
     if (payload.type === "INSERT" && payload.table === "notifications") {
-      const { id, user_id, exam_id, type, title, message, action_url } = parseRequestValue(
+      const notification = parseRequestValue(
         notificationRecordSchema,
         payload.record,
         "Invalid notification record",
       );
 
-      // 2. Fetch the user's FCM tokens
-      // We use the service_role key to bypass RLS since this is a server-to-server request
-      const supabaseAdmin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
+      // Result pushes are sent by the authenticated publication route together
+      // with the result emails. A webhook delivery for the same inserted row
+      // must not send the same device message twice.
+      if (notification.type === "results_published") {
+        return NextResponse.json({ success: true, delegated: true });
+      }
 
-      const { data: profile, error: profileError } = await supabaseAdmin
-        .from("profiles")
-        .select("fcm_tokens")
-        .eq("id", user_id)
-        .single();
-      if (profileError) throw profileError;
-
-      const tokens = Array.isArray(profile?.fcm_tokens)
-        ? profile.fcm_tokens
-            .filter((token): token is string => typeof token === "string" && token.length > 0 && token.length <= 4_096)
-            .slice(0, 500)
-        : [];
-
-      // 3. Send Push Notification via Firebase Admin
-      if (tokens.length > 0) {
-        const targetUrl = action_url
-          ?? (exam_id && (type === "exam_available" || type === "exam_reminder")
-            ? `/exams/${exam_id}`
-            : exam_id && type === "results_published"
-              ? `/exams/${exam_id}/results`
-              : "/notifications");
-        const messagePayload = {
-          // A data-only payload is displayed exactly once by our service
-          // worker in the background and by MainShell in the foreground.
-          data: {
-            title: title || "IBA Written App",
-            body: message.slice(0, 500),
-            url: targetUrl,
-            tag: id ? `notification:${id}` : `notification:${type ?? "general"}`,
-          },
-          webpush: {
-            headers: { Urgency: "high" },
-          },
-          tokens: tokens,
-        };
-
-        const response = await adminMessaging.sendEachForMulticast(messagePayload);
-        console.log(`[FCM Webhook] Successfully sent ${response.successCount} messages; ${response.failureCount} failed.`);
-        
-        // Remove only permanently invalid tokens. Transient FCM failures must
-        // not silently disable notifications on a healthy browser.
-        if (response.failureCount > 0) {
-          const failedTokens: string[] = [];
-          response.responses.forEach((resp, idx: number) => {
-            if (!resp.success && PERMANENT_FCM_ERRORS.has(resp.error?.code ?? "")) {
-              failedTokens.push(tokens[idx]);
-            }
-          });
-          
-          if (failedTokens.length > 0) {
-            const validTokens = tokens.filter((t: string) => !failedTokens.includes(t));
-            await supabaseAdmin
-              .from("profiles")
-              .update({ fcm_tokens: validTokens })
-              .eq("id", user_id);
-          }
-
-          const transientFailures = response.responses.filter((result) => (
-            !result.success && !PERMANENT_FCM_ERRORS.has(result.error?.code ?? "")
-          )).length;
-          if (transientFailures > 0) {
-            return NextResponse.json(
-              { error: "FCM temporarily failed", transientFailures },
-              { status: 502 },
-            );
-          }
-        }
+      const delivery = await deliverPushNotification(notification);
+      console.log(`[FCM Webhook] Successfully sent ${delivery.delivered} messages; ${delivery.failed} failed.`);
+      if (delivery.transientFailures > 0) {
+        return NextResponse.json(
+          { error: "FCM temporarily failed", transientFailures: delivery.transientFailures },
+          { status: 502 },
+        );
       }
 
       return NextResponse.json({ success: true });

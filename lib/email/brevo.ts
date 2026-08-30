@@ -19,6 +19,11 @@ export type PublishedExamEmailDetails = {
   isMagnusOnly: boolean;
 };
 
+export type PublishedExamResultsEmailDetails = {
+  id: string;
+  title: string;
+};
+
 export type SubscriptionRetentionEmailDetails = {
   subject: string;
   title: string;
@@ -234,6 +239,44 @@ async function getEligibleExamRecipients(isMagnusOnly: boolean) {
   return recipients;
 }
 
+async function getRecipientsByUserIds(userIds: string[]) {
+  const requestedUserIds = new Set(userIds);
+  if (requestedUserIds.size === 0) return [] as Recipient[];
+
+  const supabase = await createAdminClient();
+  const namesByUserId = new Map<string, string>();
+  const ids = [...requestedUserIds];
+  const profileBatchSize = 1_000;
+  for (let index = 0; index < ids.length; index += profileBatchSize) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, name")
+      .in("id", ids.slice(index, index + profileBatchSize));
+    if (error) throw error;
+    for (const profile of data ?? []) {
+      namesByUserId.set(profile.id, profile.name || "there");
+    }
+  }
+
+  const recipients: Recipient[] = [];
+  const pageSize = 1_000;
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: pageSize });
+    if (error) throw error;
+
+    const users = data.users ?? [];
+    for (const user of users) {
+      if (!requestedUserIds.has(user.id) || !user.email) continue;
+      recipients.push({
+        email: user.email,
+        name: namesByUserId.get(user.id) || user.user_metadata?.full_name || "there",
+      });
+    }
+    if (users.length < pageSize) break;
+  }
+  return recipients;
+}
+
 export async function sendExamPublishedEmails(exam: PublishedExamEmailDetails) {
   if (!process.env.BREVO_API_KEY || !process.env.BREVO_SENDER_EMAIL) {
     console.warn("Brevo exam-publication email skipped: set BREVO_API_KEY and BREVO_SENDER_EMAIL to enable email notifications.");
@@ -279,6 +322,52 @@ export async function sendExamPublishedEmails(exam: PublishedExamEmailDetails) {
     return { recipients: recipients.length, delivered, failed, skipped: false };
   } catch (error) {
     console.error("Unable to prepare exam-publication emails:", error);
+    return { recipients: 0, delivered: 0, failed: 0, skipped: false };
+  }
+}
+
+export async function sendExamResultsPublishedEmails(
+  exam: PublishedExamResultsEmailDetails,
+  userIds: string[],
+) {
+  if (!process.env.BREVO_API_KEY || !process.env.BREVO_SENDER_EMAIL) {
+    console.warn("Brevo result-publication email skipped: set BREVO_API_KEY and BREVO_SENDER_EMAIL to enable email notifications.");
+    return { recipients: 0, delivered: 0, failed: 0, skipped: true };
+  }
+
+  try {
+    const recipients = await getRecipientsByUserIds(userIds);
+    const subject = `Results published: ${exam.title}`;
+    const htmlContent = (recipient: Recipient) => emailLayout({
+      preview: `Your results for ${exam.title} are ready to review.`,
+      title: "Your exam results are ready",
+      body: `<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;">Hi ${escapeHtml(recipient.name)},</p>
+<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;">The finalized results for <strong style="color:#15803d;">${escapeHtml(exam.title)}</strong> have been published.</p>
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;color:#166534;font-size:14px;line-height:1.6;margin:20px 0 0;padding:14px 16px;">Review your marks, feedback, and the leaderboard in IBA Written.</div>`,
+      ctaLabel: "View my results",
+      ctaUrl: `${getSiteUrl()}/exams/${exam.id}/results`,
+    });
+
+    let delivered = 0;
+    let failed = 0;
+    const batchSize = 10;
+    for (let index = 0; index < recipients.length; index += batchSize) {
+      const outcomes = await Promise.all(recipients.slice(index, index + batchSize).map(async (recipient) => {
+        try {
+          await sendBrevoEmail(recipient, subject, htmlContent(recipient));
+          return true;
+        } catch (error) {
+          console.error("Unable to send result-publication email:", error);
+          return false;
+        }
+      }));
+      delivered += outcomes.filter(Boolean).length;
+      failed += outcomes.filter((outcome) => !outcome).length;
+    }
+
+    return { recipients: recipients.length, delivered, failed, skipped: false };
+  } catch (error) {
+    console.error("Unable to prepare result-publication emails:", error);
     return { recipients: 0, delivered: 0, failed: 0, skipped: false };
   }
 }

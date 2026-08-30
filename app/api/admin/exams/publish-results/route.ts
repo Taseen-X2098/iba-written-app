@@ -5,6 +5,7 @@ import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse, ApiError } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseJsonRequest } from "@/lib/api/request";
+import { deliverResultPublicationNotifications } from "@/lib/notifications/result-publication";
 
 const schema = z.object({ examId: z.string().uuid() });
 
@@ -34,7 +35,11 @@ export async function POST(request: NextRequest) {
     revalidatePath("/exams");
     revalidatePath("/admin/exams");
     revalidatePath("/admin/grading");
-    return NextResponse.json({ success: true, resultsVersion: version });
+    const delivery = await deliverResultPublicationNotifications({
+      examId: input.examId,
+      resultsVersion: version,
+    });
+    return NextResponse.json({ success: true, resultsVersion: version, delivery });
   } catch (error) {
     return apiErrorResponse(error);
   }

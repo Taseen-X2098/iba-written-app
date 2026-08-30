@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   sendExamPublishedEmails,
+  sendExamResultsPublishedEmails,
   sendMagnusApprovedEmail,
   sendPlanActivatedEmail,
   sendSlotsAddedEmail,
@@ -199,6 +200,48 @@ describe("Brevo account-update emails", () => {
     expect(request.htmlContent).toContain("Deadline:</strong>");
     expect(request.htmlContent).toContain("Duration:</strong> 1 hour 30 minutes");
     expect(request.htmlContent).not.toContain("Question 1");
+  });
+
+  it("emails published results only to the participating users supplied by publication", async () => {
+    const inIds = jest.fn().mockResolvedValue({
+      data: [
+        { id: "participant", name: "Ayesha" },
+        { id: "participant-without-email", name: "Nadia" },
+      ],
+      error: null,
+    });
+    const select = jest.fn().mockReturnValue({ in: inIds });
+    const listUsers = jest.fn().mockResolvedValue({
+      data: {
+        users: [
+          { id: "participant", email: "ayesha@example.com", user_metadata: {} },
+          { id: "participant-without-email", email: null, user_metadata: {} },
+          { id: "not-a-participant", email: "outsider@example.com", user_metadata: {} },
+        ],
+      },
+      error: null,
+    });
+    jest.mocked(createAdminClient).mockReturnValue({
+      auth: { admin: { listUsers } },
+      from: jest.fn().mockReturnValue({ select }),
+    } as unknown as ReturnType<typeof createAdminClient>);
+
+    await expect(sendExamResultsPublishedEmails({
+      id: "10000000-0000-4000-8000-000000000001",
+      title: "Weekly Assessment 1",
+    }, ["participant", "participant-without-email"]))
+      .resolves.toEqual({ recipients: 1, delivered: 1, failed: 0, skipped: false });
+
+    expect(inIds).toHaveBeenCalledWith("id", ["participant", "participant-without-email"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(request).toMatchObject({
+      to: [{ email: "ayesha@example.com", name: "Ayesha" }],
+      subject: "Results published: Weekly Assessment 1",
+    });
+    expect(request.htmlContent).toContain("Your exam results are ready");
+    expect(request.htmlContent).toContain("https://example.com/exams/10000000-0000-4000-8000-000000000001/results");
+    expect(request.htmlContent).not.toContain("outsider@example.com");
   });
 
   it("sends the supplied Magnus welcome copy without a CTA", async () => {

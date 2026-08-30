@@ -143,8 +143,8 @@ effect because the application does not send authentication email directly.
 
 ### 3.3.1 Account-update emails through the Brevo API
 
-Plan activation and test-slot emails are sent directly by the application using
-Brevo's Transactional Email API. Add these variables to the **web** service
+Plan activation, test-slot, exam-start, and result-publication emails are sent
+directly by the application using Brevo's Transactional Email API. Add these variables to the **web** service
 (and to `.env.local` for local development):
 
 ```dotenv
@@ -208,10 +208,13 @@ exam becomes published
   -> inserts notifications for eligible active subscribers
 
 exam results become published
-  -> inserts notifications for participating users
+  -> inserts in-app notifications for participating users
+  -> the authenticated publication route sends those users an FCM push directly
+  -> the same route sends those users a Brevo result email
 
 notifications INSERT
   -> Supabase Database Webhook calls the Railway web service
+  -> result-publication rows are acknowledged because the publication route already delivered them
   -> web service reads that user's profiles.fcm_tokens
   -> Firebase sends a data message
   -> the foreground app or background service worker shows one system notification
@@ -383,6 +386,11 @@ values (
 Verify the webhook received a `2xx` response and inspect Railway web logs. A
 successful webhook may still send no device notification if that profile has no
 valid FCM token.
+
+Result-publication push does not depend on this webhook. It is sent directly by
+the authenticated result-publication route so push and email cannot be omitted
+while only the in-app row is created. The webhook deliberately acknowledges
+`results_published` rows without sending them a second time.
 
 ## 8. Configure the current Google Forms payment flow
 
@@ -645,6 +653,7 @@ Verify all of the following:
 - [ ] A real `notifications` insert produces a successful webhook delivery.
 - [ ] FCM push reaches a registered browser, if push is enabled.
 - [ ] FCM push appears once in the system notification bar with the app open and closed.
+- [ ] Publishing staging exam results sends each participant one system push and one Brevo result email.
 - [ ] Admin Settings can select/edit practice hooks and change reminder timing.
 - [ ] A staging retention cycle creates only one row/job per event after repeated polls.
 - [ ] A five-day post-expiry staging job sends both the notification and Brevo email.

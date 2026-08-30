@@ -2,11 +2,15 @@ import { NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireAdminUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
+import { deliverResultPublicationNotifications } from "@/lib/notifications/result-publication";
 import { POST } from "./route";
 
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 jest.mock("@/lib/auth", () => ({ requireAdminUser: jest.fn() }));
 jest.mock("@/lib/supabase/server", () => ({ createAdminClient: jest.fn() }));
+jest.mock("@/lib/notifications/result-publication", () => ({
+  deliverResultPublicationNotifications: jest.fn(),
+}));
 
 const examId = "40000000-0000-4000-8000-000000000004";
 
@@ -22,6 +26,18 @@ describe("publish-results route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.mocked(requireAdminUser).mockResolvedValue({ id: "admin-id" } as never);
+    jest.mocked(deliverResultPublicationNotifications).mockResolvedValue({
+      recipients: 1,
+      push: {
+        delivered: 1,
+        failed: 0,
+        transientFailures: 0,
+        recipientsWithoutTokens: 0,
+        skipped: 0,
+      },
+      email: { recipients: 1, delivered: 1, failed: 0, skipped: false },
+      preparationFailed: false,
+    });
   });
 
   it("uses the atomic single-publication RPC", async () => {
@@ -31,8 +47,20 @@ describe("publish-results route", () => {
     const response = await POST(request());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ success: true, resultsVersion: 1 });
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      resultsVersion: 1,
+      delivery: {
+        recipients: 1,
+        push: { delivered: 1 },
+        email: { delivered: 1 },
+      },
+    });
     expect(rpc).toHaveBeenCalledWith("publish_exam_results_once", { p_exam_id: examId });
+    expect(deliverResultPublicationNotifications).toHaveBeenCalledWith({
+      examId,
+      resultsVersion: 1,
+    });
     expect(revalidatePath).toHaveBeenCalledWith(`/exams/${examId}/results`);
     expect(revalidatePath).toHaveBeenCalledWith("/exams");
     expect(revalidatePath).toHaveBeenCalledWith("/admin/exams");

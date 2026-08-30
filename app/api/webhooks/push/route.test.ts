@@ -1,22 +1,14 @@
 import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { adminMessaging } from "@/lib/firebase-admin";
+import { deliverPushNotification } from "@/lib/notifications/push";
 import { POST } from "./route";
 
-jest.mock("@supabase/supabase-js", () => ({
-  createClient: jest.fn(),
-}));
-
-jest.mock("@/lib/firebase-admin", () => ({
-  adminMessaging: {
-    sendEachForMulticast: jest.fn(),
-  },
+jest.mock("@/lib/notifications/push", () => ({
+  deliverPushNotification: jest.fn(),
 }));
 
 const WEBHOOK_URL = "http://localhost/api/webhooks/push";
 const WEBHOOK_SECRET = "test-webhook-secret";
-const mockedCreateClient = jest.mocked(createClient);
-const mockedSendEachForMulticast = jest.mocked(adminMessaging.sendEachForMulticast);
+const mockedDeliverPush = jest.mocked(deliverPushNotification);
 
 function makeRequest(options?: { secret?: string; body?: string }) {
   const headers = new Headers({ "content-type": "application/json" });
@@ -35,6 +27,13 @@ describe("push notification webhook authorization", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.SUPABASE_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    mockedDeliverPush.mockResolvedValue({
+      tokens: 0,
+      delivered: 0,
+      failed: 0,
+      transientFailures: 0,
+      skipped: false,
+    });
   });
 
   afterAll(() => {
@@ -53,8 +52,7 @@ describe("push notification webhook authorization", () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "Webhook is not configured" });
-    expect(mockedCreateClient).not.toHaveBeenCalled();
-    expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
+    expect(mockedDeliverPush).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
 
@@ -63,8 +61,7 @@ describe("push notification webhook authorization", () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
-    expect(mockedCreateClient).not.toHaveBeenCalled();
-    expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
+    expect(mockedDeliverPush).not.toHaveBeenCalled();
   });
 
   it("rejects an incorrect secret before parsing the request body", async () => {
@@ -72,18 +69,26 @@ describe("push notification webhook authorization", () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
-    expect(mockedCreateClient).not.toHaveBeenCalled();
-    expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
+    expect(mockedDeliverPush).not.toHaveBeenCalled();
   });
 
-  it("accepts the configured secret and processes a notification payload", async () => {
-    const single = jest.fn().mockResolvedValue({ data: { fcm_tokens: [] } });
-    const eq = jest.fn().mockReturnValue({ single });
-    const select = jest.fn().mockReturnValue({ eq });
-    const from = jest.fn().mockReturnValue({ select });
-    mockedCreateClient.mockReturnValue(
-      { from } as unknown as ReturnType<typeof createClient>,
-    );
+  it("accepts the configured secret and delivers a notification payload", async () => {
+    const record = {
+      id: "30000000-0000-4000-8000-000000000003",
+      user_id: "10000000-0000-4000-8000-000000000001",
+      exam_id: "20000000-0000-4000-8000-000000000002",
+      type: "exam_available",
+      title: "New Weekly Exam!",
+      message: "A new exam is available.",
+      action_url: "/exams/20000000-0000-4000-8000-000000000002",
+    };
+    mockedDeliverPush.mockResolvedValue({
+      tokens: 1,
+      delivered: 1,
+      failed: 0,
+      transientFailures: 0,
+      skipped: false,
+    });
 
     const response = await POST(makeRequest({
       secret: WEBHOOK_SECRET,
@@ -91,85 +96,16 @@ describe("push notification webhook authorization", () => {
         type: "INSERT",
         schema: "public",
         table: "notifications",
-        record: {
-          user_id: "10000000-0000-4000-8000-000000000001",
-          title: "Test notification",
-          message: "Webhook authorization works.",
-        },
+        record,
       }),
     }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
-    expect(mockedCreateClient).toHaveBeenCalledTimes(1);
-    expect(from).toHaveBeenCalledWith("profiles");
-    expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
+    expect(mockedDeliverPush).toHaveBeenCalledWith(record);
   });
 
-  it("sends exam notifications with their exam start-page target", async () => {
-    const single = jest.fn().mockResolvedValue({ data: { fcm_tokens: ["device-token"] } });
-    const eq = jest.fn().mockReturnValue({ single });
-    const select = jest.fn().mockReturnValue({ eq });
-    const from = jest.fn().mockReturnValue({ select });
-    mockedCreateClient.mockReturnValue(
-      { from } as unknown as ReturnType<typeof createClient>,
-    );
-    mockedSendEachForMulticast.mockResolvedValue({
-      successCount: 1,
-      failureCount: 0,
-      responses: [{ success: true }],
-    });
-
-    const examId = "20000000-0000-4000-8000-000000000002";
-    const response = await POST(makeRequest({
-      secret: WEBHOOK_SECRET,
-      body: JSON.stringify({
-        type: "INSERT",
-        schema: "public",
-        table: "notifications",
-        record: {
-          user_id: "10000000-0000-4000-8000-000000000001",
-          exam_id: examId,
-          type: "exam_available",
-          title: "New Weekly Exam!",
-          message: "A new exam is available.",
-        },
-      }),
-    }));
-
-    expect(response.status).toBe(200);
-    expect(mockedSendEachForMulticast).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ url: `/exams/${examId}` }),
-      tokens: ["device-token"],
-    }));
-    expect(mockedSendEachForMulticast).toHaveBeenCalledWith(expect.not.objectContaining({
-      notification: expect.anything(),
-    }));
-  });
-
-  it("reports transient FCM failures so the webhook delivery can be retried", async () => {
-    const single = jest.fn().mockResolvedValue({ data: { fcm_tokens: ["device-token"] }, error: null });
-    const eq = jest.fn().mockReturnValue({ single });
-    const select = jest.fn().mockReturnValue({ eq });
-    const from = jest.fn().mockReturnValue({ select });
-    mockedCreateClient.mockReturnValue(
-      { from } as unknown as ReturnType<typeof createClient>,
-    );
-    mockedSendEachForMulticast.mockResolvedValue({
-      successCount: 0,
-      failureCount: 1,
-      responses: [{
-        success: false,
-        error: {
-          code: "messaging/internal-error",
-          message: "temporary",
-          name: "FirebaseError",
-          hasCode: (code: string) => code === "messaging/internal-error",
-          toJSON: () => ({ code: "messaging/internal-error", message: "temporary" }),
-        },
-      }],
-    });
-
+  it("delegates result pushes to the result-publication route to prevent duplicates", async () => {
     const response = await POST(makeRequest({
       secret: WEBHOOK_SECRET,
       body: JSON.stringify({
@@ -178,6 +114,35 @@ describe("push notification webhook authorization", () => {
         table: "notifications",
         record: {
           id: "30000000-0000-4000-8000-000000000003",
+          user_id: "10000000-0000-4000-8000-000000000001",
+          exam_id: "20000000-0000-4000-8000-000000000002",
+          type: "results_published",
+          title: "Exam Results Published",
+          message: "Your results are ready.",
+        },
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ success: true, delegated: true });
+    expect(mockedDeliverPush).not.toHaveBeenCalled();
+  });
+
+  it("reports transient FCM failures so the webhook delivery can be retried", async () => {
+    mockedDeliverPush.mockResolvedValue({
+      tokens: 1,
+      delivered: 0,
+      failed: 1,
+      transientFailures: 1,
+      skipped: false,
+    });
+
+    const response = await POST(makeRequest({
+      secret: WEBHOOK_SECRET,
+      body: JSON.stringify({
+        type: "INSERT",
+        table: "notifications",
+        record: {
           user_id: "10000000-0000-4000-8000-000000000001",
           type: "practice_reminder",
           title: "Keep your writing momentum",
@@ -194,62 +159,6 @@ describe("push notification webhook authorization", () => {
     });
   });
 
-  it("removes only permanently invalid FCM tokens", async () => {
-    const single = jest.fn().mockResolvedValue({
-      data: { fcm_tokens: ["expired-token", "healthy-token"] },
-      error: null,
-    });
-    const readEq = jest.fn().mockReturnValue({ single });
-    const select = jest.fn().mockReturnValue({ eq: readEq });
-    const writeEq = jest.fn().mockResolvedValue({ error: null });
-    const update = jest.fn().mockReturnValue({ eq: writeEq });
-    const from = jest.fn()
-      .mockReturnValueOnce({ select })
-      .mockReturnValueOnce({ update });
-    mockedCreateClient.mockReturnValue(
-      { from } as unknown as ReturnType<typeof createClient>,
-    );
-    mockedSendEachForMulticast.mockResolvedValue({
-      successCount: 1,
-      failureCount: 1,
-      responses: [
-        {
-          success: false,
-          error: {
-            code: "messaging/registration-token-not-registered",
-            message: "expired",
-            name: "FirebaseError",
-            hasCode: (code: string) => code === "messaging/registration-token-not-registered",
-            toJSON: () => ({
-              code: "messaging/registration-token-not-registered",
-              message: "expired",
-            }),
-          },
-        },
-        { success: true, messageId: "message-id" },
-      ],
-    });
-
-    const response = await POST(makeRequest({
-      secret: WEBHOOK_SECRET,
-      body: JSON.stringify({
-        type: "INSERT",
-        table: "notifications",
-        record: {
-          user_id: "10000000-0000-4000-8000-000000000001",
-          type: "subscription_expiring",
-          title: "Your plan ends soon",
-          message: "Open your personal progress reminder.",
-          action_url: "/notifications",
-        },
-      }),
-    }));
-
-    expect(response.status).toBe(200);
-    expect(update).toHaveBeenCalledWith({ fcm_tokens: ["healthy-token"] });
-    expect(writeEq).toHaveBeenCalledWith("id", "10000000-0000-4000-8000-000000000001");
-  });
-
   it("rejects an authenticated webhook with an invalid notification record", async () => {
     const response = await POST(makeRequest({
       secret: WEBHOOK_SECRET,
@@ -264,7 +173,6 @@ describe("push notification webhook authorization", () => {
     await expect(response.json()).resolves.toEqual(expect.objectContaining({
       code: "VALIDATION_ERROR",
     }));
-    expect(mockedCreateClient).not.toHaveBeenCalled();
-    expect(mockedSendEachForMulticast).not.toHaveBeenCalled();
+    expect(mockedDeliverPush).not.toHaveBeenCalled();
   });
 });
