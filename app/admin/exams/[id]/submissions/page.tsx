@@ -123,7 +123,7 @@ export default async function AdminExamSubmissionsPage({
           <ForceGradeButton examId={id} />
           {exam.results_published && (
             <div className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
-              <CheckCircle size={16} /> Published
+              <CheckCircle size={16} /> Results Published
             </div>
           )}
           <PublishResultsButton

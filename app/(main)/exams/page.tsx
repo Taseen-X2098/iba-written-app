@@ -139,11 +139,11 @@ export default async function StudentExamsPage() {
                       if (hasSubmitted) {
                         return (
                           <Link
-                            href={`/exams/${exam.id}/results`}
+                            href={`/exams/${exam.id}/results#my-response`}
                             prefetch={false}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200"
                           >
-                            View Status
+                            View My Response
                             <ChevronRight size={16} />
                           </Link>
                         );
@@ -197,53 +197,71 @@ export default async function StudentExamsPage() {
           </summary>
           
           <div className="grid md:grid-cols-2 gap-6 mt-4">
-            {pastExams.map((exam: Exam) => (
-              <div 
-                key={exam.id}
-                className="bg-card border border-border rounded-2xl p-6 relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0">
-                  <div className="bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg">
-                    Ended
+            {pastExams.map((exam: Exam) => {
+              const hasSubmitted = attemptsByExamId[exam.id]?.status === "finalized";
+              return (
+                <div
+                  key={exam.id}
+                  className="bg-card border border-border rounded-2xl p-6 relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0">
+                    <div className="bg-muted text-muted-foreground text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-bl-lg">
+                      Ended
+                    </div>
+                  </div>
+
+                  <div className="mb-2 flex items-center gap-3 pr-16">
+                    {exam.is_magnus_only && <MagnusExamLogo />}
+                    <h3 className="text-lg font-bold text-foreground">{exam.title}</h3>
+                  </div>
+                  {exam.description && (
+                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
+                  )}
+
+                  <div className="flex flex-col gap-2 mb-6 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <Clock size={16} className="text-muted-foreground" />
+                      <span className="font-medium text-foreground">{exam.time_limit_minutes} Minutes</span>
+                    </div>
+                    <p className={`text-xs font-bold ${exam.results_published ? "text-green-700" : "text-amber-700"}`}>
+                      {exam.results_published ? "Results published" : "Results pending"}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    {hasSubmitted || exam.results_published ? (
+                      <Link
+                        href={`/exams/${exam.id}/results${hasSubmitted ? "#my-response" : ""}`}
+                        prefetch={false}
+                        className="flex-1 w-full flex items-center justify-center gap-2 bg-muted text-foreground hover:bg-border px-4 py-2.5 rounded-xl text-sm font-bold transition-colors"
+                      >
+                        {hasSubmitted ? <FileText size={16} /> : <Trophy size={16} />}
+                        {hasSubmitted
+                          ? exam.results_published ? "My Response & Results" : "My Response"
+                          : "Leaderboard"}
+                      </Link>
+                    ) : (
+                      <span className="flex-1 w-full rounded-xl bg-muted px-4 py-2.5 text-center text-sm font-bold text-muted-foreground">
+                        Results Pending
+                      </span>
+                    )}
+                    {exam.results_published ? (
+                      <Link
+                        href={`/exams/${exam.id}?practice=true`}
+                        prefetch={false}
+                        className="flex-1 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200"
+                      >
+                        <FileText size={16} /> Practice Exam
+                      </Link>
+                    ) : (
+                      <span className="flex-1 w-full rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-center text-sm font-bold text-muted-foreground">
+                        Practice after results
+                      </span>
+                    )}
                   </div>
                 </div>
-
-                <div className="mb-2 flex items-center gap-3 pr-16">
-                  {exam.is_magnus_only && <MagnusExamLogo />}
-                  <h3 className="text-lg font-bold text-foreground">{exam.title}</h3>
-                </div>
-                {exam.description && (
-                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
-                )}
-
-                <div className="flex flex-col gap-2 mb-6 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <Clock size={16} className="text-muted-foreground" />
-                    <span className="font-medium text-foreground">{exam.time_limit_minutes} Minutes</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-center gap-3">
-                  <Link
-                    href={`/exams/${exam.id}/results`}
-                    prefetch={false}
-                    className="flex-1 w-full flex items-center justify-center gap-2 bg-muted text-foreground hover:bg-border px-4 py-2.5 rounded-xl text-sm font-bold transition-colors"
-                  >
-                    <Trophy size={16} /> Leaderboard
-                  </Link>
-                  <Link
-                    href={`/exams/${exam.id}?practice=true`}
-                    prefetch={false}
-                    className={`flex-1 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                      "bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200"
-                    }`}
-                  >
-                    <FileText size={16} /> 
-                    Practice Exam
-                  </Link>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </details>
       )}

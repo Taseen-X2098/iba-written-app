@@ -1,8 +1,12 @@
 import Link from "next/link";
-import { Clock, Medal, Trophy } from "lucide-react";
+import { Clock, FileText, Medal, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { requirePageUser } from "@/lib/auth";
-import { getPublishedExamResults } from "@/lib/exams/results";
+import {
+  getOfficialExamResponse,
+  getPublishedExamResults,
+  type OfficialExamResponseDetail,
+} from "@/lib/exams/results";
 import { SubmissionFeedback } from "@/components/feedback/submission-feedback";
 import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
@@ -29,13 +33,17 @@ export default async function ExamResultsPage({
   if (!exam) return <StatusCard title="Exam not found" message="This exam is no longer available." />;
   if (!exam.results_published) {
     const ongoing = Date.now() < new Date(exam.ends_at).getTime();
+    const responseDetails = await getOfficialExamResponse(id, user.id);
     return (
-      <StatusCard
-        title={ongoing ? "Submission received" : "Results pending"}
-        message={ongoing
-          ? `The exam remains open for other students until ${new Date(exam.ends_at).toLocaleString()}. Results stay private until publication.`
-          : "Grading is in progress. The leaderboard will appear after every answer has a final grade and an admin publishes the results."}
-      />
+      <div className="mx-auto max-w-5xl px-4 pb-12">
+        <StatusCard
+          title={ongoing ? "Submission received — results pending" : "Results pending"}
+          message={ongoing
+            ? `The exam remains open for other students until ${new Date(exam.ends_at).toLocaleString()}. Scores, feedback, and the leaderboard stay private until an admin publishes the results.`
+            : "Grading is in progress. Scores, feedback, and the leaderboard will appear after every answer has a final grade and an admin publishes the results."}
+        />
+        {responseDetails.length > 0 && <SubmittedResponse details={responseDetails} />}
+      </div>
     );
   }
 
@@ -97,7 +105,7 @@ export default async function ExamResultsPage({
       </section>
 
       {results.details.length > 0 && (
-        <section>
+        <section id="my-response" className="scroll-mt-24">
           <h2 className="mb-5 text-xl font-black">Your answers and feedback</h2>
           <div className="space-y-6">
             {results.details.map((detail, index) => (
@@ -122,6 +130,33 @@ export default async function ExamResultsPage({
         </section>
       )}
     </div>
+  );
+}
+
+function SubmittedResponse({ details }: { details: OfficialExamResponseDetail[] }) {
+  return (
+    <section id="my-response" className="scroll-mt-24">
+      <div className="mb-5">
+        <h2 className="flex items-center gap-2 text-xl font-black">
+          <FileText className="text-brand-600" size={22} /> Your submitted response
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          You can review your finalized answers now. Marks and feedback will appear here after results are published.
+        </p>
+      </div>
+      <div className="space-y-6">
+        {details.map((detail, index) => (
+          <article key={detail.id} className="rounded-2xl border border-border bg-card p-6">
+            <div className="mb-4 border-b border-border pb-4">
+              <p className="mb-1 text-xs font-bold uppercase tracking-wider text-brand-600">Question {index + 1}</p>
+              <p className="whitespace-pre-wrap font-medium">{detail.prompt}</p>
+            </div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Your answer</h3>
+            <div className="whitespace-pre-wrap rounded-xl bg-muted/30 p-4 text-sm">{detail.answer || "No answer"}</div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

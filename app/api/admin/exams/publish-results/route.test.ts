@@ -34,6 +34,9 @@ describe("publish-results route", () => {
     await expect(response.json()).resolves.toEqual({ success: true, resultsVersion: 1 });
     expect(rpc).toHaveBeenCalledWith("publish_exam_results_once", { p_exam_id: examId });
     expect(revalidatePath).toHaveBeenCalledWith(`/exams/${examId}/results`);
+    expect(revalidatePath).toHaveBeenCalledWith("/exams");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/exams");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/grading");
   });
 
   it("returns a conflict when results are already published", async () => {

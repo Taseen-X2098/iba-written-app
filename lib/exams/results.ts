@@ -17,6 +17,57 @@ export type LeaderboardRow = {
   percentage: number;
 };
 
+export type OfficialExamResponseDetail = {
+  id: string;
+  orderIndex: number;
+  prompt: string;
+  answer: string;
+};
+
+/**
+ * Returns only a student's finalized official answers. Scores and grading data
+ * are deliberately excluded so the response can be shown before result
+ * publication without bypassing the result embargo.
+ */
+export async function getOfficialExamResponse(
+  examId: string,
+  userId: string,
+): Promise<OfficialExamResponseDetail[]> {
+  const supabase = await createClient();
+  const { data: officialAttempt, error: attemptError } = await supabase
+    .from("exam_attempts")
+    .select("id, status")
+    .eq("exam_id", examId)
+    .eq("user_id", userId)
+    .eq("mode", "official")
+    .maybeSingle();
+  if (attemptError) throw attemptError;
+
+  // Never expose drafts from an active or locked attempt.
+  if (officialAttempt && officialAttempt.status !== "finalized") return [];
+
+  let responseQuery = supabase
+    .from("exam_submissions")
+    .select("id, edited_text, exam_questions(order_index, questions(prompt))")
+    .eq("exam_id", examId)
+    .eq("user_id", userId);
+  responseQuery = officialAttempt
+    ? responseQuery.eq("attempt_id", officialAttempt.id)
+    : responseQuery.is("attempt_id", null).not("submitted_at", "is", null);
+
+  const { data: submissions, error: submissionsError } = await responseQuery;
+  if (submissionsError) throw submissionsError;
+
+  return (submissions ?? [])
+    .map((submission: any) => ({
+      id: submission.id,
+      orderIndex: submission.exam_questions?.order_index ?? 0,
+      prompt: submission.exam_questions?.questions?.prompt ?? "Question",
+      answer: submission.edited_text ?? "",
+    }))
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+}
+
 export async function getPublishedExamResults(examId: string, userId: string, page: number) {
   const supabase = await createClient();
   const { data: exam, error: examError } = await supabase

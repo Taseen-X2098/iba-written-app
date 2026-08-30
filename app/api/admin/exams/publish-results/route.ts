@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
     revalidatePath(`/exams/${input.examId}/results`);
     revalidatePath(`/admin/exams/${input.examId}/submissions`);
     revalidatePath("/exams");
+    revalidatePath("/admin/exams");
+    revalidatePath("/admin/grading");
     return NextResponse.json({ success: true, resultsVersion: version });
   } catch (error) {
     return apiErrorResponse(error);

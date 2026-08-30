@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAdminUser } from "@/lib/auth";
 import { apiErrorResponse } from "@/lib/api/errors";
@@ -24,6 +25,11 @@ export async function POST(request: NextRequest) {
     });
     if (error) throw error;
     const result = Array.isArray(data) ? data[0] : data;
+    revalidatePath(`/exams/${input.examId}/results`);
+    revalidatePath(`/admin/exams/${input.examId}/submissions`);
+    revalidatePath("/exams");
+    revalidatePath("/admin/exams");
+    revalidatePath("/admin/grading");
     return NextResponse.json({
       success: true,
       newTimeLimitMinutes: result?.time_limit_minutes,

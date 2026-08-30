@@ -65,11 +65,18 @@ export default async function AdminExamsPage() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
-                      exam.is_published ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                    }`}>
-                      {exam.is_published ? 'Published' : 'Draft'}
-                    </span>
+                    <div className="flex flex-col items-start gap-1.5">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
+                        exam.is_published ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {exam.is_published ? 'Exam Published' : 'Exam Draft'}
+                      </span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        exam.results_published ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {exam.results_published ? 'Results Published' : 'Results Not Published'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-muted-foreground flex items-center gap-1.5">
                     <Clock size={14} /> {exam.time_limit_minutes} mins
