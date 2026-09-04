@@ -61,7 +61,7 @@ export default async function PersonalReportPage({
         <section className="rounded-2xl border border-dashed border-brand-200 bg-brand-50/40 p-10 text-center">
           <Sparkles className="mx-auto text-brand-500" size={42} aria-hidden="true" />
           <h2 className="mt-4 text-lg font-bold">Your category reports are not ready yet</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-foreground/85">
             Submit and receive grades for three responses in the same question category to reveal patterns that extend beyond any one answer. You have not submitted any graded responses yet.
           </p>
           <Link href="/questions" prefetch={false} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700">
@@ -107,7 +107,7 @@ export default async function PersonalReportPage({
                   </div>
                   <FeedbackParagraphs
                     text={selected.latestReport.overview}
-                    className="mt-5 max-w-3xl space-y-3 text-sm leading-7 text-muted-foreground"
+                    className="mt-5 max-w-3xl space-y-3 text-sm leading-7 text-foreground/85"
                   />
                 </div>
 
@@ -205,7 +205,7 @@ function SnapshotCard({ icon, label, value }: { icon: React.ReactNode; label: st
       <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-brand-700">{icon}{label}</div>
       <FeedbackParagraphs
         text={value}
-        className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground"
+        className="mt-3 space-y-2 text-sm leading-6 text-foreground/85"
       />
     </div>
   );
@@ -229,7 +229,7 @@ function ReportPendingNotice({
           <h2 className="font-bold text-foreground">
             {needsMoreSubmissions ? "Your category report is not ready yet" : "Your category report is being prepared"}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 text-sm leading-6 text-foreground/85">
             {needsMoreSubmissions
               ? `You have ${totalGraded} of ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} submission${totalGraded === 1 ? "" : "s"}. Submit ${remaining} more graded response${remaining === 1 ? "" : "s"} in this category before we can identify reliable patterns across different questions.`
               : `You have submitted the ${REPORT_SUBMISSIONS_REQUIRED} graded ${submissionTypeLabel} responses needed for a category-wide report. It is being prepared now.`}
@@ -267,11 +267,11 @@ function InsightSection({
             <h3 className="text-sm font-bold capitalize">{insight.skill}</h3>
             <FeedbackParagraphs
               text={insight.insight}
-              className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+              className="mt-1 space-y-2 text-sm leading-6 text-foreground/85"
             />
-            {insight.evidence ? <p className="mt-2 text-xs italic text-muted-foreground">“{insight.evidence}”</p> : null}
+            {insight.evidence ? <p className="mt-2 text-sm italic leading-6 text-foreground/80">“{insight.evidence}”</p> : null}
           </div>
-        )) : <p className="text-sm leading-6 text-muted-foreground">{empty}</p>}
+        )) : <p className="text-sm leading-6 text-foreground/85">{empty}</p>}
       </div>
     </section>
   );
@@ -290,9 +290,9 @@ function NextStepsSection({ steps }: { steps: ProgressionReportNextStep[] }) {
                 <h3 className="text-sm font-bold">{step.action}</h3>
                 <FeedbackParagraphs
                   text={step.reason}
-                  className="mt-1 space-y-2 text-sm leading-6 text-muted-foreground"
+                  className="mt-1 space-y-2 text-sm leading-6 text-foreground/85"
                 />
-                {step.exampleLine ? <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900"><strong>Try:</strong> {step.exampleLine}</p> : null}
+                {step.exampleLine ? <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-sm leading-6 text-sky-900"><strong>Try:</strong> {step.exampleLine}</p> : null}
               </div>
             </div>
           </li>

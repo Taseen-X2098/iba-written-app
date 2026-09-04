@@ -30,7 +30,7 @@ export function SubmissionFeedback({ feedback }: { feedback: StudentFeedback }) 
         </div>
         <FeedbackParagraphs
           text={remarks}
-          className="space-y-3 text-sm leading-7 text-muted-foreground"
+          className="space-y-3 text-sm leading-7 text-foreground"
         />
 
         <div className="mt-5 border-t border-border pt-4">

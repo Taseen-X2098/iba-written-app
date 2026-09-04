@@ -21,7 +21,7 @@ export function PersonalProgressionCard({
     return (
       <section className="rounded-2xl border border-border bg-card p-5 sm:p-6">
         <h3 className="font-bold text-foreground">Category Progress Report</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-sm text-foreground/85">
           Your category-wide report is temporarily unavailable. Your submission feedback has still been saved.
         </p>
       </section>
@@ -76,7 +76,7 @@ export function PersonalProgressionCard({
             Building your baseline
           </span>
         </div>
-        <p className="mt-4 text-sm leading-6 text-muted-foreground">
+        <p className="mt-4 text-sm leading-6 text-foreground/85">
           {remaining > 0
             ? `A category-wide report needs ${REPORT_SUBMISSIONS_REQUIRED} graded ${report.submissionTypeLabel} responses. You have ${completed}; submit ${remaining} more to reveal reliable patterns across different questions.`
             : `Your ${report.submissionTypeLabel} category report is being prepared from your graded responses.`}
@@ -109,7 +109,7 @@ export function PersonalProgressionCard({
         </div>
         <FeedbackParagraphs
           text={categoryReport.overview}
-          className="mt-4 space-y-3 text-sm leading-6 text-muted-foreground"
+          className="mt-4 space-y-3 text-sm leading-6 text-foreground/85"
         />
       </div>
 
@@ -160,7 +160,7 @@ function ProgressItem({
       </div>
       <FeedbackParagraphs
         text={value}
-        className="mt-2 space-y-2 text-sm leading-6 text-muted-foreground"
+        className="mt-2 space-y-2 text-sm leading-6 text-foreground/85"
       />
     </div>
   );
