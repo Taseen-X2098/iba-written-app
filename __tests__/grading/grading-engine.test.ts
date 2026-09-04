@@ -332,4 +332,12 @@ describe("SYSTEM_PROMPT", () => {
     expect(SYSTEM_PROMPT).toContain("exactly two short paragraphs");
     expect(SYSTEM_PROMPT).toContain("add one empty line");
   });
+
+  it("requires explicit feedback when a multi-paragraph answer has no visible breaks", () => {
+    expect(SYSTEM_PROMPT).toContain("Never imagine paragraph breaks");
+    expect(SYSTEM_PROMPT).toContain("no paragraph breaks are visible");
+    expect(SYSTEM_PROMPT).toContain("specific paragraphing action");
+    expect(SYSTEM_PROMPT).toContain("basic paragraph task should normally stay as one unified paragraph");
+    expect(SYSTEM_PROMPT).toContain("If its paragraph structure is already suitable, do not tell the student");
+  });
 });

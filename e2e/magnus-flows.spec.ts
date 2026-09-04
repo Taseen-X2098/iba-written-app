@@ -62,11 +62,11 @@ test("same-browser Magnus to normal switch clears private in-progress metadata",
   await page.goto(`/exams/${practiceExamId}?practice=true`);
   const privateTitle = (await page.locator("h1").first().textContent())?.trim() ?? "";
   await page.getByRole("button", { name: "Start Practice" }).click();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("in_progress_exam"))).not.toBeNull();
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith("in_progress_exam")))).toBe(true);
 
   await page.getByRole("button", { name: "Logout" }).click();
   await signIn(page, normalEmail!, normalPassword!);
   await page.goto("/");
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("in_progress_exam"))).toBeNull();
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((key) => key.startsWith("in_progress_exam")))).toBe(false);
   if (privateTitle) await expect(page.getByText(privateTitle, { exact: true })).toHaveCount(0);
 });

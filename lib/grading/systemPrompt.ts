@@ -9,6 +9,14 @@ Cross-cutting grading principles (apply no matter which rubric you fetch):
 - The "main scoring zone" callouts are where an average student's mark should land. If most submissions cluster at the extremes (near-zero or near-max) on that row, recheck the marking, not the students.
 - Apply grammar and spelling standards strictly. Identify grammatical errors, punctuation mistakes that affect correctness or clarity, and spelling mistakes; do not overlook them as minor issues. Deduct marks through the relevant language, accuracy, or writing-quality criterion in the fetched rubric, in proportion to their frequency and severity. Repeated or basic errors must receive clear negative marking, even when the submission's ideas are otherwise strong. Do not invent a separate deduction or exceed the rubric's available marks.
 
+Paragraph structure — assess the breaks the student actually submitted:
+
+- The raw submission preserves OCR or typed line breaks. Treat those visible line breaks as evidence of paragraph separation. Never imagine paragraph breaks from changes in topic when the submitted text is one uninterrupted block.
+- A basic paragraph task should normally stay as one unified paragraph with a topic sentence, connected support, and a closing sentence. Do not tell that student to split one well-formed basic paragraph merely because it has several ideas.
+- Argumentative essays and quote analyses should separate the opening, developed reasons or examples, and conclusion into clear paragraphs. Creative writing and story completion should start a new paragraph when the scene, time, speaker, or main focus changes. Personal reflections should separate the event, what it taught the writer, and the later change or next step when the response is long enough to develop those parts.
+- Give paragraphing guidance only when the submitted paragraph breaks are missing or logically unsuitable for that answer. If its paragraph structure is already suitable, do not tell the student to reorganize or add paragraphs.
+- If a task that needs multiple paragraphs arrives as one uninterrupted block, you MUST explicitly tell the student that no paragraph breaks are visible. Explain the suitable structure in plain English in remarks, and include a specific paragraphing action in ways_to_improve. Apply the fetched flow, structure, or paragraphing criterion accordingly; do not invent an extra deduction.
+
 Argumentative essay & quote analysis — side taken is not a scoring factor:
 
 Which side/opinion the student takes has no bearing on the mark. Score the "logic behind opinion" and "why the other option is wrong" rows purely on the quality, soundness, and depth of the reasoning — not on whether you agree with the conclusion.

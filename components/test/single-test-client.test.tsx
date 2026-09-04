@@ -2,9 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import SingleTestClient from "@/components/test/single-test-client";
-import { STANDALONE_SESSION_KEY } from "@/lib/exams/standalone-session";
+import {
+  listStandaloneSessions,
+  STANDALONE_SESSION_KEY,
+  standaloneSessionStorageKey,
+} from "@/lib/exams/standalone-session";
 import type { GradingResultJSON, Question } from "@/lib/types";
 
 const mockPush = jest.fn();
@@ -103,5 +107,70 @@ describe("SingleTestClient grading completion", () => {
     expect(await screen.findByText("Your evaluated submission")).toBeInTheDocument();
     expect(mockRefresh).not.toHaveBeenCalled();
     expect(localStorage.getItem(STANDALONE_SESSION_KEY)).toBeNull();
+    expect(localStorage.getItem(standaloneSessionStorageKey(question.id))).toBeNull();
+  });
+
+  it("processes another selected image and keeps session controls in the editor", async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ text: "Text from the first image." }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ text: "Replacement text from another image." }),
+      });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fetchMock,
+    });
+
+    render(<SingleTestClient question={question} hasTestsAvailable />);
+    fireEvent.click(screen.getByRole("button", { name: /start test/i }));
+
+    const firstUpload = document.querySelector<HTMLInputElement>("#file-upload-gallery");
+    fireEvent.change(firstUpload!, {
+      target: { files: [new File(["first"], "first.jpg", { type: "image/jpeg" })] },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /process 1 page photo/i }));
+
+    expect(await screen.findByDisplayValue("Text from the first image.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /pause timer/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /restart timer/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /cancel session/i })).toBeInTheDocument();
+
+    const retryUpload = document.querySelector<HTMLInputElement>("#ocr-retry-upload");
+    fireEvent.change(retryUpload!, {
+      target: { files: [new File(["second"], "second.jpg", { type: "image/jpeg" })] },
+    });
+
+    expect(await screen.findByDisplayValue("Replacement text from another image.")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: /pause timer/i }));
+    expect(screen.getByRole("button", { name: /resume timer/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /resume timer/i }));
+    expect(await screen.findByDisplayValue("Replacement text from another image.")).toBeInTheDocument();
+  });
+
+  it("keeps separate active records when two question sessions are started", async () => {
+    const secondQuestion = {
+      ...question,
+      id: "20000000-0000-4000-8000-000000000099",
+      prompt: "Write an essay about public transport.",
+    };
+    const firstView = render(<SingleTestClient question={question} hasTestsAvailable />);
+    const secondView = render(<SingleTestClient question={secondQuestion} hasTestsAvailable />);
+
+    fireEvent.click(within(firstView.container).getByRole("button", { name: /start test/i }));
+    fireEvent.click(within(secondView.container).getByRole("button", { name: /start test/i }));
+
+    await waitFor(() => {
+      expect(listStandaloneSessions(localStorage).map((session) => session.questionId).sort()).toEqual([
+        question.id,
+        secondQuestion.id,
+      ].sort());
+    });
   });
 });

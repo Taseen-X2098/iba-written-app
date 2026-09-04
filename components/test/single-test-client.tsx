@@ -14,13 +14,16 @@ import {
 } from "@/lib/exams/recovery-client";
 import {
   isOwnedStandaloneSession,
-  parseStandaloneSession,
+  isStandaloneSessionStorageKey,
+  readStandaloneSession,
   removeStandaloneSession,
-  STANDALONE_SESSION_KEY,
+  standaloneSessionStorageKey,
   STANDALONE_SESSION_UPDATED_EVENT,
+  writeStandaloneSession,
 } from "@/lib/exams/standalone-session";
 import { countWords, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
+import { consumeSelectedFiles } from "@/lib/answers/image-input";
 import {
   CATEGORY_LABELS,
   type Question,
@@ -63,6 +66,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const maxWords = wordLimitForMarks(question.marks);
   const maxImages = ANSWER_PAGE_LIMIT;
   const recoveryId = `standalone:${question.id}`;
+  const sessionStorageKey = standaloneSessionStorageKey(question.id);
   const [state, setState] = useState<TestState>("idle");
   const [error, setError] = useState<string | null>(null);
   
@@ -74,6 +78,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   const sessionEndedRef = useRef(true);
   const sessionIdRef = useRef<string | null>(null);
   const hasPersistedSessionRef = useRef(false);
+  const resumeStateRef = useRef<"running" | "editing">("running");
   
   // File upload state
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -92,11 +97,9 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     let cancelled = false;
     const restore = async () => {
       try {
-        const saved = localStorage.getItem(STANDALONE_SESSION_KEY);
-        if (!saved) return;
-        const parsed = parseStandaloneSession(saved);
+        const parsed = readStandaloneSession(localStorage, question.id);
         if (!parsed) {
-          localStorage.removeItem(STANDALONE_SESSION_KEY);
+          localStorage.removeItem(sessionStorageKey);
           clearEncryptedRecovery(recoveryId);
           window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
           return;
@@ -107,17 +110,28 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
         sessionIdRef.current = parsed.sessionId ?? crypto.randomUUID();
         hasPersistedSessionRef.current = true;
         if (parsed.state === "running") {
+          resumeStateRef.current = "running";
           const currentElapsed = parsed.secondsElapsed + Math.floor((Date.now() - parsed.lastUpdatedAt) / 1000);
           if (!cancelled) {
             setSecondsElapsed(currentElapsed);
             setState("running");
           }
         } else if (parsed.state === "paused") {
+          resumeStateRef.current = parsed.resumeState;
+          const recovered = parsed.resumeState === "editing"
+            ? await loadEncryptedRecovery(recoveryId)
+            : {};
+          const answer = recovered[question.id];
           if (!cancelled) {
             setSecondsElapsed(parsed.secondsElapsed);
+            if (answer) {
+              setOcrText(answer.ocrText);
+              setEditedText(answer.editedText);
+            }
             setState("paused");
           }
         } else if (parsed.state === "editing") {
+          resumeStateRef.current = "editing";
           const recovered = await loadEncryptedRecovery(recoveryId);
           const answer = recovered[question.id];
           if (!cancelled) {
@@ -140,7 +154,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     return () => {
       cancelled = true;
     };
-  }, [question.id, recoveryId]);
+  }, [question.id, recoveryId, sessionStorageKey]);
 
   useEffect(() => {
     secondsRef.current = secondsElapsed;
@@ -154,7 +168,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       if (sessionEndedRef.current) return;
       if (state !== "running" && state !== "paused" && state !== "editing") return;
       if (hasPersistedSessionRef.current) {
-        const current = parseStandaloneSession(localStorage.getItem(STANDALONE_SESSION_KEY));
+        const current = readStandaloneSession(localStorage, question.id);
         if (!current || !isOwnedStandaloneSession(current, question.id, sessionIdRef.current)) {
           // The user or another tab cleared/replaced this record. Relinquish
           // ownership so this mounted page cannot recreate a dismissed session.
@@ -178,23 +192,29 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
         marks: question.marks,
         secondsElapsed: secondsRef.current,
         state,
+        resumeState: state === "paused"
+          ? resumeStateRef.current
+          : state === "editing"
+            ? "editing"
+            : "running",
         lastUpdatedAt: Date.now()
       };
-      localStorage.setItem(STANDALONE_SESSION_KEY, JSON.stringify(payload));
+      writeStandaloneSession(localStorage, payload);
       hasPersistedSessionRef.current = true;
       window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
     };
     persist();
     const checkpoint = window.setInterval(persist, 15_000);
     return () => window.clearInterval(checkpoint);
-  }, [recoveryId, state, question]);
+  }, [recoveryId, sessionStorageKey, state, question]);
 
   // Native storage events cover deletion or replacement from another tab.
   // Same-tab DevTools deletion is caught by the ownership check above.
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if ((event.key !== STANDALONE_SESSION_KEY && event.key !== null) || sessionEndedRef.current) return;
-      const current = parseStandaloneSession(event.newValue);
+      if (!isStandaloneSessionStorageKey(event.key) || sessionEndedRef.current) return;
+      if (event.key && event.key !== sessionStorageKey && event.key !== "in_progress_test") return;
+      const current = readStandaloneSession(localStorage, question.id);
       if (current && isOwnedStandaloneSession(current, question.id, sessionIdRef.current)) return;
       sessionEndedRef.current = true;
       hasPersistedSessionRef.current = false;
@@ -206,7 +226,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
-  }, [question.id, recoveryId]);
+  }, [question.id, recoveryId, sessionStorageKey]);
 
   // Keep answer text out of plaintext localStorage. The encrypted payload is
   // recoverable across refreshes in this tab because its key lives only in
@@ -254,6 +274,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     sessionIdRef.current = crypto.randomUUID();
     hasPersistedSessionRef.current = false;
     sessionEndedRef.current = false;
+    resumeStateRef.current = "running";
     setState("running");
   };
 
@@ -262,9 +283,9 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     // Notify the persistent shell immediately; recovery cleanup is separate and
     // must not prevent the shell from learning that the session has ended.
     sessionEndedRef.current = true;
-    // Cancellation and successful submission both terminate the global
-    // standalone session unconditionally. No saved session should survive.
-    removeStandaloneSession(localStorage);
+    // Cancellation and successful submission terminate only this question's
+    // session. Other active questions keep their own scoped records.
+    removeStandaloneSession(localStorage, question.id);
     hasPersistedSessionRef.current = false;
     sessionIdRef.current = null;
     window.dispatchEvent(new Event(STANDALONE_SESSION_UPDATED_EVENT));
@@ -272,24 +293,28 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.length) return;
-    const files = Array.from(e.target.files);
+    const files = consumeSelectedFiles(e.currentTarget);
+    if (!files.length) return;
     const violation = getPageLimitViolation(files.length);
     if (violation) {
       setError(`Maximum ${answerPageLabel()}. Select fewer photos.`);
-      e.target.value = "";
       return;
     }
     setError(null);
     setSelectedFiles(files);
-    e.target.value = "";
   };
 
   const handlePauseToggle = () => {
-    if (state === "running") {
+    if (state === "running" || state === "editing") {
+      if (state === "editing") {
+        void saveEncryptedRecovery(recoveryId, {
+          [question.id]: { ocrText, editedText },
+        });
+      }
+      resumeStateRef.current = state;
       setState("paused");
     } else if (state === "paused") {
-      setState("running");
+      setState(resumeStateRef.current);
     }
   };
 
@@ -297,7 +322,11 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
     if (confirm("Are you sure you want to restart the timer?")) {
       secondsRef.current = 0;
       setSecondsElapsed(0);
-      setState("running");
+      const restartState = state === "editing" || resumeStateRef.current === "editing"
+        ? "editing"
+        : "running";
+      resumeStateRef.current = restartState;
+      setState(restartState);
     }
   };
 
@@ -306,6 +335,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       clearPersistedSession();
       secondsRef.current = 0;
       setSecondsElapsed(0);
+      resumeStateRef.current = "running";
       setState("idle");
     }
   };
@@ -344,12 +374,41 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       setOcrText(data.text);
       setEditedText(data.text);
       setSelectedFiles([]);
+      resumeStateRef.current = "editing";
       setState("editing");
     } catch (err: any) {
       setError(err.message);
       setState(returnState);
     }
   };
+
+  const sessionControls = (
+    <div className="flex w-full flex-col flex-wrap items-center justify-center gap-3 sm:flex-row">
+      <button
+        type="button"
+        onClick={handlePauseToggle}
+        className="w-full rounded-xl border border-border bg-muted/50 px-6 py-2.5 text-sm font-semibold uppercase tracking-widest text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-auto sm:rounded-full sm:px-4 sm:py-1.5 sm:text-xs"
+      >
+        {state === "paused" ? "Resume Timer" : "Pause Timer"}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleRestartTimer}
+        className="w-full rounded-xl border border-destructive/20 bg-destructive/10 px-6 py-2.5 text-sm font-semibold uppercase tracking-widest text-destructive transition-colors hover:bg-destructive/20 sm:w-auto sm:rounded-full sm:px-4 sm:py-1.5 sm:text-xs"
+      >
+        Restart Timer
+      </button>
+
+      <button
+        type="button"
+        onClick={handleCancelSession}
+        className="w-full rounded-xl border border-border bg-muted px-6 py-2.5 text-sm font-semibold uppercase tracking-widest text-muted-foreground transition-colors hover:border-destructive hover:bg-destructive hover:text-destructive-foreground sm:w-auto sm:rounded-full sm:px-4 sm:py-1.5 sm:text-xs"
+      >
+        Cancel Session
+      </button>
+    </div>
+  );
 
   const handleSubmitForGrading = async () => {
     if (!editedText.trim()) {
@@ -468,31 +527,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
               {formatTime(secondsElapsed)}
             </div>
             
-            <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 mb-8 w-full">
-              <button
-                onClick={handlePauseToggle}
-                className="w-full sm:w-auto px-6 py-2.5 sm:px-4 sm:py-1.5 rounded-xl sm:rounded-full text-sm sm:text-xs font-semibold uppercase tracking-widest transition-colors border
-                           bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground border-border"
-              >
-                {state === "paused" ? "Resume Timer" : "Pause Timer"}
-              </button>
-              
-              <button
-                onClick={handleRestartTimer}
-                className="w-full sm:w-auto px-6 py-2.5 sm:px-4 sm:py-1.5 rounded-xl sm:rounded-full text-sm sm:text-xs font-semibold uppercase tracking-widest transition-colors border
-                           bg-destructive/10 text-destructive hover:bg-destructive/20 border-destructive/20"
-              >
-                Restart Timer
-              </button>
-              
-              <button
-                onClick={handleCancelSession}
-                className="w-full sm:w-auto px-6 py-2.5 sm:px-4 sm:py-1.5 rounded-xl sm:rounded-full text-sm sm:text-xs font-semibold uppercase tracking-widest transition-colors border
-                           bg-muted text-muted-foreground hover:bg-destructive hover:text-destructive-foreground border-border hover:border-destructive"
-              >
-                Cancel Session
-              </button>
-            </div>
+            <div className="mb-8 w-full">{sessionControls}</div>
             
             <p className="text-sm text-muted-foreground mb-8">
               {state === "paused" 
@@ -636,6 +671,7 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                 Time: {formatTime(secondsElapsed)}
               </div>
             </div>
+            <div className="mb-4">{sessionControls}</div>
             <p className="text-sm text-muted-foreground mb-4">
               Review the extracted text and fix any mistakes the AI made reading your handwriting.
             </p>
@@ -666,6 +702,9 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                     {editedWordCount} / {maxWords} words
                   </span>
                 </div>
+                <p className="mt-2 text-xs leading-5 text-amber-800">
+                  Paragraph check: For essays, stories, and reflections, keep each new idea in a separate paragraph. If OCR merged paragraphs, add the missing line breaks before submitting.
+                </p>
 
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
                   <button
@@ -688,9 +727,8 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
                     multiple
                     className="hidden"
                     onChange={(event) => {
-                      const files = event.currentTarget.files;
-                      event.currentTarget.value = "";
-                      if (files?.length) void handleUploadAndOcr(files);
+                      const files = consumeSelectedFiles(event.currentTarget);
+                      if (files.length) void handleUploadAndOcr(files);
                     }}
                   />
                   <button

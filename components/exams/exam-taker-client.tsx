@@ -22,8 +22,13 @@ import { FeedbackParagraphs } from "@/components/feedback/feedback-paragraphs";
 import { PersonalProgressionCard } from "@/components/progress/personal-progression-card";
 import { countWords, getWordLimitViolation, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
+import { consumeSelectedFiles } from "@/lib/answers/image-input";
 import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
-import { IN_PROGRESS_EXAM_KEY, IN_PROGRESS_EXAM_UPDATED_EVENT } from "@/lib/exams/in-progress-exam";
+import {
+  IN_PROGRESS_EXAM_UPDATED_EVENT,
+  removeInProgressExam,
+  writeInProgressExam,
+} from "@/lib/exams/in-progress-exam";
 import type {
   AttemptDrafts,
   AttemptQuestion,
@@ -273,7 +278,7 @@ export default function ExamTakerClient({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Submission failed");
 
-      localStorage.removeItem(IN_PROGRESS_EXAM_KEY);
+      removeInProgressExam(localStorage, { attemptId: attempt.id });
       window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
       if (isPractice) {
         setSelection(data as PracticeSelection);
@@ -318,7 +323,7 @@ export default function ExamTakerClient({
     };
     tick();
     const timer = window.setInterval(tick, 1_000);
-    localStorage.setItem(IN_PROGRESS_EXAM_KEY, JSON.stringify({
+    writeInProgressExam(localStorage, {
       userId: attempt.user_id,
       examId: exam.id,
       attemptId: attempt.id,
@@ -326,7 +331,7 @@ export default function ExamTakerClient({
       isPractice,
       expiresAt: attempt.expires_at,
       lastUpdatedAt: Date.now(),
-    }));
+    });
     window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
     return () => window.clearInterval(timer);
   }, [attempt.expires_at, attempt.id, attempt.user_id, exam.id, exam.title, isPractice]);
@@ -662,8 +667,8 @@ export default function ExamTakerClient({
                   <label className={`rounded-xl border-2 border-dashed border-border p-6 text-center ${locked ? "opacity-50" : "cursor-pointer"}`}>
                     <ImageIcon className="mx-auto mb-2 text-brand-600" size={22} /><span className="text-sm font-bold">Upload Page Photos</span><span className="mt-1 block text-[10px] text-muted-foreground">Maximum {maxImages}</span>
                     <input type="file" accept="image/*" multiple disabled={locked} className="hidden" onChange={(event) => {
-                      if (event.target.files?.length) void handleFileUpload(question.id, event.target.files);
-                      event.currentTarget.value = "";
+                      const files = consumeSelectedFiles(event.currentTarget);
+                      if (files.length) void handleFileUpload(question.id, files);
                     }} />
                   </label>
                 </div>
@@ -680,6 +685,9 @@ export default function ExamTakerClient({
                     <span>{answer.error ?? (answer.isDirty ? "Unsaved changes" : "Saved on server")}. Running OCR on a new image replaces this text.</span>
                     <span className={wordCount > maxWords ? "font-bold text-red-600" : ""}>{wordCount} / {maxWords} words</span>
                   </div>
+                  <p className="mt-2 text-xs leading-5 text-amber-800">
+                    Paragraph check: For essays, stories, and reflections, keep each new idea in a separate paragraph. If OCR merged paragraphs, add the missing line breaks before submitting.
+                  </p>
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <button type="button" disabled={locked} onClick={() => setActiveCameraId(question.id)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold disabled:opacity-50">
                       <Camera size={14} /> Replace with Camera Photo
@@ -687,8 +695,8 @@ export default function ExamTakerClient({
                     <label className={`inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold ${locked ? "opacity-50" : "cursor-pointer"}`}>
                       <ImageIcon size={14} /> Upload Another Image
                       <input type="file" accept="image/*" multiple disabled={locked} className="hidden" onChange={(event) => {
-                        if (event.currentTarget.files?.length) void handleFileUpload(question.id, event.currentTarget.files);
-                        event.currentTarget.value = "";
+                        const files = consumeSelectedFiles(event.currentTarget);
+                        if (files.length) void handleFileUpload(question.id, files);
                       }} />
                     </label>
                     <button type="button" disabled={locked || !answer.isDirty || answer.saving} onClick={() => void saveDrafts([question.id])} className="inline-flex items-center justify-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs font-bold disabled:opacity-50">

@@ -7,7 +7,7 @@ import {
   formatScore,
   MARK_NORMALIZATION_VERSION,
 } from "./marks";
-import { formatNumberedImprovementList } from "./improvements";
+import { formatNumberedImprovementList, parseImprovementActions } from "./improvements";
 
 const MODEL = "gpt-5.6-luna";
 
@@ -246,6 +246,79 @@ function taskTypeLabel(taskType: string): string {
     .join(" ");
 }
 
+const PARAGRAPH_STRUCTURE_ACTIONS: Readonly<Record<string, string>> = {
+  argumentative_essay: "Use separate paragraphs next time: one for the opening and position, one for each developed reason or example, and one for the conclusion. Your submitted answer had no visible paragraph breaks, so its structure was harder to follow.",
+  quote_analysis: "Use separate paragraphs next time: explain the quote and your view first, develop the reasons and example in the middle, and end with a short conclusion. Your submitted answer had no visible paragraph breaks.",
+  creative_writing: "Use separate paragraphs next time when the scene, time, speaker, or main focus changes. Your submitted story had no visible paragraph breaks, which made the events harder to follow.",
+  personal_reflection: "Use separate paragraphs next time for the event, what it taught you, and how you changed or will act later. Your submitted reflection had no visible paragraph breaks.",
+  story_completion: "Use separate paragraphs next time when the scene, time, speaker, or main focus changes. Your submitted story had no visible paragraph breaks, which made the continuation harder to follow.",
+};
+
+const PARAGRAPH_STRUCTURE_REMARKS: Readonly<Record<string, string>> = {
+  argumentative_essay: "No paragraph breaks are visible in the submitted answer. Divide it into an opening that states your position, separate body paragraphs for developed reasons or examples, and a conclusion that brings the argument together.",
+  quote_analysis: "No paragraph breaks are visible in the submitted answer. Use an opening paragraph to explain the quote and your view, middle paragraphs to develop reasons and an example, and a final paragraph for the conclusion.",
+  creative_writing: "No paragraph breaks are visible in the submitted story. Start a new paragraph when the scene, time, speaker, or main focus changes so the sequence is easier to follow.",
+  personal_reflection: "No paragraph breaks are visible in the submitted reflection. Separate the event, what it taught you, and the change or next step into logical paragraphs.",
+  story_completion: "No paragraph breaks are visible in the submitted story. Start a new paragraph when the scene, time, speaker, or main focus changes so the continuation is easier to follow.",
+};
+
+const PARAGRAPH_STRUCTURE_REMARK_PATTERNS: Readonly<Record<string, RegExp>> = {
+  argumentative_essay: /(?:opening|introduction)[\s\S]*(?:body|reason|example)[\s\S]*conclusion/i,
+  quote_analysis: /(?:opening|introduction)[\s\S]*(?:reason|example)[\s\S]*conclusion/i,
+  creative_writing: /new paragraph[\s\S]*(?:scene|time|speaker|focus)/i,
+  personal_reflection: /event[\s\S]*(?:taught|lesson)[\s\S]*(?:change|next step)/i,
+  story_completion: /new paragraph[\s\S]*(?:scene|time|speaker|focus)/i,
+};
+
+function needsParagraphStructureReminder(submission: string, taskType: string): boolean {
+  return Boolean(PARAGRAPH_STRUCTURE_ACTIONS[taskType])
+    && !/\r?\n\s*(?:\r?\n)?/.test(submission.trim());
+}
+
+function ensureParagraphStructureRemarks(
+  submission: string,
+  taskType: string,
+  remarks: string,
+): string {
+  const reminder = PARAGRAPH_STRUCTURE_REMARKS[taskType];
+  const structurePattern = PARAGRAPH_STRUCTURE_REMARK_PATTERNS[taskType];
+  const identifiesOneBlock = /no (?:visible )?paragraph breaks|one uninterrupted block/i.test(remarks);
+  const alreadyCovered = identifiesOneBlock && structurePattern?.test(remarks);
+
+  if (!reminder || !needsParagraphStructureReminder(submission, taskType) || alreadyCovered) {
+    return remarks;
+  }
+
+  const paragraphs = remarks
+    .split(/\r?\n\s*\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length <= 1) {
+    return `${paragraphs[0] || remarks}\n\n${reminder}`;
+  }
+
+  return `${paragraphs[0]}\n\n${[...paragraphs.slice(1), reminder].join(" ")}`;
+}
+
+function ensureParagraphStructureAction(
+  submission: string,
+  taskType: string,
+  value: unknown,
+): string {
+  const actions = parseImprovementActions(value);
+  const reminder = PARAGRAPH_STRUCTURE_ACTIONS[taskType];
+  const alreadyCovered = actions.some((action) =>
+    /no (?:visible )?paragraph breaks|separate paragraphs|add (?:the missing )?(?:paragraph|line) breaks|start (?:a )?new paragraph/i.test(action),
+  );
+
+  if (!reminder || !needsParagraphStructureReminder(submission, taskType) || alreadyCovered) {
+    return formatNumberedImprovementList(actions);
+  }
+
+  return formatNumberedImprovementList([reminder, ...actions].slice(0, 3));
+}
+
 function calibrateCriteria(
   criteria: GradingResult["internal"]["criteria"],
   modelTotal: number,
@@ -390,10 +463,13 @@ export async function grade(
     normalizedTotal,
   );
   const legacySummary = String(parsed.student_feedback.summary ?? "").trim();
-  const remarks = String(parsed.student_feedback.remarks ?? legacySummary).trim()
+  const modelRemarks = String(parsed.student_feedback.remarks ?? legacySummary).trim()
     || "Your response addresses the task, but the available feedback could not be expanded further.";
+  const remarks = ensureParagraphStructureRemarks(submission, taskType, modelRemarks);
   const personalizedFeedback = `No previous ${taskTypeLabel(taskType)} answers were found.\n\nThis personal feedback is based only on your current answer.`;
-  const waysToImprove = formatNumberedImprovementList(
+  const waysToImprove = ensureParagraphStructureAction(
+    submission,
+    taskType,
     parsed.student_feedback.ways_to_improve,
   );
 

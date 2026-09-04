@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { IN_PROGRESS_EXAM_KEY, IN_PROGRESS_EXAM_UPDATED_EVENT } from "@/lib/exams/in-progress-exam";
+import { IN_PROGRESS_EXAM_UPDATED_EVENT, removeInProgressExam } from "@/lib/exams/in-progress-exam";
 
 export default function AutoFinalizer({ examId, isPractice }: { examId: string, isPractice?: boolean }) {
   const router = useRouter();
@@ -13,7 +13,7 @@ export default function AutoFinalizer({ examId, isPractice }: { examId: string, 
     const finalize = async () => {
       try {
         if (isPractice) {
-          localStorage.removeItem(IN_PROGRESS_EXAM_KEY);
+          removeInProgressExam(localStorage, { examId });
           window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
           router.push(`/exams`);
           router.refresh();
@@ -30,7 +30,7 @@ export default function AutoFinalizer({ examId, isPractice }: { examId: string, 
         if (!res.ok) throw new Error(data.error || "Failed to finalize");
         
         // Clear from localStorage since we submitted
-        localStorage.removeItem(IN_PROGRESS_EXAM_KEY);
+        removeInProgressExam(localStorage, { examId });
         window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
 
         // Redirect to results page after finalizing

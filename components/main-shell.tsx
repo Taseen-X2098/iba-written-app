@@ -19,7 +19,6 @@ import {
   Lightbulb,
   ChevronRight,
   ExternalLink,
-  Play,
   Lock,
   TrendingUp,
 } from "lucide-react";
@@ -29,17 +28,20 @@ import { getToken, onMessage } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
 import { registerAppServiceWorker } from "@/lib/pwa";
 import { NavigationLoadingOverlay } from "@/components/ui/navigation-loading-overlay";
+import { ActiveSessionSidenavLinks } from "@/components/navigation/active-session-links";
 import {
-  parseStandaloneSession,
-  STANDALONE_SESSION_KEY,
+  clearStandaloneSessions,
   STANDALONE_SESSION_UPDATED_EVENT,
 } from "@/lib/exams/standalone-session";
 import {
-  IN_PROGRESS_EXAM_KEY,
   IN_PROGRESS_EXAM_UPDATED_EVENT,
   clearExamBrowserStateOnSignOut,
-  parseOwnedInProgressExam,
 } from "@/lib/exams/in-progress-exam";
+import {
+  isActiveSessionStorageKey,
+  listActiveSessionLinks,
+  type ActiveSessionLink,
+} from "@/lib/exams/active-sessions";
 
 // ─── Tab Configuration ────────────────────────────────────────────────────
 
@@ -85,7 +87,7 @@ export default function MainShell({
   const isApprovedMagnusStudent = initialMagnusStatus === "approved";
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
 
-  const [activeTestState, setActiveTestState] = useState<{ type: "test" | "exam", id: string, title: string, isPractice?: boolean } | null>(null);
+  const [activeSessions, setActiveSessions] = useState<ActiveSessionLink[]>([]);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -106,55 +108,20 @@ export default function MainShell({
     const interval = setInterval(refreshNotifications, 300000);
     window.addEventListener("focus", refreshNotifications);
     
-    // Check for active timer
+    // Keep every active test and exam visible. Session metadata is stored per
+    // question/attempt so opening another session cannot replace this list.
     const checkTimer = () => {
-      let active = false;
       try {
-        const savedExam = localStorage.getItem(IN_PROGRESS_EXAM_KEY);
-        if (savedExam) {
-          const parsed = parseOwnedInProgressExam(savedExam, profile.id);
-          if (parsed) {
-            setActiveTestState({
-              type: "exam",
-              id: parsed.examId,
-              title: parsed.title,
-              isPractice: parsed.isPractice
-            });
-            active = true;
-          } else {
-            localStorage.removeItem(IN_PROGRESS_EXAM_KEY);
-          }
-        }
-
-        if (!active) {
-          const saved = localStorage.getItem(STANDALONE_SESSION_KEY);
-          if (saved) {
-            const parsed = parseStandaloneSession(saved);
-            if (parsed) {
-              setActiveTestState({
-                type: "test",
-                id: parsed.questionId,
-                title: parsed.prompt
-              });
-              active = true;
-            } else {
-              localStorage.removeItem(STANDALONE_SESSION_KEY);
-            }
-          }
-        }
+        setActiveSessions(listActiveSessionLinks(localStorage, profile.id));
       } catch {
-        // ignore
-      }
-      
-      if (!active) {
-        setActiveTestState(null);
+        setActiveSessions([]);
       }
     };
     
     checkTimer();
     const timerCheckpoint = setInterval(checkTimer, 15_000);
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === STANDALONE_SESSION_KEY || e.key === IN_PROGRESS_EXAM_KEY || e.key === null) checkTimer();
+      if (isActiveSessionStorageKey(e.key)) checkTimer();
     };
     window.addEventListener("storage", handleStorage);
     window.addEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
@@ -253,6 +220,7 @@ export default function MainShell({
         console.error("Unable to unregister this browser from push notifications", error);
       }
     }
+    clearStandaloneSessions(localStorage);
     clearExamBrowserStateOnSignOut(localStorage, sessionStorage);
     await supabase.auth.signOut();
     router.push("/login");
@@ -326,27 +294,7 @@ export default function MainShell({
             );
           })}
           
-          {/* Active Test Sidenav Link */}
-          {activeTestState && (
-            <div className="pt-2">
-              <Link
-                href={activeTestState.type === "exam" 
-                  ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
-                  : `/test/${activeTestState.id}`}
-                prefetch={false}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-bold bg-brand-600 text-white shadow-md shadow-brand-200 hover:bg-brand-700 transition-colors relative overflow-hidden group"
-              >
-                <span className="absolute inset-0 w-1/4 bg-white/20 skew-x-[45deg] -translate-x-full group-hover:animate-shine"></span>
-                <Play size={18} className="shrink-0" />
-                <div className="flex flex-col items-start min-w-0">
-                  <span className="text-[10px] uppercase tracking-wider opacity-80 leading-none mb-0.5">
-                    Active {activeTestState.type === "exam" ? "Exam" : "Test"}
-                  </span>
-                  <span className="truncate w-full">{activeTestState.title}</span>
-                </div>
-              </Link>
-            </div>
-          )}
+          <ActiveSessionSidenavLinks sessions={activeSessions} />
         </nav>
 
         {/* Usage Bar */}
@@ -480,28 +428,10 @@ export default function MainShell({
             );
           })}
           
-          {/* Active Test Sidenav Link Mobile */}
-          {activeTestState && (
-            <div className="pt-2">
-              <Link
-                onClick={() => setSidenavOpen(false)}
-                href={activeTestState.type === "exam" 
-                  ? `/exams/${activeTestState.id}${activeTestState.isPractice ? "?practice=true" : ""}` 
-                  : `/test/${activeTestState.id}`}
-                prefetch={false}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-bold bg-brand-600 text-white shadow-md shadow-brand-200 hover:bg-brand-700 transition-colors relative overflow-hidden group"
-              >
-                <span className="absolute inset-0 w-1/4 bg-white/20 skew-x-[45deg] -translate-x-full group-hover:animate-shine"></span>
-                <Play size={18} className="shrink-0" />
-                <div className="flex flex-col items-start min-w-0">
-                  <span className="text-[10px] uppercase tracking-wider opacity-80 leading-none mb-0.5">
-                    Active {activeTestState.type === "exam" ? "Exam" : "Test"}
-                  </span>
-                  <span className="truncate w-full">{activeTestState.title}</span>
-                </div>
-              </Link>
-            </div>
-          )}
+          <ActiveSessionSidenavLinks
+            sessions={activeSessions}
+            onNavigate={() => setSidenavOpen(false)}
+          />
         </nav>
 
         {/* Usage Bar */}

@@ -126,16 +126,15 @@ The timer supports pause/resume and a restart button (with confirmation dialog).
 Elapsed seconds are stored in the final submission for analytics.
 
 ### 4.3 Session Persistence (localStorage)
-The current test state is saved to `localStorage` under `in_progress_test` on every state change.
+Each current test is saved to its own `localStorage` key under the `in_progress_test:` prefix on every state change. The legacy `in_progress_test` key mirrors the most recently updated test for backward compatibility.
 This includes the question ID, prompt, category, marks, elapsed seconds, timer state, and a `lastUpdatedAt` timestamp.
 If the student navigates away and returns within 1 hour, the session is restored automatically.
 After 1 hour of inactivity, the stored session is treated as expired and cleared.
 
 ### 4.4 Active Test Reminder
 The main shell detects in-progress tests and exams via localStorage on mount.
-If an active session is found and the user is not already on the test page, a popup reminder appears offering to navigate back.
-A persistent green banner at the bottom of the app shows the active test/exam title with a "Continue" button.
-Cross-tab synchronization via `StorageEvent` and custom events ensures the banner updates when a test starts or ends in another tab.
+Every active test and exam appears as its own link in the desktop and mobile sidenav, ordered by the most recently updated session.
+Cross-tab synchronization via `StorageEvent` and custom events ensures the list updates when a test starts or ends in another tab.
 
 ### 4.5 Image Upload
 Students upload photos of their handwritten answers via file picker (JPEG, PNG, WebP, GIF; max 10MB).
@@ -162,7 +161,7 @@ Both the original OCR text and the edited text are stored in the submission, cre
 The client presents availability, but `/api/grade` derives the user, active question, category, and marks on the server. It reserves quota with `reserve_standalone_usage`, grades, and atomically inserts the submission plus consumes the charge with `complete_standalone_grade`. Failed grading calls `release_standalone_usage`; a stable request UUID makes lost-response retries safe.
 
 ### 4.10 Session Cancellation
-A "Cancel Session" button is available during the running/paused states.
+A "Cancel Session" button is available while selecting an answer method, while paused, and while reviewing or editing OCR text.
 Cancellation clears localStorage, resets the timer, and returns to the idle state.
 A confirmation dialog prevents accidental clicks.
 
@@ -517,10 +516,9 @@ The sidebar slides open as an overlay on mobile (triggered by hamburger menu) wi
 Displays the app logo/name, notification bell with unread badge, and a user avatar/logout area.
 On desktop, the header is part of the sidebar; on mobile, it's a sticky top bar.
 
-### 21.4 Active Test/Exam Banner
-A persistent bottom banner appears when a test or exam is in progress (detected via localStorage).
-Shows the test/exam title and a "Continue" CTA that links directly to the active session.
-The banner uses a pulsing green dot animation to draw attention.
+### 21.4 Active Test/Exam Links
+The desktop and mobile sidenav show every in-progress test and exam detected via localStorage.
+Each session has its own direct link, and the active-session count remains visible above the list.
 
 ### 21.5 Activity Tracking
 The `last_active_at` timestamp on the profile is updated on every app load.

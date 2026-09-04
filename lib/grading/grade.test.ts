@@ -217,16 +217,72 @@ describe('AI Grading Utility', () => {
     );
 
     expect(result.studentFeedback.remarks).toContain('relevant position');
+    expect(result.studentFeedback.remarks).toContain('No paragraph breaks are visible');
+    expect(result.studentFeedback.remarks).toContain('opening that states your position');
     expect(result.studentFeedback.personalizedFeedback).toContain('No previous Argumentative Essay answers');
     expect(result.studentFeedback.personalizedFeedback?.split('\n\n')).toHaveLength(2);
     expect(result.studentFeedback.waysToImprove).toContain('People are affected');
     expect(result.studentFeedback.waysToImprove).toBe([
-      '1. Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
-      '2. Read the revised sentence in context to confirm that its subject and verb still agree.',
+      '1. Use separate paragraphs next time: one for the opening and position, one for each developed reason or example, and one for the conclusion. Your submitted answer had no visible paragraph breaks, so its structure was harder to follow.',
+      '2. Proofread agreement first. Instead of “People is affected,” write “People are affected.”',
+      '3. Read the revised sentence in context to confirm that its subject and verb still agree.',
     ].join('\n'));
     expect(result.studentFeedback.grammarErrors).toHaveLength(1);
     expect(result.studentFeedback.grammarErrors?.[0].corrections).toHaveLength(2);
-    expect(result.studentFeedback.summary.split('\n\n')).toHaveLength(4);
+    expect(result.studentFeedback.summary.split('\n\n')).toHaveLength(5);
+  });
+
+  it('keeps the paragraph reminder as a deterministic fallback for one-block essays', async () => {
+    const mockResponse = JSON.stringify({
+      internal: { total: 6, max: 10, criteria: [] },
+      student_feedback: {
+        score: '6/10',
+        remarks: 'The main view is clear, but the answer is difficult to scan. No paragraph breaks are visible.',
+        ways_to_improve: [
+          'Add a specific example for the main reason.',
+          'End by restating the position clearly.',
+          'Proofread the final answer.',
+        ],
+        grammar_errors: [],
+        highlights: [],
+      },
+    });
+
+    const result = await grade(
+      createMockClient(mockResponse),
+      'This essay has an opening, several reasons, an example, and a conclusion but no line breaks anywhere.',
+      'argumentative_essay',
+      10,
+    );
+
+    expect(result.studentFeedback.waysToImprove).toContain('Use separate paragraphs next time');
+    expect(result.studentFeedback.waysToImprove).toContain('no visible paragraph breaks');
+    expect(result.studentFeedback.waysToImprove?.split('\n')).toHaveLength(3);
+    expect(result.studentFeedback.remarks).toContain('No paragraph breaks are visible');
+    expect(result.studentFeedback.remarks).toContain('separate body paragraphs');
+    expect(result.studentFeedback.remarks?.split('\n\n')).toHaveLength(2);
+  });
+
+  it('does not add the fallback to a multi-paragraph essay or a basic paragraph task', async () => {
+    const mockResponse = JSON.stringify({
+      internal: { total: 6, max: 10, criteria: [] },
+      student_feedback: {
+        score: '6/10',
+        remarks: 'The main view is clear.',
+        ways_to_improve: ['Add one specific example.', 'Use a stronger final sentence.'],
+        grammar_errors: [],
+        highlights: [],
+      },
+    });
+    const client = createMockClient(mockResponse);
+
+    const essay = await grade(client, 'Opening paragraph.\n\nBody paragraph.', 'argumentative_essay', 10);
+    const paragraph = await grade(client, 'One unified paragraph is correct for this task.', 'basic_paragraph', 10);
+
+    expect(essay.studentFeedback.waysToImprove).not.toContain('Use separate paragraphs next time');
+    expect(paragraph.studentFeedback.waysToImprove).not.toContain('Use separate paragraphs next time');
+    expect(essay.studentFeedback.remarks).not.toContain('No paragraph breaks are visible');
+    expect(paragraph.studentFeedback.remarks).not.toContain('No paragraph breaks are visible');
   });
 
   it('normalizes legacy improvement text into a numbered list', async () => {
