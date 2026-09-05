@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   applicationName: "IBA Written",
   title: {
-    default: "IBA Written — AI-Powered Exam Preparation",
+    default: "IBA Written",
     template: "%s | IBA Written",
   },
   description:
