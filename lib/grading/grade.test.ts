@@ -285,6 +285,51 @@ describe('AI Grading Utility', () => {
     expect(paragraph.studentFeedback.remarks).not.toContain('No paragraph breaks are visible');
   });
 
+  it('deducts half a mark and adds explicit review guidance for a split basic paragraph', async () => {
+    const mockResponse = JSON.stringify({
+      internal: {
+        total: 6,
+        max: 6,
+        criteria: [
+          {
+            criterion: 'Concluding sentence, flow & grammar',
+            marks_awarded: 1,
+            marks_possible: 1,
+            reasoning: 'The answer reads clearly.',
+          },
+          {
+            criterion: 'Development of the main idea',
+            marks_awarded: 5,
+            marks_possible: 5,
+            reasoning: 'The central idea is fully developed.',
+          },
+        ],
+      },
+      student_feedback: {
+        score: '6/6',
+        remarks: 'The answer has a clear main idea and useful support.',
+        ways_to_improve: ['Use a more specific example.', 'Proofread the final sentence.'],
+        grammar_errors: [],
+        highlights: [],
+      },
+    });
+
+    const result = await grade(
+      createMockClient(mockResponse),
+      'The topic sentence introduces the idea.\n\nThe support starts in a second paragraph.',
+      'basic_paragraph',
+      6,
+    );
+
+    expect(result.internal.total).toBe(5.5);
+    expect(result.studentFeedback.score).toBe('5.5/6');
+    expect(result.internal.criteria[0].marksAwarded).toBe(0.5);
+    expect(result.internal.criteria[0].reasoning).toContain('0.5-mark format penalty');
+    expect(result.studentFeedback.remarks).toContain('more than one visible paragraph');
+    expect(result.studentFeedback.remarks).toContain('exactly one unified paragraph');
+    expect(result.studentFeedback.waysToImprove).toContain('exactly one unified paragraph');
+  });
+
   it('normalizes legacy improvement text into a numbered list', async () => {
     const mockResponse = JSON.stringify({
       internal: { total: 6, max: 10, criteria: [] },

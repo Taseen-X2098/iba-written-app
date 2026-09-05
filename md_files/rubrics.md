@@ -321,7 +321,7 @@ must not receive more than 50% of the raw marks.
 
 ## 6. Basic Paragraph
  
-A single-paragraph task is judged on the same bones as the essay (understanding → development → support → structure) minus the counter-argument machinery, since there's no "other option" to dismiss in one paragraph. As marks shrink, categories start merging — same rule as the Creative Writing and Personal Reflection tiers: don't invent precision the mark count can't support.
+A single-paragraph task is judged on the same bones as the essay (understanding → development → support → structure) minus the counter-argument machinery, since there's no "other option" to dismiss in one paragraph. The answer must contain exactly one visible paragraph. When it contains more than one non-empty paragraph, the application applies one fixed 0.5-mark format penalty and the review must tell the student to merge the answer into one unified paragraph; do not apply that fixed penalty twice. Any additional loss for drift, repetition, weak unity, or poor flow still belongs under the relevant criterion. As marks shrink, categories start merging — same rule as the Creative Writing and Personal Reflection tiers: don't invent precision the mark count can't support.
  
 ### Basic Paragraph — 15 Marks
  

@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ExamTakerClient from "./exam-taker-client";
 import type { AttemptQuestion, Exam, ExamAttempt } from "@/lib/types";
 
@@ -144,6 +144,38 @@ describe.each([
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
   });
 
+  it("shows the question type without exposing grading instructions", () => {
+    const basicParagraphQuestion: AttemptQuestion = {
+      ...examQuestion,
+      questions: {
+        ...examQuestion.questions,
+        category: "basic_paragraph",
+        prompt: "Write a paragraph about persistence.",
+      },
+    };
+    const exam = makeExam(isMagnusOnly);
+
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[basicParagraphQuestion]}
+        attempt={makeAttempt(exam.id)}
+        writerToken="writer-token"
+        initialDrafts={{
+          [basicParagraphQuestion.id]: {
+            ocrText: "Persistence matters.",
+            editedText: "Persistence matters.",
+            updatedAt: "2026-09-05T00:00:00.000Z",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Paragraph Writing")).toBeInTheDocument();
+    expect(screen.queryByText(/Write exactly one unified paragraph/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Starting a second paragraph will reduce your mark/)).not.toBeInTheDocument();
+  });
+
   it("stores translation photos for human grading without calling OCR", async () => {
     const translationQuestion: AttemptQuestion = {
       ...examQuestion,
@@ -194,5 +226,80 @@ describe.each([
       expect.objectContaining({ method: "POST" }),
     );
     expect(globalThis.fetch).not.toHaveBeenCalledWith("/api/ocr", expect.anything());
+  });
+
+  it("waits for a last-second translation upload before automatic finalization", async () => {
+    const translationQuestion: AttemptQuestion = {
+      ...examQuestion,
+      id: "translation-exam-question",
+      questions: {
+        ...examQuestion.questions,
+        id: "translation-question",
+        category: "translation",
+        prompt: "Translate the passage into Bangla.",
+      },
+    };
+    let finishUpload!: (response: Response) => void;
+    jest.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/translation-images")) {
+        return new Promise<Response>((resolve) => {
+          finishUpload = resolve;
+        });
+      }
+      if (url.endsWith("/complete")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const exam = makeExam(isMagnusOnly);
+    const attempt = {
+      ...makeAttempt(exam.id),
+      expires_at: new Date(Date.now() + 100).toISOString(),
+    };
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[translationQuestion]}
+        attempt={attempt}
+        writerToken="writer-token"
+        initialDrafts={{}}
+      />,
+    );
+
+    const upload = screen.getByText("Upload Page Photos")
+      .closest("label")
+      ?.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(upload!, {
+      target: { files: [new File(["translation"], "translation.jpg", { type: "image/jpeg" })] },
+    });
+
+    expect(screen.getByRole("button", { name: "Saving Image…" })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Waiting for Image Upload…" })).toBeDisabled();
+    }, { timeout: 2_000 });
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/complete"),
+      expect.anything(),
+    );
+
+    await act(async () => {
+      finishUpload({
+        ok: true,
+        json: async () => ({
+          manualReviewOnly: true,
+          images: [{ id: "image-1", pageIndex: 1, url: "https://example.test/signed-page" }],
+        }),
+      } as Response);
+    });
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/complete"),
+      expect.objectContaining({ method: "POST" }),
+    ));
   });
 });

@@ -92,6 +92,9 @@ describe("SingleTestClient grading completion", () => {
   it("shows feedback without refreshing the route after a successful grade", async () => {
     render(<SingleTestClient question={question} hasTestsAvailable />);
 
+    expect(screen.getByText("Paragraph Writing")).toBeInTheDocument();
+    expect(screen.queryByText(/Write exactly one unified paragraph/)).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: /start test/i }));
 
     const upload = document.querySelector<HTMLInputElement>("#file-upload-gallery");

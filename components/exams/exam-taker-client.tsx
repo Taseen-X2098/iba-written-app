@@ -29,15 +29,16 @@ import {
   removeInProgressExam,
   writeInProgressExam,
 } from "@/lib/exams/in-progress-exam";
-import type {
-  AttemptDrafts,
-  AttemptQuestion,
-  Exam,
-  ExamAttempt,
-  GradingResultJSON,
-  PersonalProgressionCardDTO,
-  TranslationAnswerImagePreview,
-  TranslationAnswerImages,
+import {
+  CATEGORY_LABELS,
+  type AttemptDrafts,
+  type AttemptQuestion,
+  type Exam,
+  type ExamAttempt,
+  type GradingResultJSON,
+  type PersonalProgressionCardDTO,
+  type TranslationAnswerImagePreview,
+  type TranslationAnswerImages,
 } from "@/lib/types";
 
 type AnswerState = {
@@ -137,6 +138,8 @@ export default function ExamTakerClient({
   );
   const expiryTriggered = useRef(false);
   const completionInFlight = useRef(false);
+  const pendingUploads = useRef(new Set<Promise<boolean>>());
+  const hasPendingUploads = Object.values(answers).some((answer) => answer.uploading);
 
   useEffect(() => {
     answersRef.current = answers;
@@ -287,8 +290,15 @@ export default function ExamTakerClient({
     setLocked(true);
     setIsSubmitting(true);
     try {
+      const uploadResults = await Promise.all([...pendingUploads.current]);
+      if (
+        uploadResults.some((uploaded) => !uploaded)
+        && Date.now() < new Date(attempt.expires_at).getTime()
+      ) {
+        throw new Error("Wait for every selected image to be saved successfully before submitting.");
+      }
       const saved = await saveRef.current();
-      if (!saved && !expired) {
+      if (!saved && Date.now() < new Date(attempt.expires_at).getTime()) {
         throw new Error("Save the corrected answers before submitting.");
       }
       const response = await fetch(`/api/exam-attempts/${attempt.id}/complete`, {
@@ -357,7 +367,16 @@ export default function ExamTakerClient({
     return () => window.clearInterval(timer);
   }, [attempt.expires_at, attempt.id, attempt.user_id, exam.id, exam.title, isPractice]);
 
-  async function handleFileUpload(questionId: string, files: FileList | File[]) {
+  function handleFileUpload(questionId: string, files: FileList | File[]) {
+    if (completionInFlight.current) return Promise.resolve(false);
+
+    const upload = performFileUpload(questionId, files);
+    pendingUploads.current.add(upload);
+    void upload.finally(() => pendingUploads.current.delete(upload));
+    return upload;
+  }
+
+  async function performFileUpload(questionId: string, files: FileList | File[]) {
     const question = examQuestions.find((item) => item.id === questionId);
     const selectedFiles = Array.from(files);
     const violation = getPageLimitViolation(selectedFiles.length);
@@ -369,7 +388,7 @@ export default function ExamTakerClient({
         ...current,
         [questionId]: { ...current[questionId], uploading: false, error: message },
       }));
-      return;
+      return false;
     }
     setAnswers((current) => ({
       ...current,
@@ -403,7 +422,7 @@ export default function ExamTakerClient({
             isDirty: false,
           },
         }));
-        return;
+        return true;
       }
       const editedText = data.text;
       setAnswers((current) => ({
@@ -418,6 +437,7 @@ export default function ExamTakerClient({
         },
       }));
       await persistEntries([[questionId, { ocrText: editedText, editedText }]]);
+      return true;
     } catch (error) {
       setAnswers((current) => ({
         ...current,
@@ -429,6 +449,7 @@ export default function ExamTakerClient({
             : question.questions.category === "translation" ? "Image upload failed" : "OCR failed",
         },
       }));
+      return false;
     }
   }
 
@@ -664,7 +685,12 @@ export default function ExamTakerClient({
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">{index + 1}</span>
-                  <h2 className="font-bold">Question {index + 1}</h2>
+                  <div>
+                    <h2 className="font-bold">Question {index + 1}</h2>
+                    <span className="mt-1 inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-brand-700 sm:text-xs">
+                      {CATEGORY_LABELS[question.questions.category] || question.questions.category}
+                    </span>
+                  </div>
                 </div>
                 <span className="text-sm font-bold text-muted-foreground">{question.marks} marks</span>
               </div>
@@ -812,9 +838,13 @@ export default function ExamTakerClient({
           <button type="button" disabled={locked || isSavingAll || !Object.values(answers).some((answer) => answer.isDirty)} onClick={() => void saveDrafts()} className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-5 py-3 font-bold disabled:opacity-50">
             {isSavingAll ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} Save Changes
           </button>
-          <button type="button" disabled={locked || isSubmitting || hasOverLimitAnswers} onClick={() => void completeAttempt()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-8 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-            {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
-            {isSubmitting ? "Finalizing…" : hasOverLimitAnswers ? "Shorten Over-Limit Answers" : isPractice ? "Finish Practice" : "Submit Exam"}
+          <button type="button" disabled={locked || isSubmitting || hasPendingUploads || hasOverLimitAnswers} onClick={() => void completeAttempt()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-8 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            {isSubmitting || hasPendingUploads ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+            {isSubmitting
+              ? hasPendingUploads ? "Waiting for Image Upload…" : "Finalizing…"
+              : hasPendingUploads ? "Saving Image…"
+              : hasOverLimitAnswers ? "Shorten Over-Limit Answers"
+              : isPractice ? "Finish Practice" : "Submit Exam"}
           </button>
         </div>
       </div>

@@ -37,7 +37,7 @@ export default async function ExamResultsPage({
     return (
       <div className="mx-auto max-w-5xl px-4 pb-12">
         <StatusCard
-          title={ongoing ? "Submission received — results pending" : "Results pending"}
+          title={ongoing ? "Submission received, results pending" : "Results pending"}
           message={ongoing
             ? `The exam remains open for other students until ${new Date(exam.ends_at).toLocaleString()}. Scores, feedback, and the leaderboard stay private until an admin publishes the results.`
             : "Grading is in progress. Scores, feedback, and the leaderboard will appear after every answer has a final grade and an admin publishes the results."}

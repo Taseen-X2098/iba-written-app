@@ -143,7 +143,7 @@ export default function DashboardClient({ profile, tip, stats, trend }: Dashboar
           <div className="flex items-center gap-2 mb-2">
             <Lightbulb size={16} className="text-brand-600" />
             <span className="text-xs font-semibold text-brand-700 uppercase tracking-wide">
-              Daily Tip
+              Tip
             </span>
           </div>
           <p className="text-sm text-foreground leading-relaxed italic">

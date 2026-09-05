@@ -52,6 +52,14 @@ describe("POST translation answer images", () => {
   });
 
   it("stores the original page in the private human-review bucket", async () => {
+    jest.mocked(requireAttemptWriter).mockResolvedValue({
+      id: ATTEMPT_ID,
+      exam_id: EXAM_ID,
+      user_id: USER_ID,
+      mode: "official",
+      status: "active",
+      expires_at: new Date(Date.now() - 30_000).toISOString(),
+    } as Awaited<ReturnType<typeof requireAttemptWriter>>);
     const upload = jest.fn().mockResolvedValue({ error: null });
     const remove = jest.fn().mockResolvedValue({ error: null });
     const examQuestionQuery = {
@@ -101,5 +109,24 @@ describe("POST translation answer images", () => {
       expect.any(ArrayBuffer),
       expect.objectContaining({ contentType: "image/png", upsert: false }),
     );
+  });
+
+  it("rejects an image after the final network grace period", async () => {
+    jest.mocked(requireAttemptWriter).mockResolvedValue({
+      id: ATTEMPT_ID,
+      exam_id: EXAM_ID,
+      user_id: USER_ID,
+      mode: "official",
+      status: "active",
+      expires_at: new Date(Date.now() - 3 * 60_000 - 1_000).toISOString(),
+    } as Awaited<ReturnType<typeof requireAttemptWriter>>);
+
+    const response = await POST(formRequest(), { params: Promise.resolve({ attemptId: ATTEMPT_ID }) });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      code: "ATTEMPT_EXPIRED",
+    }));
+    expect(createAdminClient).not.toHaveBeenCalled();
   });
 });

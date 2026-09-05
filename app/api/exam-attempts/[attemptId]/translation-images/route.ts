@@ -55,8 +55,12 @@ export async function POST(
     if (attempt.status !== "active") {
       throw new ApiError("ATTEMPT_NOT_ACTIVE", "The exam attempt is locked", 409);
     }
-    if (Date.now() > new Date(attempt.expires_at).getTime()) {
-      throw new ApiError("ATTEMPT_EXPIRED", "The exam time has ended", 409);
+    // Match draft/finalization grace: a request that was started just before
+    // time ran out must still have enough time to finish transferring up to
+    // two page photos. The attempt must remain active, so this does not permit
+    // changing an answer after it has been finalized.
+    if (Date.now() > new Date(attempt.expires_at).getTime() + 3 * 60_000) {
+      throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
     }
 
     const admin = createAdminClient();

@@ -246,6 +246,56 @@ function taskTypeLabel(taskType: string): string {
     .join(" ");
 }
 
+const BASIC_PARAGRAPH_COUNT_PENALTY = 0.5;
+
+function visibleParagraphCount(submission: string): number {
+  return submission
+    .trim()
+    .split(/\r?\n(?:[\t ]*\r?\n)*/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .length;
+}
+
+function hasMultipleBasicParagraphs(submission: string, taskType: string): boolean {
+  return taskType === "basic_paragraph" && visibleParagraphCount(submission) > 1;
+}
+
+function applyBasicParagraphCountPenalty(
+  submission: string,
+  taskType: string,
+  modelTotal: number,
+  criteria: GradingResult["internal"]["criteria"],
+) {
+  if (!hasMultipleBasicParagraphs(submission, taskType)) {
+    return { modelTotal, criteria };
+  }
+
+  const penalty = Math.min(BASIC_PARAGRAPH_COUNT_PENALTY, Math.max(0, modelTotal));
+  let remaining = penalty;
+  const preferred = criteria
+    .map((criterion, index) => ({ criterion, index }))
+    .filter(({ criterion }) => /unity|logical order|flow|paragraph|structure/i.test(criterion.criterion))
+    .map(({ index }) => index);
+  const fallback = criteria.map((_, index) => index).filter((index) => !preferred.includes(index));
+  const adjustedCriteria = criteria.map((criterion) => ({ ...criterion }));
+
+  for (const index of [...preferred, ...fallback]) {
+    if (remaining <= 0) break;
+    const criterion = adjustedCriteria[index];
+    const deducted = Math.min(remaining, Math.max(0, criterion.marksAwarded));
+    if (deducted <= 0) continue;
+    criterion.marksAwarded -= deducted;
+    criterion.reasoning = `${criterion.reasoning.trim()} A ${deducted}-mark format penalty was applied because the basic paragraph used more than one visible paragraph.`.trim();
+    remaining -= deducted;
+  }
+
+  return {
+    modelTotal: Math.max(0, modelTotal - penalty),
+    criteria: adjustedCriteria,
+  };
+}
+
 const PARAGRAPH_STRUCTURE_ACTIONS: Readonly<Record<string, string>> = {
   argumentative_essay: "Use separate paragraphs next time: one for the opening and position, one for each developed reason or example, and one for the conclusion. Your submitted answer had no visible paragraph breaks, so its structure was harder to follow.",
   quote_analysis: "Use separate paragraphs next time: explain the quote and your view first, develop the reasons and example in the middle, and end with a short conclusion. Your submitted answer had no visible paragraph breaks.",
@@ -262,6 +312,9 @@ const PARAGRAPH_STRUCTURE_REMARKS: Readonly<Record<string, string>> = {
   story_completion: "No paragraph breaks are visible in the submitted story. Start a new paragraph when the scene, time, speaker, or main focus changes so the continuation is easier to follow.",
 };
 
+const BASIC_PARAGRAPH_STRUCTURE_ACTION = "Write the next basic paragraph as exactly one unified paragraph. Your submitted answer used more than one visible paragraph, so merge the topic sentence, supporting details, and closing sentence without starting a second paragraph.";
+const BASIC_PARAGRAPH_STRUCTURE_REMARK = "The submitted answer uses more than one visible paragraph. A basic paragraph must be exactly one unified paragraph, so keep the topic sentence, connected support, and closing sentence together.";
+
 const PARAGRAPH_STRUCTURE_REMARK_PATTERNS: Readonly<Record<string, RegExp>> = {
   argumentative_essay: /(?:opening|introduction)[\s\S]*(?:body|reason|example)[\s\S]*conclusion/i,
   quote_analysis: /(?:opening|introduction)[\s\S]*(?:reason|example)[\s\S]*conclusion/i,
@@ -271,6 +324,9 @@ const PARAGRAPH_STRUCTURE_REMARK_PATTERNS: Readonly<Record<string, RegExp>> = {
 };
 
 function needsParagraphStructureReminder(submission: string, taskType: string): boolean {
+  if (taskType === "basic_paragraph") {
+    return hasMultipleBasicParagraphs(submission, taskType);
+  }
   return Boolean(PARAGRAPH_STRUCTURE_ACTIONS[taskType])
     && !/\r?\n\s*(?:\r?\n)?/.test(submission.trim());
 }
@@ -280,10 +336,16 @@ function ensureParagraphStructureRemarks(
   taskType: string,
   remarks: string,
 ): string {
-  const reminder = PARAGRAPH_STRUCTURE_REMARKS[taskType];
+  const reminder = taskType === "basic_paragraph"
+    ? BASIC_PARAGRAPH_STRUCTURE_REMARK
+    : PARAGRAPH_STRUCTURE_REMARKS[taskType];
   const structurePattern = PARAGRAPH_STRUCTURE_REMARK_PATTERNS[taskType];
   const identifiesOneBlock = /no (?:visible )?paragraph breaks|one uninterrupted block/i.test(remarks);
-  const alreadyCovered = identifiesOneBlock && structurePattern?.test(remarks);
+  const identifiesSplitBasicParagraph = /more than one|multiple|separate|split/i.test(remarks)
+    && /(?:one|single|unified) paragraph/i.test(remarks);
+  const alreadyCovered = taskType === "basic_paragraph"
+    ? identifiesSplitBasicParagraph
+    : identifiesOneBlock && structurePattern?.test(remarks);
 
   if (!reminder || !needsParagraphStructureReminder(submission, taskType) || alreadyCovered) {
     return remarks;
@@ -307,10 +369,16 @@ function ensureParagraphStructureAction(
   value: unknown,
 ): string {
   const actions = parseImprovementActions(value);
-  const reminder = PARAGRAPH_STRUCTURE_ACTIONS[taskType];
-  const alreadyCovered = actions.some((action) =>
-    /no (?:visible )?paragraph breaks|separate paragraphs|add (?:the missing )?(?:paragraph|line) breaks|start (?:a )?new paragraph/i.test(action),
-  );
+  const reminder = taskType === "basic_paragraph"
+    ? BASIC_PARAGRAPH_STRUCTURE_ACTION
+    : PARAGRAPH_STRUCTURE_ACTIONS[taskType];
+  const alreadyCovered = taskType === "basic_paragraph"
+    ? actions.some((action) =>
+        /(?:exactly one|single|unified) paragraph|merge[\s\S]*paragraph/i.test(action),
+      )
+    : actions.some((action) =>
+        /no (?:visible )?paragraph breaks|separate paragraphs|add (?:the missing )?(?:paragraph|line) breaks|start (?:a )?new paragraph/i.test(action),
+      );
 
   if (!reminder || !needsParagraphStructureReminder(submission, taskType) || alreadyCovered) {
     return formatNumberedImprovementList(actions);
@@ -451,15 +519,21 @@ export async function grade(
     );
   }
 
-  const normalizedTotal = calibrateAiFinalMark(parsed.internal.total, marks);
-  const criteria = calibrateCriteria(
+  const paragraphAdjusted = applyBasicParagraphCountPenalty(
+    submission,
+    taskType,
+    parsed.internal.total,
     parsed.internal.criteria.map((criterion) => ({
       criterion: criterion.criterion,
       marksAwarded: criterion.marks_awarded,
       marksPossible: criterion.marks_possible,
       reasoning: criterion.reasoning,
     })),
-    parsed.internal.total,
+  );
+  const normalizedTotal = calibrateAiFinalMark(paragraphAdjusted.modelTotal, marks);
+  const criteria = calibrateCriteria(
+    paragraphAdjusted.criteria,
+    paragraphAdjusted.modelTotal,
     normalizedTotal,
   );
   const legacySummary = String(parsed.student_feedback.summary ?? "").trim();
