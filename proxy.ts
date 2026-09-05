@@ -11,9 +11,17 @@ const AUTH_PATHS = [
 
 const PUBLIC_PATHS = ["/subscription", "/~offline"];
 
+function isSupabaseSessionCookie(name: string) {
+  // Supabase also writes keys such as `...-auth-token-code-verifier` during
+  // PKCE signup and password recovery. Those prove only that an auth flow is
+  // in progress; they are not sessions. Real session cookies are either the
+  // base storage key or one of its numbered chunks.
+  return name.startsWith("sb-") && /-auth-token(?:\.\d+)?$/.test(name);
+}
+
 function hasSupabaseSession(request: NextRequest) {
   return request.cookies.getAll().some(({ name, value }) =>
-    Boolean(value) && name.startsWith("sb-") && name.includes("auth-token"),
+    Boolean(value) && isSupabaseSessionCookie(name),
   );
 }
 
@@ -64,12 +72,14 @@ export function proxy(request: NextRequest) {
   if (!hasSession && !authPath && !publicPath) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
     url.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(url);
   }
-  if (hasSession && authPath && !pathname.startsWith("/reset-password") && !pathname.startsWith("/auth/callback")) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
+  // Never redirect away from an auth page based only on cookie presence. A
+  // cookie can be expired, malformed, or incomplete; the protected layouts
+  // validate it with Supabase. Redirecting here would turn any stale cookie
+  // into an infinite `/login` <-> `/` loop.
   return NextResponse.next();
 }
 

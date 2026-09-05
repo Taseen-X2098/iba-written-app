@@ -47,3 +47,55 @@ describe("proxy request-boundary CSRF protection", () => {
     expect(response.status).toBe(200);
   });
 });
+
+describe("proxy auth routing", () => {
+  it("does not mistake a PKCE code verifier for a session after signup", () => {
+    const request = new NextRequest("https://app.example.test/verify-email", {
+      headers: {
+        cookie: "sb-project-auth-token-code-verifier=temporary-verifier",
+      },
+    });
+
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("redirects a protected route when only a PKCE code verifier exists", () => {
+    const request = new NextRequest("https://app.example.test/questions?category=essay", {
+      headers: {
+        cookie: "sb-project-auth-token-code-verifier=temporary-verifier",
+      },
+    });
+
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://app.example.test/login?next=%2Fquestions%3Fcategory%3Dessay",
+    );
+  });
+
+  it("lets the login page render when a stale session cookie is present", () => {
+    const request = new NextRequest("https://app.example.test/login", {
+      headers: { cookie: SESSION_COOKIE },
+    });
+
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("recognizes numbered Supabase session-cookie chunks", () => {
+    const request = new NextRequest("https://app.example.test/questions", {
+      headers: { cookie: "sb-project-auth-token.0=session-chunk" },
+    });
+
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+});
