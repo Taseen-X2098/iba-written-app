@@ -3,8 +3,9 @@
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
-import { sendPlanActivatedEmail, sendSlotsAddedEmail } from "@/lib/email/brevo";
+import { sendSlotsAddedEmail } from "@/lib/email/brevo";
 import { wakeGradingWorker } from "@/lib/grading/jobs";
+import { deliverAccountApprovalNotifications } from "@/lib/notifications/account-approval";
 import type { PlanType } from "@/lib/types";
 import { z } from "zod";
 
@@ -163,17 +164,22 @@ export async function adminActivateSubscription(userId: string, planType: string
 
     // 4. Create new subscription
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { error } = await supabaseAdmin.from("subscriptions").insert({
+    const { data: subscription, error } = await supabaseAdmin.from("subscriptions").insert({
       user_id: input.userId,
       plan_type: input.planType,
       tests_remaining: testsRemaining,
       extra_tests_purchased: carriedOverExtra,
       is_active: true,
       expires_at: expiresAt, // 30 days
-    });
+    }).select("id").single();
 
     if (error) throw error;
-    await sendPlanActivatedEmail(input.userId, input.planType as PlanType, expiresAt);
+    await deliverAccountApprovalNotifications({
+      userId: input.userId,
+      planType: input.planType as PlanType,
+      expiresAt,
+      subscriptionId: subscription.id,
+    });
     revalidatePath("/admin/users");
     return { success: true };
   } catch (error: unknown) {

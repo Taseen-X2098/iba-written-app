@@ -71,12 +71,22 @@ export async function resolveOcrContext(
   const admin = await createAdminClient();
   const { data: examQuestion, error } = await admin
     .from("exam_questions")
-    .select("id")
+    .select("id, questions(category)")
     .eq("id", parsed.data.examQuestionId)
     .eq("exam_id", attempt.exam_id)
     .single();
   if (error || !examQuestion) {
     throw new ApiError("VALIDATION_ERROR", "Question does not belong to this exam", 400);
+  }
+  const joinedQuestion = Array.isArray(examQuestion.questions)
+    ? examQuestion.questions[0]
+    : examQuestion.questions;
+  if (joinedQuestion?.category === "translation") {
+    throw new ApiError(
+      "VALIDATION_ERROR",
+      "Translation answers are stored as images for human grading and are never sent to OCR.",
+      409,
+    );
   }
   return {
     contextKey: `exam:${attempt.id}:${examQuestion.id}`,

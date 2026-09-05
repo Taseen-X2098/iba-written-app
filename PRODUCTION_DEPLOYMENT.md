@@ -75,7 +75,7 @@ The server-only key bypasses Row Level Security. It must never be placed in a
 ### 3.1 Apply database migrations
 
 All SQL files in `supabase/migrations` must be applied in numeric order, from
-`001_schema.sql` through `032_repair_result_publication.sql`. The migrations create
+`001_schema.sql` through the highest-numbered checked-in migration. The migrations create
 the schema, RLS policies, triggers, RPCs, grading queues, and production question
 bank.
 
@@ -206,6 +206,7 @@ auth.users INSERT
 
 exam becomes published
   -> inserts notifications for eligible active subscribers
+  -> the authenticated admin route sends both FCM push and Brevo email
 
 exam results become published
   -> inserts in-app notifications for participating users
@@ -214,7 +215,7 @@ exam results become published
 
 notifications INSERT
   -> Supabase Database Webhook calls the Railway web service
-  -> result-publication rows are acknowledged because the publication route already delivered them
+  -> rows owned by an application/worker delivery path are acknowledged to prevent duplicates
   -> web service reads that user's profiles.fcm_tokens
   -> Firebase sends a data message
   -> the foreground app or background service worker shows one system notification
@@ -222,8 +223,8 @@ notifications INSERT
 grading-worker retention poll (every minute by default)
   -> atomically enqueues due Monday/Wednesday, exam, expiry, and lapsed jobs
   -> claims each due job once across worker replicas
-  -> inserts the in-app notification (which enters the webhook flow above)
-  -> sends the five-day post-expiry Brevo email and retries failures
+  -> inserts the in-app notification and sends FCM push directly
+  -> sends the five-day post-expiry and Magnus emails and retries each channel independently
 ```
 
 The `profiles` table is used during a manual notification test only to obtain a
@@ -278,7 +279,9 @@ In Firebase:
 4. Create a Firebase Admin service-account private key.
 5. Keep the downloaded service-account JSON out of Git.
 
-Configure the Railway `web` service with:
+Configure the Railway `web` service with all four values below. Configure the
+`grading-worker` with the project ID, client email, and private key as well,
+because scheduled reminders and Magnus approvals are delivered there.
 
 ```dotenv
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=
@@ -569,6 +572,11 @@ GRADING_WORKER_SECRET=
 BREVO_API_KEY=
 BREVO_SENDER_EMAIL=
 BREVO_SENDER_NAME=IBA Written
+
+# Required here for reminder and Magnus browser pushes.
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
 
 RETENTION_NOTIFICATION_CONCURRENCY=20
 RETENTION_POLL_INTERVAL_MS=300000

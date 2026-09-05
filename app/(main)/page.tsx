@@ -20,9 +20,8 @@ export default async function DashboardPage() {
   let trend: TrendDataPoint[] = [];
   trend = generateTrendData(submissions.slice(0, 100));
 
-  // Random tip via relative API call (or we can just fetch it directly from DB, but keeping the original logic using fetch)
-  // To use fetch in a server component with relative URL, we need the origin
-  const tip: Tip | null = context.profile.tips_enabled ? (data?.tip as Tip | null) : null;
+  // Tips are available to every authenticated user, including the free tier.
+  const tip: Tip | null = (data?.tip as Tip | null) ?? null;
 
   return (
     <DashboardClient 

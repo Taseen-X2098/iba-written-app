@@ -18,12 +18,8 @@ jest.mock("@/lib/ocr/usage", () => ({
   completeOcrRequest: jest.fn(),
 }));
 jest.mock("@/lib/ocr/zai", () => {
-  class ZaiOcrError extends Error {
-    constructor(message: string, public readonly status: number) {
-      super(message);
-    }
-  }
-  return { extractTextWithZai: jest.fn(), ZaiOcrError };
+  const actual = jest.requireActual<typeof import("@/lib/ocr/zai")>("@/lib/ocr/zai");
+  return { ...actual, extractTextWithZai: jest.fn() };
 });
 
 const USER_ID = "10000000-0000-0000-0000-000000000001";
@@ -107,7 +103,7 @@ describe("POST /api/ocr", () => {
     }));
     expect(mockedExtract).not.toHaveBeenCalled();
     expect(mockedReserve).toHaveBeenCalledWith(expect.objectContaining({
-      contextKey: `standalone:${QUESTION_ID}:0:processor:mock:v2`,
+      contextKey: `standalone:${QUESTION_ID}:0:processor:mock:v3`,
     }));
     expect(mockedComplete).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
   });
@@ -189,7 +185,20 @@ describe("POST /api/ocr", () => {
       providerUserId: expect.stringMatching(/^user_[0-9a-f]{32}$/),
     }));
     expect(mockedReserve).toHaveBeenCalledWith(expect.objectContaining({
-      contextKey: `standalone:${QUESTION_ID}:0:processor:zai:glm-ocr:v2`,
+      contextKey: `standalone:${QUESTION_ID}:0:processor:zai:glm-ocr:v3`,
+    }));
+  });
+
+  it("strips provider HTML again before returning or storing the response", async () => {
+    process.env.Z_AI_MOCK = "false";
+    process.env.Z_AI_API_KEY = "zai-real-key";
+    mockedExtract.mockResolvedValue("<table><tr><td>Plain answer</td></tr></table>");
+
+    const response = await POST(makeRequest());
+
+    await expect(response.json()).resolves.toEqual({ text: "Plain answer", cached: false });
+    expect(mockedComplete).toHaveBeenCalledWith(expect.objectContaining({
+      extractedText: "Plain answer",
     }));
   });
 

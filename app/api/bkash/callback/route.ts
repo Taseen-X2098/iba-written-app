@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getBkashClient } from "@/lib/bkash/client";
-import { sendPlanActivatedEmail, sendSlotsAddedEmail } from "@/lib/email/brevo";
+import { sendSlotsAddedEmail } from "@/lib/email/brevo";
+import { deliverAccountApprovalNotifications } from "@/lib/notifications/account-approval";
 import type { PlanType } from "@/lib/types";
 
 export async function GET(req: NextRequest) {
@@ -131,7 +132,7 @@ export async function GET(req: NextRequest) {
       // plan1 = 300 tests, plan2 = 300 tests, plan3 = 0 tests (weekly only)
       const tests = (isPlan1 || isPlan2) ? 300 : 0;
 
-      const { error: planInsertError } = await supabase
+      const { data: subscription, error: planInsertError } = await supabase
         .from("subscriptions")
         .insert({
           user_id: paymentRecord.user_id,
@@ -140,9 +141,16 @@ export async function GET(req: NextRequest) {
           extra_tests_purchased: carriedOverExtra,
           expires_at: expiry.toISOString(),
           is_active: true
-        });
+        })
+        .select("id")
+        .single();
       if (planInsertError) throw planInsertError;
-      await sendPlanActivatedEmail(paymentRecord.user_id, paymentRecord.plan_type as PlanType, expiry.toISOString());
+      await deliverAccountApprovalNotifications({
+        userId: paymentRecord.user_id,
+        planType: paymentRecord.plan_type as PlanType,
+        expiresAt: expiry.toISOString(),
+        subscriptionId: subscription.id,
+      });
     }
 
     // Success redirect

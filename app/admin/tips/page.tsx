@@ -8,6 +8,12 @@ import { z } from "zod";
 const tipContentSchema = z.string().trim().min(1).max(1_000);
 const tipIdSchema = z.string().uuid();
 
+function revalidateTipViews() {
+  revalidatePath("/admin/tips");
+  revalidatePath("/tips");
+  revalidatePath("/");
+}
+
 export default async function AdminTipsPage() {
   const supabase = await createClient();
   const { data: tips, error } = await supabase
@@ -27,8 +33,11 @@ export default async function AdminTipsPage() {
     const parsed = tipContentSchema.safeParse(formData.get("content"));
     if (!parsed.success) return;
 
-    await createAdminClient().from("tips").insert({ content: parsed.data, is_active: true });
-    revalidatePath("/admin/tips");
+    const { error } = await createAdminClient()
+      .from("tips")
+      .insert({ content: parsed.data, is_active: true });
+    if (error) throw error;
+    revalidateTipViews();
   }
 
   async function deleteTip(formData: FormData) {
@@ -37,8 +46,9 @@ export default async function AdminTipsPage() {
     const parsed = tipIdSchema.safeParse(formData.get("id"));
     if (!parsed.success) return;
 
-    await createAdminClient().from("tips").delete().eq("id", parsed.data);
-    revalidatePath("/admin/tips");
+    const { error } = await createAdminClient().from("tips").delete().eq("id", parsed.data);
+    if (error) throw error;
+    revalidateTipViews();
   }
 
   return (

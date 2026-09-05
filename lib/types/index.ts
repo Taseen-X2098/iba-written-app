@@ -33,8 +33,10 @@ export type GradingJobStatus = "queued" | "running" | "completed" | "failed" | "
 export type GradingItemStatus = "queued" | "running" | "completed" | "failed" | "skipped" | "cancelled";
 
 export type NotificationType =
+  | "account_approved"
   | "exam_available"
   | "exam_reminder"
+  | "magnus_approved"
   | "results_published"
   | "subscription_expiring"
   | "subscription_lapsed"
@@ -158,6 +160,14 @@ export interface AttemptDraft {
 
 export type AttemptDrafts = Record<string, AttemptDraft>;
 
+export interface TranslationAnswerImagePreview {
+  id: string;
+  pageIndex: number;
+  url: string;
+}
+
+export type TranslationAnswerImages = Record<string, TranslationAnswerImagePreview[]>;
+
 export interface AttemptQuestion {
   id: string;
   order_index: number;
@@ -171,6 +181,7 @@ export interface AttemptStartResponse {
   exam: Exam;
   questions: AttemptQuestion[];
   drafts: AttemptDrafts;
+  answerImages: TranslationAnswerImages;
   resumed: boolean;
 }
 

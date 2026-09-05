@@ -72,19 +72,22 @@ export async function POST(request: NextRequest) {
     if (!submission.user_id || typeof category !== "string") {
       throw new ApiError("VALIDATION_ERROR", "Submission learner data is incomplete", 409);
     }
-    const useMock = process.env.USE_MOCK_GRADER === "true";
-    const client: ResponsesClient = useMock
-      ? createMockClient({ taskType: category, marks, submission: text })
-      : (new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ResponsesClient);
-    const profilePlan = await prepareManualLearnerProfilePlan({
-      client,
-      useMock,
-      userId: submission.user_id,
-      category,
-      submission: text,
-      result: baseResult,
-    });
-    const gradingResult = profilePlan.result;
+    let profilePlan: Awaited<ReturnType<typeof prepareManualLearnerProfilePlan>> | null = null;
+    if (category !== "translation") {
+      const useMock = process.env.USE_MOCK_GRADER === "true";
+      const client: ResponsesClient = useMock
+        ? createMockClient({ taskType: category, marks, submission: text })
+        : (new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) as unknown as ResponsesClient);
+      profilePlan = await prepareManualLearnerProfilePlan({
+        client,
+        useMock,
+        userId: submission.user_id,
+        category,
+        submission: text,
+        result: baseResult,
+      });
+    }
+    const gradingResult = profilePlan?.result ?? baseResult;
     const { error: saveError } = await admin.rpc("save_manual_exam_grade", {
       p_submission_id: submissionId,
       p_grading_result: gradingResult,
@@ -97,6 +100,9 @@ export async function POST(request: NextRequest) {
     }
     let reportEnqueued = false;
     try {
+      if (!profilePlan) {
+        return NextResponse.json({ success: true, gradingResult });
+      }
       const profileRecord = await recordLearnerProfileUpdate({
         userId: submission.user_id,
         sourceKind: "official_exam",

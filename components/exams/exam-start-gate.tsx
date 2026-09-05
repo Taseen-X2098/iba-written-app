@@ -78,6 +78,7 @@ export default function ExamStartGate({
         attempt={started.attempt}
         writerToken={started.writerToken}
         initialDrafts={started.drafts}
+        initialAnswerImages={started.answerImages ?? {}}
         isPractice={mode === "practice"}
       />
     );

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import GradingClient, { type GradingSubmission } from "./GradingClient";
 import { CATEGORY_LABELS, type GradingResultJSON, type QuestionCategory } from "@/lib/types";
+import { getTranslationAnswerImagePreviews } from "@/lib/exams/translation-images";
 
 function joinedRecord(value: unknown): Record<string, unknown> | null {
   const record = Array.isArray(value) ? value[0] : value;
@@ -32,6 +33,7 @@ export default async function AdminGradeSubmissionPage({
     .from("exam_submissions")
     .select(`
       id,
+      attempt_id,
       question_id,
       ocr_text,
       edited_text,
@@ -53,6 +55,14 @@ export default async function AdminGradeSubmissionPage({
     return <div>Data not found</div>;
   }
 
+  const attemptIds = [...new Set(submissions
+    .map((submission) => submission.attempt_id)
+    .filter((attemptId): attemptId is string => typeof attemptId === "string"))];
+  const imagePreviewsByAttempt = new Map(await Promise.all(attemptIds.map(async (attemptId) => [
+    attemptId,
+    await getTranslationAnswerImagePreviews(attemptId),
+  ] as const)));
+
   const normalizedSubmissions = submissions.flatMap((submission): GradingSubmission[] => {
     const examQuestion = joinedRecord(submission.exam_questions);
     const question = joinedRecord(examQuestion?.questions);
@@ -60,6 +70,9 @@ export default async function AdminGradeSubmissionPage({
     return [{
       id: submission.id,
       edited_text: submission.edited_text,
+      answer_images: typeof submission.attempt_id === "string"
+        ? imagePreviewsByAttempt.get(submission.attempt_id)?.[submission.question_id] ?? []
+        : [],
       grading_result: submission.grading_result as GradingResultJSON | null,
       graded_by: submission.graded_by === "ai" || submission.graded_by === "admin" ? submission.graded_by : null,
       exam_questions: {

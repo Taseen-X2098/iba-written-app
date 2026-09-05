@@ -1,7 +1,9 @@
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 jest.mock("@/lib/email/brevo", () => ({
-  sendPlanActivatedEmail: jest.fn(),
   sendSlotsAddedEmail: jest.fn(),
+}));
+jest.mock("@/lib/notifications/account-approval", () => ({
+  deliverAccountApprovalNotifications: jest.fn(),
 }));
 jest.mock("@/lib/supabase/server", () => ({ createClient: jest.fn() }));
 jest.mock("@/lib/supabase/admin", () => ({ createAdminClient: jest.fn() }));

@@ -16,6 +16,7 @@ function submission(id: string, gradingResult: GradingResultJSON | null = null):
   return {
     id,
     edited_text: "A complete student answer.",
+    answer_images: [],
     grading_result: gradingResult,
     graded_by: gradingResult ? "ai" as const : null,
     exam_questions: {
@@ -66,6 +67,23 @@ describe("GradingClient refreshed AI results", () => {
       expect(screen.getByLabelText("3. Ways to improve next time")).toHaveValue(aiResult.studentFeedback.waysToImprove);
     });
     expect(screen.getByLabelText("Select question 1 for AI grading")).toBeDisabled();
+  });
+
+  it("shows translation photos and keeps AI-only feedback controls out of human grading", () => {
+    const translation = submission("translation-submission");
+    translation.edited_text = "";
+    translation.answer_images = [{
+      id: "translation-image",
+      pageIndex: 1,
+      url: "https://example.test/signed-translation-page",
+    }];
+    translation.exam_questions.questions.category = "translation";
+
+    render(<GradingClient examId="exam-1" submissions={[translation]} />);
+
+    expect(screen.getByAltText("Translation answer page 1")).toBeInTheDocument();
+    expect(screen.getAllByText(/never sent to AI/)).toHaveLength(2);
+    expect(screen.queryByText("AI generated")).not.toBeInTheDocument();
   });
 
   it("preserves an unsaved manual edit in another answer while an AI result arrives", async () => {

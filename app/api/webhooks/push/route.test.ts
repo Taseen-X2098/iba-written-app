@@ -72,15 +72,14 @@ describe("push notification webhook authorization", () => {
     expect(mockedDeliverPush).not.toHaveBeenCalled();
   });
 
-  it("accepts the configured secret and delivers a notification payload", async () => {
+  it("keeps legacy inactivity notifications available through the webhook", async () => {
     const record = {
       id: "30000000-0000-4000-8000-000000000003",
       user_id: "10000000-0000-4000-8000-000000000001",
-      exam_id: "20000000-0000-4000-8000-000000000002",
-      type: "exam_available",
-      title: "New Weekly Exam!",
-      message: "A new exam is available.",
-      action_url: "/exams/20000000-0000-4000-8000-000000000002",
+      type: "inactivity_reminder",
+      title: "We miss you",
+      message: "Come back for a focused practice answer.",
+      action_url: "/questions",
     };
     mockedDeliverPush.mockResolvedValue({
       tokens: 1,
@@ -128,6 +127,28 @@ describe("push notification webhook authorization", () => {
     expect(mockedDeliverPush).not.toHaveBeenCalled();
   });
 
+  it("delegates exam-start and reminder pushes to their authoritative delivery paths", async () => {
+    for (const type of ["exam_available", "exam_reminder", "practice_reminder", "magnus_approved", "account_approved"]) {
+      const response = await POST(makeRequest({
+        secret: WEBHOOK_SECRET,
+        body: JSON.stringify({
+          type: "INSERT",
+          table: "notifications",
+          record: {
+            user_id: "10000000-0000-4000-8000-000000000001",
+            type,
+            title: "Notification",
+            message: "A new update is ready.",
+          },
+        }),
+      }));
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ success: true, delegated: true });
+    }
+    expect(mockedDeliverPush).not.toHaveBeenCalled();
+  });
+
   it("reports transient FCM failures so the webhook delivery can be retried", async () => {
     mockedDeliverPush.mockResolvedValue({
       tokens: 1,
@@ -144,8 +165,8 @@ describe("push notification webhook authorization", () => {
         table: "notifications",
         record: {
           user_id: "10000000-0000-4000-8000-000000000001",
-          type: "practice_reminder",
-          title: "Keep your writing momentum",
+          type: "inactivity_reminder",
+          title: "We miss you",
           message: "Complete one focused practice answer.",
           action_url: "/questions",
         },

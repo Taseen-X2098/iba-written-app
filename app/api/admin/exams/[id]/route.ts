@@ -5,7 +5,7 @@ import { examDefinitionSchema } from "@/lib/exams/admin-contracts";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseJsonRequest, parseRequestValue } from "@/lib/api/request";
 import { uuidSchema } from "@/lib/exams/contracts";
-import { sendExamPublishedEmails } from "@/lib/email/brevo";
+import { deliverExamPublicationNotifications } from "@/lib/notifications/exam-publication";
 
 export async function PUT(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
@@ -40,7 +40,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
       throw error;
     }
     if (input.isPublished && !existingExam.is_published) {
-      await sendExamPublishedEmails({
+      await deliverExamPublicationNotifications({
         id,
         title: input.title,
         instructions: input.description,

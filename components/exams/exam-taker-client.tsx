@@ -36,6 +36,8 @@ import type {
   ExamAttempt,
   GradingResultJSON,
   PersonalProgressionCardDTO,
+  TranslationAnswerImagePreview,
+  TranslationAnswerImages,
 } from "@/lib/types";
 
 type AnswerState = {
@@ -45,6 +47,7 @@ type AnswerState = {
   saving: boolean;
   isDirty: boolean;
   editorOpen: boolean;
+  images: TranslationAnswerImagePreview[];
   error?: string;
 };
 
@@ -67,17 +70,23 @@ interface Props {
   attempt: ExamAttempt;
   writerToken: string;
   initialDrafts: AttemptDrafts;
+  initialAnswerImages?: TranslationAnswerImages;
   isPractice?: boolean;
 }
 
-function emptyAnswer(draft?: { ocrText: string; editedText: string }): AnswerState {
+function emptyAnswer(
+  draft: { ocrText: string; editedText: string } | undefined,
+  translation: boolean,
+  images: TranslationAnswerImagePreview[] = [],
+): AnswerState {
   return {
-    ocrText: draft?.ocrText ?? "",
-    editedText: draft?.editedText ?? "",
+    ocrText: translation ? "" : draft?.ocrText ?? "",
+    editedText: translation ? "" : draft?.editedText ?? "",
     uploading: false,
     saving: false,
     isDirty: false,
-    editorOpen: Boolean(draft?.editedText),
+    editorOpen: !translation && Boolean(draft?.editedText),
+    images,
   };
 }
 
@@ -93,11 +102,19 @@ export default function ExamTakerClient({
   attempt,
   writerToken,
   initialDrafts,
+  initialAnswerImages = {},
   isPractice = false,
 }: Props) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, AnswerState>>(() =>
-    Object.fromEntries(examQuestions.map((question) => [question.id, emptyAnswer(initialDrafts[question.id])])),
+    Object.fromEntries(examQuestions.map((question) => [
+      question.id,
+      emptyAnswer(
+        initialDrafts[question.id],
+        question.questions.category === "translation",
+        initialAnswerImages[question.id],
+      ),
+    ])),
   );
   const answersRef = useRef(answers);
   const [timeLeft, setTimeLeft] = useState(() =>
@@ -115,7 +132,8 @@ export default function ExamTakerClient({
   const [personalProgressionReports, setPersonalProgressionReports] = useState<Record<string, PersonalProgressionCardDTO>>({});
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const hasOverLimitAnswers = examQuestions.some((question) =>
-    Boolean(getWordLimitViolation(answers[question.id]?.editedText ?? "", question.marks)),
+    question.questions.category !== "translation"
+    && Boolean(getWordLimitViolation(answers[question.id]?.editedText ?? "", question.marks)),
   );
   const expiryTriggered = useRef(false);
   const completionInFlight = useRef(false);
@@ -133,6 +151,8 @@ export default function ExamTakerClient({
         const next = { ...current };
         for (const [questionId, answer] of Object.entries(recovered)) {
           if (!next[questionId]) continue;
+          const question = examQuestions.find((item) => item.id === questionId);
+          if (question?.questions.category === "translation") continue;
           next[questionId] = {
             ...next[questionId],
             ...answer,
@@ -146,7 +166,7 @@ export default function ExamTakerClient({
     return () => {
       cancelled = true;
     };
-  }, [attempt.id, attempt.status]);
+  }, [attempt.id, attempt.status, examQuestions]);
 
   useEffect(() => {
     if (locked) return;
@@ -251,6 +271,7 @@ export default function ExamTakerClient({
     if (completionInFlight.current) return;
     const expired = Date.now() >= new Date(attempt.expires_at).getTime();
     const overLimitQuestions = examQuestions.flatMap((question, index) => {
+      if (question.questions.category === "translation") return [];
       const violation = getWordLimitViolation(
         answersRef.current[question.id]?.editedText ?? "",
         question.marks,
@@ -360,9 +381,30 @@ export default function ExamTakerClient({
       formData.append("attemptId", attempt.id);
       formData.append("examQuestionId", questionId);
       formData.append("writerToken", writerToken);
-      const response = await fetch("/api/ocr", { method: "POST", body: formData });
+      const translation = question.questions.category === "translation";
+      const response = await fetch(
+        translation
+          ? `/api/exam-attempts/${attempt.id}/translation-images`
+          : "/api/ocr",
+        { method: "POST", body: formData },
+      );
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "OCR failed");
+      if (!response.ok) throw new Error(data.error ?? (translation ? "Image upload failed" : "OCR failed"));
+      if (translation) {
+        setAnswers((current) => ({
+          ...current,
+          [questionId]: {
+            ...current[questionId],
+            ocrText: "",
+            editedText: "",
+            images: data.images ?? [],
+            uploading: false,
+            editorOpen: false,
+            isDirty: false,
+          },
+        }));
+        return;
+      }
       const editedText = data.text;
       setAnswers((current) => ({
         ...current,
@@ -382,7 +424,9 @@ export default function ExamTakerClient({
         [questionId]: {
           ...current[questionId],
           uploading: false,
-          error: error instanceof Error ? error.message : "OCR failed",
+          error: error instanceof Error
+            ? error.message
+            : question.questions.category === "translation" ? "Image upload failed" : "OCR failed",
         },
       }));
     }
@@ -631,22 +675,31 @@ export default function ExamTakerClient({
               />
               {isPractice && question.questions.category === "translation" && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Translation is available for self-study but is not AI graded and does not use a test slot.
+                  Translation is image-only, is never read or graded by AI, and does not use a test slot in practice.
                 </div>
               )}
               <div className="mb-5 flex items-start gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
                 <CheckCircle size={16} className="mt-0.5 shrink-0" />
-                <span>
-                  <strong>Hard answer limits: {maxWords} words and maximum {answerPageLabel()}.</strong>{" "}
-                  {question.questions.space_hint ? `${question.questions.space_hint}. ` : ""}
-                  You may use one or two sheets. If you use two, upload both page photos together. A third photo will be rejected.
-                </span>
+                {question.questions.category === "translation" ? (
+                  <span>
+                    <strong>Human grading only: upload a maximum of {answerPageLabel()}.</strong>{" "}
+                    The original photos are stored privately for the administrator. No OCR, transcription, or AI feedback is performed.
+                  </span>
+                ) : (
+                  <span>
+                    <strong>Hard answer limits: {maxWords} words and maximum {answerPageLabel()}.</strong>{" "}
+                    {question.questions.space_hint ? `${question.questions.space_hint}. ` : ""}
+                    You may use one or two sheets. If you use two, upload both page photos together. A third photo will be rejected.
+                  </span>
+                )}
               </div>
 
               {answer.uploading ? (
                 <div className="flex flex-col items-center rounded-xl border border-border bg-muted/30 p-12">
                   <Loader2 className="mb-3 animate-spin text-brand-600" size={30} />
-                  <p className="text-sm text-muted-foreground">Extracting text…</p>
+                  <p className="text-sm text-muted-foreground">
+                    {question.questions.category === "translation" ? "Saving photos for human grading…" : "Extracting text…"}
+                  </p>
                 </div>
               ) : activeCameraId === question.id ? (
                 <WebcamCapture
@@ -656,6 +709,49 @@ export default function ExamTakerClient({
                   }}
                   onCancel={() => setActiveCameraId(null)}
                 />
+              ) : question.questions.category === "translation" ? (
+                <div>
+                  {answer.images.length > 0 ? (
+                    <div className="mb-4 grid gap-4 sm:grid-cols-2">
+                      {answer.images.map((image) => (
+                        <a
+                          key={image.id}
+                          href={image.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="overflow-hidden rounded-xl border border-border bg-muted/20"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={image.url}
+                            alt={`Translation answer page ${image.pageIndex}`}
+                            className="h-64 w-full object-contain"
+                          />
+                          <span className="block border-t border-border px-3 py-2 text-xs font-bold">
+                            Page {image.pageIndex} · saved for human grading
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-4 rounded-xl bg-muted/30 p-4 text-sm text-muted-foreground">
+                      No translation page photo has been submitted yet.
+                    </p>
+                  )}
+                  {answer.error && <p className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{answer.error}</p>}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button type="button" disabled={locked} onClick={() => setActiveCameraId(question.id)} className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-5 text-sm font-bold disabled:opacity-50">
+                      <Camera size={18} /> {answer.images.length ? "Replace with Camera Photo" : "Take Photo"}
+                    </button>
+                    <label className={`inline-flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-5 text-sm font-bold ${locked ? "opacity-50" : "cursor-pointer"}`}>
+                      <ImageIcon size={18} /> {answer.images.length ? "Replace Page Photos" : "Upload Page Photos"}
+                      <input type="file" accept="image/jpeg,image/png" multiple disabled={locked} className="hidden" onChange={(event) => {
+                        const files = consumeSelectedFiles(event.currentTarget);
+                        if (files.length) void handleFileUpload(question.id, files);
+                      }} />
+                    </label>
+                  </div>
+                </div>
               ) : !answer.editorOpen ? (
                 <div className="grid gap-4 sm:grid-cols-3">
                   <button type="button" disabled={locked} onClick={() => setAnswers((current) => ({ ...current, [question.id]: { ...current[question.id], editorOpen: true, isDirty: true } }))} className="rounded-xl border-2 border-dashed border-border p-6 disabled:opacity-50">

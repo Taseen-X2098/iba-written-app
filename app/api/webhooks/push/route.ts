@@ -19,6 +19,8 @@ const notificationRecordSchema = z.object({
   type: z.enum([
     "exam_available",
     "exam_reminder",
+    "account_approved",
+    "magnus_approved",
     "results_published",
     "subscription_expiring",
     "subscription_lapsed",
@@ -65,10 +67,19 @@ export async function POST(req: NextRequest) {
         "Invalid notification record",
       );
 
-      // Result pushes are sent by the authenticated publication route together
-      // with the result emails. A webhook delivery for the same inserted row
-      // must not send the same device message twice.
-      if (notification.type === "results_published") {
+      // These notifications are delivered by the same application/worker path
+      // that creates them. A webhook for the inserted row must not send the
+      // same browser message a second time.
+      if (notification.type && new Set([
+        "account_approved",
+        "exam_available",
+        "exam_reminder",
+        "magnus_approved",
+        "practice_reminder",
+        "results_published",
+        "subscription_expiring",
+        "subscription_lapsed",
+      ]).has(notification.type)) {
         return NextResponse.json({ success: true, delegated: true });
       }
 

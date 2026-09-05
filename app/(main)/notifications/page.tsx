@@ -20,8 +20,10 @@ import {
 import type { Notification, NotificationType } from "@/lib/types";
 
 const NOTIFICATION_ICONS: Record<NotificationType, React.ComponentType<{ size?: number; className?: string }>> = {
+  account_approved: Crown,
   exam_available: Trophy,
   exam_reminder: CalendarClock,
+  magnus_approved: Crown,
   results_published: Trophy,
   subscription_expiring: Crown,
   subscription_lapsed: Crown,
@@ -30,8 +32,10 @@ const NOTIFICATION_ICONS: Record<NotificationType, React.ComponentType<{ size?: 
 };
 
 const NOTIFICATION_COLORS: Record<NotificationType, string> = {
+  account_approved: "bg-emerald-50 text-emerald-600",
   exam_available: "bg-brand-50 text-brand-600",
   exam_reminder: "bg-purple-50 text-purple-600",
+  magnus_approved: "bg-red-50 text-[#900304]",
   results_published: "bg-blue-50 text-blue-600",
   subscription_expiring: "bg-orange-50 text-orange-600",
   subscription_lapsed: "bg-amber-50 text-amber-700",

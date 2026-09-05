@@ -11,28 +11,14 @@ import {
   enforceOcrRateLimit,
 } from "@/lib/ocr/rate-limit";
 import { completeOcrRequest, reserveOcrRequest } from "@/lib/ocr/usage";
-import { extractTextWithZai, ZaiOcrError } from "@/lib/ocr/zai";
-import { getPageLimitViolation } from "@/lib/answers/page-limit";
+import { extractTextWithZai, normalizeZaiOcrMarkdown, ZaiOcrError } from "@/lib/ocr/zai";
+import { validateAnswerImageEntries } from "@/lib/answers/image-validation";
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
-// v2 prevents previously cached raw layout markup from being replayed after
-// Markdown-to-plain-text normalization was added at the Z.ai trust boundary.
-const OCR_CACHE_VERSION = "v2";
+// v3 prevents any previously cached partial HTML normalization from being
+// replayed after the OCR output boundary was made strictly plain text.
+const OCR_CACHE_VERSION = "v3";
 const MOCK_OCR_TEXT =
   "The quick brown fox jumps over the lazy dog. This is sample OCR text extracted from the uploaded image.";
-
-async function hasValidImageSignature(image: File) {
-  const bytes = new Uint8Array(await image.slice(0, 8).arrayBuffer());
-  if (image.type === "image/png") {
-    const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-    return pngSignature.every((byte, index) => bytes[index] === byte);
-  }
-  if (image.type === "image/jpeg") {
-    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  }
-  return false;
-}
 
 export async function POST(request: Request) {
   try {
@@ -48,48 +34,8 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const imageEntries = formData.getAll("image");
-
-    if (imageEntries.length === 0 || imageEntries.some((entry) => !(entry instanceof File))) {
-      throw new ApiError("VALIDATION_ERROR", "Upload at least one valid image file.", 400);
-    }
-    const images = imageEntries as File[];
+    const images = await validateAnswerImageEntries(formData.getAll("image"));
     const context = await resolveOcrContext(formData, user.id);
-    const pageLimitViolation = getPageLimitViolation(images.length);
-    if (pageLimitViolation) {
-      throw new ApiError(
-        "VALIDATION_ERROR",
-        `This question allows a maximum of ${pageLimitViolation.pageLimit} answer-page photo${pageLimitViolation.pageLimit === 1 ? "" : "s"}. You selected ${pageLimitViolation.imageCount}.`,
-        400,
-        pageLimitViolation,
-      );
-    }
-
-    for (const image of images) {
-      if (!ALLOWED_IMAGE_TYPES.has(image.type)) {
-        throw new ApiError(
-          "VALIDATION_ERROR",
-          "Unsupported image type. Upload JPEG or PNG page photos.",
-          415,
-        );
-      }
-
-      if (image.size < 1 || image.size > MAX_FILE_SIZE_BYTES) {
-        throw new ApiError(
-          "VALIDATION_ERROR",
-          "Each image must be between 1 byte and 10 MB.",
-          413,
-        );
-      }
-
-      if (!(await hasValidImageSignature(image))) {
-        throw new ApiError(
-          "VALIDATION_ERROR",
-          "The uploaded file contents do not match a valid JPEG or PNG image.",
-          415,
-        );
-      }
-    }
 
     const isMock = process.env.Z_AI_MOCK === "true";
     const apiKey = process.env.Z_AI_API_KEY?.trim();
@@ -124,7 +70,11 @@ export async function POST(request: Request) {
         requestToken: reservationToken,
       });
       if (reservation.status === "succeeded" && reservation.extracted_text) {
-        extractedPages.push(reservation.extracted_text);
+        const cachedText = normalizeZaiOcrMarkdown(reservation.extracted_text);
+        if (!cachedText) {
+          throw new ZaiOcrError("The cached OCR result did not contain readable text.", 422);
+        }
+        extractedPages.push(cachedText);
         continue;
       }
 
@@ -156,6 +106,10 @@ export async function POST(request: Request) {
             providerUserId,
           });
         }
+        text = normalizeZaiOcrMarkdown(text);
+        if (!text) {
+          throw new ZaiOcrError("Z.ai could not extract readable text from this image.", 422);
+        }
       } catch (error) {
         await completeOcrRequest({
           requestId: reservation.id,
@@ -177,7 +131,10 @@ export async function POST(request: Request) {
       allCached = false;
     }
 
-    return NextResponse.json({ text: extractedPages.join("\n\n"), cached: allCached });
+    return NextResponse.json({
+      text: normalizeZaiOcrMarkdown(extractedPages.join("\n\n")),
+      cached: allCached,
+    });
   } catch (error) {
     if (error instanceof ApiError) {
       return apiErrorResponse(error);

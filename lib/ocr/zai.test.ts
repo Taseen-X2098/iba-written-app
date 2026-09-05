@@ -102,4 +102,47 @@ describe("Z.ai OCR client", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     })).resolves.toBe("The assistant manager approved the proposal.");
   });
+
+  it("removes raw table markup from Bengali OCR output", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        md_results: "<table><tr><td>একবার একটি বাহ ডিল। সাটি শুরু বাহ ডিল।</td></tr></table>",
+      }),
+    });
+
+    const result = await extractTextWithZai({
+      apiKey: "zai-test-key",
+      dataUrl: "data:image/png;base64,YQ==",
+      requestId: "request-table",
+      providerUserId: "user-hash",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result).toBe("একবার একটি বাহ ডিল। সাটি শুরু বাহ ডিল।");
+    expect(result).not.toMatch(/<\/?[a-z][^>]*>/i);
+  });
+
+  it("removes escaped and entity-encoded HTML without joining table cells", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        md_results: "\\<table>\\<tr>\\<td>First\\</td>\\<td>Second\\</td>\\</tr>\\</table>\n&lt;b&gt;Safe&lt;/b&gt;",
+      }),
+    });
+
+    const result = await extractTextWithZai({
+      apiKey: "zai-test-key",
+      dataUrl: "data:image/png;base64,YQ==",
+      requestId: "request-escaped-table",
+      providerUserId: "user-hash",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result).toContain("First Second");
+    expect(result).toContain("Safe");
+    expect(result).not.toContain("<");
+  });
 });

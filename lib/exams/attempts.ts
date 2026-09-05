@@ -4,6 +4,7 @@ import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
 import { getWordLimitViolation } from "@/lib/answers/word-limit";
 import { assertExamAudienceAccess } from "@/lib/exams/access";
+import { getTranslationAnswerImagePreviews } from "@/lib/exams/translation-images";
 import type {
   AttemptDrafts,
   AttemptQuestion,
@@ -13,6 +14,11 @@ import type {
 } from "@/lib/types";
 
 const WRITER_TOKEN_BYTES = 32;
+
+function joinedRecord(value: unknown): Record<string, unknown> | null {
+  const record = Array.isArray(value) ? value[0] : value;
+  return record && typeof record === "object" ? record as Record<string, unknown> : null;
+}
 
 export function createWriterToken() {
   return randomBytes(WRITER_TOKEN_BYTES).toString("base64url");
@@ -41,12 +47,13 @@ export async function assertAttemptDraftWordLimits(
   const admin = await createAdminClient();
   const { data: questions, error } = await admin
     .from("exam_questions")
-    .select("id, marks, order_index")
+    .select("id, marks, order_index, questions(category)")
     .eq("exam_id", examId)
     .order("order_index", { ascending: true });
   if (error) throw error;
 
   const violations = (questions ?? []).flatMap((question) => {
+    if (joinedRecord(question.questions)?.category === "translation") return [];
     const violation = getWordLimitViolation(resolvedDrafts[question.id]?.editedText ?? "", question.marks);
     return violation
       ? [{ examQuestionId: question.id, questionNumber: question.order_index + 1, ...violation }]
@@ -171,12 +178,17 @@ export async function startAttempt(input: {
         throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
       }
       const drafts = await getAttemptDrafts(existing.id);
+      const [questions, answerImages] = await Promise.all([
+        loadAttemptQuestions(input.examId),
+        getTranslationAnswerImagePreviews(existing.id),
+      ]);
       return {
         attempt: existing,
         writerToken: input.writerToken,
         exam,
-        questions: await loadAttemptQuestions(input.examId),
+        questions,
         drafts,
+        answerImages,
         resumed: true,
       };
     }
@@ -225,6 +237,7 @@ export async function startAttempt(input: {
     exam,
     questions: await loadAttemptQuestions(input.examId),
     drafts: {},
+    answerImages: {},
     resumed: false,
   };
 }
@@ -261,7 +274,7 @@ export async function saveAttemptDrafts(input: {
   const ids = [...new Set(input.answers.map((answer) => answer.examQuestionId))];
   const { data: validRows, error } = await admin
     .from("exam_questions")
-    .select("id, marks")
+    .select("id, marks, questions(category)")
     .eq("exam_id", attempt.exam_id)
     .in("id", ids);
   if (error) throw error;
@@ -269,7 +282,22 @@ export async function saveAttemptDrafts(input: {
     throw new ApiError("VALIDATION_ERROR", "One or more questions do not belong to this exam", 400);
   }
   const marksById = new Map((validRows ?? []).map((row) => [row.id, row.marks]));
+  const categoryById = new Map((validRows ?? []).map((row) => [
+    row.id,
+    joinedRecord(row.questions)?.category,
+  ]));
   for (const answer of input.answers) {
+    if (
+      categoryById.get(answer.examQuestionId) === "translation"
+      && (answer.ocrText.trim() || answer.editedText.trim())
+    ) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "Translation answers must be submitted as page images for human grading; parsed or typed text is not accepted.",
+        400,
+        { examQuestionId: answer.examQuestionId },
+      );
+    }
     const marks = marksById.get(answer.examQuestionId);
     const violation = marks === undefined ? null : getWordLimitViolation(answer.editedText, marks);
     if (violation) {

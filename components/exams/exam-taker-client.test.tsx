@@ -143,4 +143,56 @@ describe.each([
     expect(await screen.findByDisplayValue("Replacement text from another exam image.")).toBeInTheDocument();
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
   });
+
+  it("stores translation photos for human grading without calling OCR", async () => {
+    const translationQuestion: AttemptQuestion = {
+      ...examQuestion,
+      id: "translation-exam-question",
+      questions: {
+        ...examQuestion.questions,
+        id: "translation-question",
+        category: "translation",
+        prompt: "Translate the passage into Bangla.",
+      },
+    };
+    jest.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/translation-images")) {
+        return {
+          ok: true,
+          json: async () => ({
+            manualReviewOnly: true,
+            images: [{ id: "image-1", pageIndex: 1, url: "https://example.test/signed-page" }],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const exam = makeExam(isMagnusOnly);
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[translationQuestion]}
+        attempt={makeAttempt(exam.id)}
+        writerToken="writer-token"
+        initialDrafts={{}}
+      />,
+    );
+
+    expect(screen.queryByText("Type Answer")).not.toBeInTheDocument();
+    expect(screen.getByText(/No OCR, transcription, or AI feedback/)).toBeInTheDocument();
+    const uploadLabel = screen.getByText("Upload Page Photos").closest("label");
+    const upload = uploadLabel?.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(upload!, {
+      target: { files: [new File(["translation"], "translation.jpg", { type: "image/jpeg" })] },
+    });
+
+    expect(await screen.findByAltText("Translation answer page 1")).toBeInTheDocument();
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/translation-images"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalledWith("/api/ocr", expect.anything());
+  });
 });

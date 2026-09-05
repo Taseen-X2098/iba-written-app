@@ -8,6 +8,7 @@ import type { GradingResultJSON, QuestionCategory } from "@/lib/types";
 export type GradingSubmission = {
   id: string;
   edited_text: string | null;
+  answer_images: Array<{ id: string; pageIndex: number; url: string }>;
   grading_result: GradingResultJSON | null;
   graded_by: "ai" | "admin" | null;
   exam_questions: {
@@ -233,17 +234,35 @@ export default function GradingClient({ examId, submissions }: { examId: string;
             </header>
             <div className="grid gap-8 p-6 lg:grid-cols-2">
               <div>
-                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Student answer</h3>
-                <div className="min-h-40 whitespace-pre-wrap rounded-xl border border-brand-100 bg-brand-50/40 p-4 text-sm">
-                  {submission.edited_text || <span className="italic text-muted-foreground">No answer provided.</span>}
-                </div>
+                <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  {translation ? "Original answer photos" : "Student answer"}
+                </h3>
+                {translation ? (
+                  submission.answer_images.length ? (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                      {submission.answer_images.map((image) => (
+                        <a key={image.id} href={image.url} target="_blank" rel="noreferrer" className="overflow-hidden rounded-xl border border-brand-100 bg-brand-50/40">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={image.url} alt={`Translation answer page ${image.pageIndex}`} className="h-72 w-full object-contain" />
+                          <span className="block border-t border-brand-100 px-3 py-2 text-xs font-bold">Page {image.pageIndex} · open full size</span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="min-h-40 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm italic text-amber-800">No translation answer photo was submitted.</div>
+                  )
+                ) : (
+                  <div className="min-h-40 whitespace-pre-wrap rounded-xl border border-brand-100 bg-brand-50/40 p-4 text-sm">
+                    {submission.edited_text || <span className="italic text-muted-foreground">No answer provided.</span>}
+                  </div>
+                )}
               </div>
               <div className="rounded-xl border border-border bg-muted/20 p-5">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider">Final grade</h3>
                   <span className="text-xs text-muted-foreground">{submission.graded_by ? `Saved by ${submission.graded_by}` : "Pending"}</span>
                 </div>
-                {translation && <p className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Translation answers require manual grading.</p>}
+                {translation && <p className="mb-4 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Translation answers require human grading. These photos and grade are never sent to AI.</p>}
                 <div className="mb-4 flex items-center gap-3">
                   <input aria-label={`Score for question ${index + 1}`} type="number" min={0} max={examQuestion.marks} step={0.5} value={state.score} onChange={(event) => setGrades((current) => ({ ...current, [submission.id]: { ...current[submission.id], score: event.target.value, saved: false } }))} className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-center text-lg font-bold" />
                   <span className="font-bold text-muted-foreground">/ {examQuestion.marks}</span>
@@ -273,7 +292,7 @@ export default function GradingClient({ examId, submissions }: { examId: string;
                     )}
                   </section>
 
-                  <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+                  {!translation && <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label htmlFor={`personal-${submission.id}`} className="text-sm font-bold text-foreground">2. Personalized feedback</label>
                       <span className="text-[11px] font-bold uppercase tracking-wider text-violet-700">AI generated</span>
@@ -285,7 +304,7 @@ export default function GradingClient({ examId, submissions }: { examId: string;
                       className="mt-2 h-28 w-full resize-y rounded-lg border border-violet-200 bg-white/70 p-3 text-sm text-muted-foreground"
                       placeholder="AI will fill this when the grade is saved. The score remains controlled by the administrator."
                     />
-                  </section>
+                  </section>}
 
                   <section className="rounded-xl border border-sky-200 bg-sky-50/40 p-4">
                     <label htmlFor={`improve-${submission.id}`} className="text-sm font-bold text-foreground">3. Ways to improve next time</label>
@@ -300,7 +319,7 @@ export default function GradingClient({ examId, submissions }: { examId: string;
                 </div>
                 <button type="button" disabled={state.saving} onClick={() => saveManual(submission)} className={`mt-4 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold ${state.saved ? "bg-green-100 text-green-700" : "bg-brand-600 text-white"}`}>
                   {state.saving ? <Loader2 className="animate-spin" size={16} /> : state.saved ? <CheckCircle size={16} /> : <Save size={16} />}
-                  {state.saving ? "Saving grade and AI feedback…" : state.saved ? "Saved" : "Save Manual Grade"}
+                  {state.saving ? (translation ? "Saving human grade…" : "Saving grade and AI feedback…") : state.saved ? "Saved" : "Save Manual Grade"}
                 </button>
               </div>
             </div>

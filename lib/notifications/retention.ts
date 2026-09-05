@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sendMagnusApprovedEmail, sendSubscriptionRetentionEmail } from "@/lib/email/brevo";
+import { deliverPushNotification } from "@/lib/notifications/push";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CATEGORY_LABELS, type NotificationType, type QuestionCategory } from "@/lib/types";
 
@@ -20,6 +21,7 @@ type RetentionJob = {
   requires_email: boolean;
   notification_id: string | null;
   email_sent_at: string | null;
+  push_sent_at: string | null;
   attempt_count: number;
 };
 
@@ -398,8 +400,8 @@ async function processJob(job: RetentionJob) {
     }
 
     const admin = createAdminClient();
-    if (job.kind !== "magnus_approved") {
-      const notificationId = job.notification_id ?? await ensureNotification(job, copy);
+    const notificationId = job.notification_id ?? await ensureNotification(job, copy);
+    if (!job.notification_id) {
       const { error: linkError } = await admin
         .from("retention_notification_jobs")
         .update({ notification_id: notificationId, updated_at: new Date().toISOString() })
@@ -408,6 +410,7 @@ async function processJob(job: RetentionJob) {
     }
 
     let emailSentAt = job.email_sent_at;
+    let deliveryError: Error | null = null;
     if (job.requires_email && !emailSentAt) {
       const outcome = job.kind === "magnus_approved"
         ? await sendMagnusApprovedEmail(job.user_id)
@@ -418,12 +421,49 @@ async function processJob(job: RetentionJob) {
             details: copy.details ?? copy.message,
           });
       if (!outcome.delivered) {
-        throw new Error(outcome.skipped
+        deliveryError = new Error(outcome.skipped
           ? "Brevo retention email is not configured"
           : "Brevo retention email was not delivered");
+      } else {
+        emailSentAt = new Date().toISOString();
+        const { error: emailStateError } = await admin
+          .from("retention_notification_jobs")
+          .update({ email_sent_at: emailSentAt, updated_at: emailSentAt })
+          .eq("id", job.id);
+        if (emailStateError) throw emailStateError;
       }
-      emailSentAt = new Date().toISOString();
     }
+
+    let pushSentAt = job.push_sent_at;
+    if (!pushSentAt) {
+      try {
+        const push = await deliverPushNotification({
+          id: notificationId,
+          user_id: job.user_id,
+          exam_id: job.exam_id,
+          type: job.kind,
+          title: copy.title,
+          message: copy.message,
+          action_url: copy.actionUrl,
+        }, admin);
+        if (push.skipped) {
+          throw new Error("Firebase push is not configured");
+        }
+        if (push.delivered === 0 && push.transientFailures > 0) {
+          throw new Error(`Firebase temporarily failed for ${push.transientFailures} device token(s)`);
+        }
+        pushSentAt = new Date().toISOString();
+        const { error: pushStateError } = await admin
+          .from("retention_notification_jobs")
+          .update({ push_sent_at: pushSentAt, updated_at: pushSentAt })
+          .eq("id", job.id);
+        if (pushStateError) throw pushStateError;
+      } catch (error) {
+        deliveryError ??= error instanceof Error ? error : new Error("Browser push delivery failed");
+      }
+    }
+
+    if (deliveryError) throw deliveryError;
 
     const completedAt = new Date().toISOString();
     const { error: completeError } = await admin
@@ -431,6 +471,7 @@ async function processJob(job: RetentionJob) {
       .update({
         status: "completed",
         email_sent_at: emailSentAt,
+        push_sent_at: pushSentAt,
         completed_at: completedAt,
         claimed_by: null,
         claimed_at: null,
