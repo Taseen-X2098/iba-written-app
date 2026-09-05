@@ -3,7 +3,7 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "IBA Written — AI-Powered Exam Preparation",
+    name: "IBA Written",
     short_name: "IBA Written",
     description:
       "Practice IBA written exam questions with AI-powered grading, progress tracking, and weekly exams.",
