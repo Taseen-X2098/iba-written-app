@@ -20,6 +20,7 @@ DECLARE
   v_normal_eq uuid;
   v_old_expiry timestamptz := now() + interval '10 days';
   v_new_expiry timestamptz;
+  v_subscription_id uuid;
   v_attempt public.exam_attempts;
   v_page jsonb;
   v_version integer;
@@ -88,7 +89,7 @@ BEGIN
   IF (SELECT source FROM public.magnus_memberships WHERE user_id = v_approval_candidate) <> 'promo' THEN
     RAISE EXCEPTION 'ASSERT: promo source was not preserved';
   END IF;
-  SELECT expires_at INTO v_new_expiry
+  SELECT id, expires_at INTO v_subscription_id, v_new_expiry
   FROM public.subscriptions
   WHERE user_id = v_approval_candidate AND is_active = true;
   IF v_new_expiry < v_old_expiry + interval '29 days 23 hours'
@@ -140,13 +141,24 @@ BEGIN
   IF public.disable_magnus_student(v_approval_candidate) THEN
     RAISE EXCEPTION 'ASSERT: repeated Magnus disable was not idempotent';
   END IF;
-  SELECT count(*) INTO v_count
-  FROM public.approve_magnus_students(ARRAY[v_approval_candidate]);
-  IF v_count <> 1
+  IF NOT public.reenable_magnus_student(v_approval_candidate)
     OR (SELECT status FROM public.magnus_memberships
         WHERE user_id = v_approval_candidate) <> 'approved'
   THEN
     RAISE EXCEPTION 'ASSERT: disabled Magnus status could not be re-enabled';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.subscriptions
+    WHERE id = v_subscription_id
+      AND user_id = v_approval_candidate
+      AND is_active = true
+      AND plan_type = 'plan_2'
+      AND tests_remaining = 300
+      AND extra_tests_purchased = 2
+      AND expires_at = v_new_expiry
+  ) OR (SELECT count(*) FROM public.subscriptions
+        WHERE user_id = v_approval_candidate AND is_active = true) <> 1 THEN
+    RAISE EXCEPTION 'ASSERT: re-enabling Magnus changed the plan, balance, or expiry';
   END IF;
   IF (SELECT count(*) FROM public.retention_notification_jobs
       WHERE user_id = v_approval_candidate AND kind = 'magnus_approved') <> 2 THEN

@@ -13,7 +13,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { wakeGradingWorker } from "@/lib/grading/jobs";
 import { deliverAccountApprovalNotifications } from "@/lib/notifications/account-approval";
-import { adminActivateSubscription, approveMagnusStudents, disableMagnusStudent } from "./actions";
+import {
+  adminActivateSubscription,
+  approveMagnusStudents,
+  disableMagnusStudent,
+  reenableMagnusStudent,
+} from "./actions";
 
 const USER_1 = "40000000-0000-4000-8000-000000000001";
 
@@ -91,6 +96,31 @@ describe("Magnus admin approval action", () => {
     await expect(disableMagnusStudent(USER_1)).resolves.toEqual({
       success: false,
       error: "Student does not have an approved Magnus status",
+    });
+  });
+
+  it("re-enables Magnus through the status-only RPC", async () => {
+    const client = signedInClient({ rpcData: true });
+    jest.mocked(createClient).mockResolvedValue(client as unknown as Awaited<ReturnType<typeof createClient>>);
+
+    await expect(reenableMagnusStudent(USER_1)).resolves.toEqual({ success: true });
+    expect(client.rpc).toHaveBeenCalledWith("reenable_magnus_student", {
+      p_user_id: USER_1,
+    });
+    expect(wakeGradingWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces the database error when Magnus re-enable fails", async () => {
+    const client = signedInClient();
+    client.rpc.mockResolvedValue({
+      data: null,
+      error: { message: "Magnus re-enable database failure" },
+    });
+    jest.mocked(createClient).mockResolvedValue(client as unknown as Awaited<ReturnType<typeof createClient>>);
+
+    await expect(reenableMagnusStudent(USER_1)).resolves.toEqual({
+      success: false,
+      error: "Magnus re-enable database failure",
     });
   });
 

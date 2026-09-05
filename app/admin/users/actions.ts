@@ -22,7 +22,12 @@ function validationError(error: z.ZodError) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "An unexpected error occurred";
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "An unexpected error occurred";
 }
 
 async function verifyAdmin() {
@@ -86,6 +91,26 @@ export async function disableMagnusStudent(userId: string) {
     if (error) throw error;
     if (!data) throw new Error("Student does not have an approved Magnus status");
 
+    revalidatePath("/admin/users");
+    return { success: true as const };
+  } catch (error: unknown) {
+    return { success: false as const, error: errorMessage(error) };
+  }
+}
+
+export async function reenableMagnusStudent(userId: string) {
+  try {
+    const { supabase } = await verifyAdmin();
+    const parsedUserId = userIdSchema.safeParse(userId);
+    if (!parsedUserId.success) throw new Error(validationError(parsedUserId.error));
+
+    const { data, error } = await supabase.rpc("reenable_magnus_student", {
+      p_user_id: parsedUserId.data,
+    });
+    if (error) throw error;
+    if (!data) throw new Error("Student does not have a disabled Magnus status");
+
+    await wakeMagnusEmailWorker();
     revalidatePath("/admin/users");
     return { success: true as const };
   } catch (error: unknown) {

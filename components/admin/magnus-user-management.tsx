@@ -6,6 +6,7 @@ import { BadgeCheck, Ban, Bell, Check, Mail, RefreshCw, Search, Users } from "lu
 import {
   approveMagnusStudents,
   disableMagnusStudent,
+  reenableMagnusStudent,
   retryMagnusWelcomeEmail,
 } from "@/app/admin/users/actions";
 import { UserActions } from "@/components/admin/user-actions";
@@ -126,6 +127,21 @@ export function MagnusUserManagement({ users }: { users: AdminStudentRow[] }) {
     });
   }
 
+  function reenableMagnus(userId: string) {
+    setMessage(null);
+    setBusyUserId(userId);
+    startTransition(async () => {
+      const result = await reenableMagnusStudent(userId);
+      if (result.success) {
+        setMessage({ type: "success", text: "Magnus status re-enabled. The student's plan and test balance were left unchanged." });
+        router.refresh();
+      } else {
+        setMessage({ type: "error", text: result.error });
+      }
+      setBusyUserId(null);
+    });
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm md:flex-row md:items-center">
@@ -208,7 +224,9 @@ export function MagnusUserManagement({ users }: { users: AdminStudentRow[] }) {
                         <button
                           type="button"
                           disabled={isPending}
-                          onClick={() => approve([user.id])}
+                          onClick={() => user.magnusStatus === "disabled"
+                            ? reenableMagnus(user.id)
+                            : approve([user.id])}
                           className="inline-flex items-center gap-1.5 rounded-md bg-green-50 px-2.5 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50"
                         >
                           <Check size={14} /> {busyUserId === user.id
