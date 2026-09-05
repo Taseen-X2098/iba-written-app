@@ -73,6 +73,7 @@ export default function SubscriptionClient({
   const usage = getUsageInfo(profileMock, activeSubscription);
 
   const canBuySlots = activeSubscription && (activeSubscription.plan_type === "plan_1" || activeSubscription.plan_type === "plan_2");
+  const hasPlanPaymentForm = Boolean(planPaymentFormUrl.trim());
 
   return (
     <div className="px-4 py-6 lg:px-8 max-w-6xl mx-auto animate-fade-in">
@@ -218,14 +219,18 @@ export default function SubscriptionClient({
               </div>
 
               <button
-                onClick={() => window.open(planPaymentFormUrl, "_blank")}
-                disabled={isCurrentPlan || isUnavailableSwitch}
+                onClick={() => {
+                  if (hasPlanPaymentForm) {
+                    window.open(planPaymentFormUrl, "_blank", "noopener,noreferrer");
+                  }
+                }}
+                disabled={isCurrentPlan || isUnavailableSwitch || !hasPlanPaymentForm}
                 className={`w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                   isCurrentPlan 
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : plan.isPopular
-                    ? `bg-brand-600 text-white ${isUnavailableSwitch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-700 shadow-md shadow-brand-200'}`
-                    : `bg-brand-50 text-brand-700 ${isUnavailableSwitch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-100'}`
+                    ? `bg-brand-600 text-white ${isUnavailableSwitch || !hasPlanPaymentForm ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-700 shadow-md shadow-brand-200'}`
+                    : `bg-brand-50 text-brand-700 ${isUnavailableSwitch || !hasPlanPaymentForm ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-100'}`
                 }`}
               >
                 {isCurrentPlan ? (

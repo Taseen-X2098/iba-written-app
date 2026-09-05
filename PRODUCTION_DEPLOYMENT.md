@@ -411,8 +411,8 @@ BREVO_SENDER_EMAIL=
 BREVO_SENDER_NAME=IBA Written
 ```
 
-`PAYMENT_FORM_URL` is not read by the current application; use
-`PLAN_PAYMENT_FORM_URL`.
+`PLAN_PAYMENT_FORM_URL` is the preferred key. `PAYMENT_FORM_URL` remains
+supported as a legacy fallback for existing deployments.
 
 After redeploying `web`, verify that the Subscribe, Buy Now, and Apply for
 Mentorship buttons open the intended forms. Keep payment verification and account

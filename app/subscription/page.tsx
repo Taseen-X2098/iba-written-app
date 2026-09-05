@@ -1,6 +1,7 @@
 import MainShell from "@/components/main-shell";
 import SubscriptionClient from "@/components/subscription/subscription-client";
 import { getMainUserContext } from "@/lib/main-user-context";
+import { getSubscriptionFormUrls } from "@/lib/subscriptions/form-urls";
 
 export default async function SubscriptionPage({
   searchParams,
@@ -11,6 +12,7 @@ export default async function SubscriptionPage({
   const params = await searchParams;
   const success = params.success === "true";
   const error = typeof params.error === "string" ? params.error : undefined;
+  const formUrls = getSubscriptionFormUrls();
 
   const subscriptionPage = (
     <SubscriptionClient
@@ -18,9 +20,7 @@ export default async function SubscriptionPage({
       freeTestsRemaining={context?.profile.free_tests_remaining ?? 0}
       success={success}
       error={error}
-      planPaymentFormUrl={process.env.PLAN_PAYMENT_FORM_URL || process.env.NEXT_PUBLIC_PLAN_PAYMENT_FORM_URL || ""}
-      slotsPaymentFormUrl={process.env.SLOTS_PAYMENT_FORM_URL || process.env.NEXT_PUBLIC_SLOTS_PAYMENT_FORM_URL || ""}
-      mentorshipFormUrl={process.env.MENTORSHIP_FORM_URL || process.env.NEXT_PUBLIC_MENTORSHIP_FORM_URL || ""}
+      {...formUrls}
     />
   );
 
