@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Crown, Check, AlertCircle, Plus, Sparkles, TrendingUp, ChevronDown } from "lucide-react";
-import type { Subscription } from "@/lib/types";
+import { EXTRA_TEST_PRICE, type Subscription } from "@/lib/types";
 import { getUsageInfo } from "@/lib/utils/subscription";
 
 interface Props {
@@ -69,18 +69,8 @@ export default function SubscriptionClient({
 
   // We construct a temporary Profile just to pass the free tests count 
   // since the new universal utility accepts profile and subscription.
-  const profileMock = { free_tests_remaining: freeTestsRemaining } as any;
+  const profileMock = { free_tests_remaining: freeTestsRemaining };
   const usage = getUsageInfo(profileMock, activeSubscription);
-
-  const calculateUpgradeCost = (newPlanPrice: number) => {
-    if (!activeSubscription || activeSubscription.plan_type === "plan_3") return newPlanPrice; // not upgrading from 1->2
-    const oldPrice = activeSubscription.plan_type === "plan_1" ? 499 : (activeSubscription.plan_type === "plan_2" ? 699 : 299);
-    if (newPlanPrice <= oldPrice) return newPlanPrice; // downgrade/same plan handled by backend (prevented)
-    
-    // Quick frontend estimation (backend does exact calc based on current date)
-    const diff = newPlanPrice - oldPrice;
-    return `~${Math.ceil(diff * 0.5)} (prorated)`; // Very rough visual estimate
-  };
 
   const canBuySlots = activeSubscription && (activeSubscription.plan_type === "plan_1" || activeSubscription.plan_type === "plan_2");
 
@@ -146,7 +136,7 @@ export default function SubscriptionClient({
             <h4 className="text-sm font-bold text-brand-900 mb-1 flex items-center gap-1.5">
               <Plus size={16} /> Need more slots?
             </h4>
-            <p className="text-xs text-brand-700 mb-3">Buy extra tests for 10 ৳ each.</p>
+            <p className="text-xs text-brand-700 mb-3">Buy extra tests for {EXTRA_TEST_PRICE} ৳ each.</p>
             {canBuySlots ? (
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="relative w-full sm:w-auto">
@@ -155,10 +145,10 @@ export default function SubscriptionClient({
                     onChange={(e) => setExtraSlots(Number(e.target.value))}
                     className="bg-white border border-brand-200 text-brand-900 rounded-lg pl-3 pr-10 py-2.5 sm:py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none relative z-10 w-full"
                   >
-                    <option value={10}>10 Tests (100 ৳)</option>
-                    <option value={20}>20 Tests (200 ৳)</option>
-                    <option value={50}>50 Tests (500 ৳)</option>
-                    <option value={100}>100 Tests (1000 ৳)</option>
+                    <option value={10}>10 Tests ({10 * EXTRA_TEST_PRICE} ৳)</option>
+                    <option value={20}>20 Tests ({20 * EXTRA_TEST_PRICE} ৳)</option>
+                    <option value={50}>50 Tests ({50 * EXTRA_TEST_PRICE} ৳)</option>
+                    <option value={100}>100 Tests ({100 * EXTRA_TEST_PRICE} ৳)</option>
                   </select>
                   <ChevronDown size={16} className="text-brand-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none z-0" />
                 </div>
@@ -183,8 +173,16 @@ export default function SubscriptionClient({
       <div className="grid md:grid-cols-3 gap-6">
         {PLANS.map((plan) => {
           const isCurrentPlan = activeSubscription?.plan_type === plan.id;
-          const isDowngrade = activeSubscription?.plan_type === "plan_2" && (plan.id === "plan_1" || plan.id === "plan_3");
-          const isUpgrade = activeSubscription?.plan_type === "plan_1" && plan.id === "plan_2";
+          const isUpgrade = Boolean(
+            activeSubscription &&
+            activeSubscription.plan_type !== "plan_2" &&
+            plan.id === "plan_2"
+          );
+          const isUnavailableSwitch = Boolean(
+            activeSubscription &&
+            !isCurrentPlan &&
+            !isUpgrade
+          );
           
           return (
             <div 
@@ -221,19 +219,21 @@ export default function SubscriptionClient({
 
               <button
                 onClick={() => window.open(planPaymentFormUrl, "_blank")}
-                disabled={isCurrentPlan || isDowngrade}
+                disabled={isCurrentPlan || isUnavailableSwitch}
                 className={`w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
                   isCurrentPlan 
                     ? 'bg-muted text-muted-foreground cursor-not-allowed'
                     : plan.isPopular
-                    ? `bg-brand-600 text-white ${isDowngrade ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-700 shadow-md shadow-brand-200'}`
-                    : `bg-brand-50 text-brand-700 ${isDowngrade ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-100'}`
+                    ? `bg-brand-600 text-white ${isUnavailableSwitch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-700 shadow-md shadow-brand-200'}`
+                    : `bg-brand-50 text-brand-700 ${isUnavailableSwitch ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-100'}`
                 }`}
               >
                 {isCurrentPlan ? (
                   "Current Plan"
                 ) : isUpgrade ? (
-                  <>Upgrade ({calculateUpgradeCost(plan.price)} ৳) <TrendingUp size={16}/></>
+                  <>Upgrade (prorated) <TrendingUp size={16}/></>
+                ) : isUnavailableSwitch ? (
+                  "Available after expiry"
                 ) : (
                   "Subscribe"
                 )}
@@ -253,7 +253,7 @@ export default function SubscriptionClient({
         <div className="relative z-10 max-w-2xl">
           <h4 className="text-2xl font-bold mb-3">Need personalized guidance?</h4>
           <p className="text-brand-100 mb-6 leading-relaxed">
-            Get dedicated 1-on-1 mentorship to fast-track your preparation. We'll identify your weaknesses, craft a custom study plan, and guide you through intensive writing practice.
+            Get dedicated 1-on-1 mentorship to fast-track your preparation. We&apos;ll identify your weaknesses, craft a custom study plan, and guide you through intensive writing practice.
           </p>
           <button
             onClick={() => window.open(mentorshipFormUrl, "_blank")}

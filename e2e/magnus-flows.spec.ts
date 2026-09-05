@@ -19,7 +19,7 @@ test("settings renders a clear Magnus membership state", async ({ page }) => {
   test.skip(!process.env.E2E_STUDENT_EMAIL, "A seeded authenticated student is required");
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Magnus Academy" })).toBeVisible();
-  await expect(page.getByText(/Approved Magnus student|Awaiting approval|submit their promocode/i)).toBeVisible();
+  await expect(page.getByText(/Approved Magnus student|Awaiting approval|Magnus status disabled|submit their promocode/i)).toBeVisible();
 });
 
 test("admin candidates and all-students views expose email and approval controls", async ({ page }) => {

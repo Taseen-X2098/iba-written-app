@@ -1,26 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
 import { getBkashClient } from "@/lib/bkash/client";
 import { sendSlotsAddedEmail } from "@/lib/email/brevo";
 import { deliverAccountApprovalNotifications } from "@/lib/notifications/account-approval";
-import type { PlanType } from "@/lib/types";
+import { createAdminClient } from "@/lib/supabase/server";
+import type { PaymentType, PlanType } from "@/lib/types";
+
+interface FulfillmentResult {
+  fulfilled_now: boolean;
+  fulfilled_user_id: string;
+  fulfilled_payment_type: PaymentType;
+  fulfilled_plan_type: PlanType | null;
+  fulfilled_subscription_id: string | null;
+  fulfilled_expires_at: string | null;
+  fulfilled_slots: number;
+}
+
+function redirect(req: NextRequest, query: string) {
+  return NextResponse.redirect(new URL(`/subscription?${query}`, req.url));
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown callback error";
+}
 
 export async function GET(req: NextRequest) {
-  // We use the admin client because the callback might not have the user's cookies attached
-  // (depending on how bKash redirects, e.g., in a different context). But typically it does.
-  // Using admin client to safely update DB records regardless of session state.
+  // bKash redirects may not include the student's session, so the internal
+  // payment ID is verified against the stored provider payment ID before the
+  // service-role client is allowed to fulfill anything.
   const supabase = await createAdminClient();
-  
-  const searchParams = req.nextUrl.searchParams;
-  const status = searchParams.get("status");
-  const bkashPaymentID = searchParams.get("paymentID");
-  const internalPaymentId = searchParams.get("payment_id"); // our DB id
+  const status = req.nextUrl.searchParams.get("status");
+  const bkashPaymentId = req.nextUrl.searchParams.get("paymentID");
+  const internalPaymentId = req.nextUrl.searchParams.get("payment_id");
 
-  if (!bkashPaymentID || !internalPaymentId) {
-    return NextResponse.redirect(new URL("/subscription?error=missing_params", req.url));
+  if (!bkashPaymentId || !internalPaymentId) {
+    return redirect(req, "error=missing_params");
   }
 
-  // 1. Fetch our internal payment record
   const { data: paymentRecord, error: fetchError } = await supabase
     .from("payments")
     .select("*")
@@ -28,137 +43,128 @@ export async function GET(req: NextRequest) {
     .single();
 
   if (fetchError || !paymentRecord) {
-    return NextResponse.redirect(new URL("/subscription?error=payment_not_found", req.url));
+    return redirect(req, "error=payment_not_found");
   }
-
-  // 1b. Idempotency Check
+  if (paymentRecord.bkash_payment_id !== bkashPaymentId) {
+    return redirect(req, "error=payment_mismatch");
+  }
   if (paymentRecord.status === "completed") {
-    return NextResponse.redirect(new URL("/subscription?success=true", req.url));
+    return redirect(req, "success=true");
   }
 
-  // 2. Handle failure or cancel
   if (status !== "success") {
     await supabase
       .from("payments")
-      .update({ status: status === "cancel" ? "failed" : "failed" })
-      .eq("id", paymentRecord.id);
-      
-    return NextResponse.redirect(new URL(`/subscription?error=${status}`, req.url));
+      .update({ status: "failed" })
+      .eq("id", paymentRecord.id)
+      .eq("status", "pending");
+    return redirect(req, `error=${status === "cancel" ? "cancelled" : "payment_failed"}`);
   }
 
-  // 3. Status is success, execute the payment
   try {
     const bkash = getBkashClient();
-    const executed = await bkash.executePayment(bkashPaymentID);
+    let providerResult = await bkash.executePayment(bkashPaymentId);
 
-    if (executed.statusCode !== "0000") {
-      // Payment execution failed
+    if (providerResult.statusCode !== "0000") {
+      // A callback can be retried after bKash has already executed the payment.
+      // Querying avoids charging/fulfilling twice and also handles a timeout
+      // where the original execute response never reached this server.
+      const queried = await bkash.queryPayment(bkashPaymentId);
+      if (queried.statusCode === "0000" && queried.transactionStatus === "Completed") {
+        providerResult = queried;
+      } else {
+        await supabase
+          .from("payments")
+          .update({
+            metadata: {
+              ...(paymentRecord.metadata ?? {}),
+              executeError: providerResult.statusMessage || queried.statusMessage || "Payment verification pending",
+            },
+          })
+          .eq("id", paymentRecord.id)
+          .eq("status", "pending");
+        return redirect(req, "error=payment_verification_pending");
+      }
+    }
+
+    const transactionId = providerResult.trxID;
+    const paidAmount = Number(providerResult.amount);
+    const expectedAmount = Number(paymentRecord.amount);
+    if (
+      !transactionId ||
+      !Number.isFinite(paidAmount) ||
+      !Number.isFinite(expectedAmount) ||
+      Math.abs(paidAmount - expectedAmount) > 0.001 ||
+      (providerResult.currency && providerResult.currency !== "BDT")
+    ) {
+      console.error("bKash payment verification mismatch", {
+        paymentId: paymentRecord.id,
+        expectedAmount,
+        paidAmount,
+        currency: providerResult.currency,
+      });
+      return redirect(req, "error=payment_verification_pending");
+    }
+
+    // The RPC changes the subscription/slot balance and marks the payment
+    // completed in one database transaction. Repeated callbacks return
+    // fulfilled_now=false and cannot apply the purchase a second time.
+    const { data, error: fulfillmentError } = await supabase.rpc("fulfill_bkash_payment", {
+      p_payment_id: paymentRecord.id,
+      p_bkash_trx_id: transactionId,
+    });
+    if (fulfillmentError) {
+      console.error("bKash fulfillment failed:", fulfillmentError);
       await supabase
         .from("payments")
-        .update({ status: "failed", metadata: { ...paymentRecord.metadata, executeError: executed.statusMessage } })
-        .eq("id", paymentRecord.id);
-        
-      return NextResponse.redirect(new URL(`/subscription?error=${encodeURIComponent(executed.statusMessage || "execution_failed")}`, req.url));
-    }
-
-    // 4. Payment Executed Successfully!
-    await supabase
-      .from("payments")
-      .update({ 
-        status: "completed", 
-        bkash_trx_id: executed.trxID 
-      })
-      .eq("id", paymentRecord.id);
-
-    // 5. Fulfill the purchase (update subscription)
-    if (paymentRecord.payment_type === "extra_slots") {
-      const slotsToAdd = paymentRecord.metadata.slots || 0;
-      
-      // Get current active subscription if any
-      const { data: activeSub } = await supabase
-        .from("subscriptions")
-        .select("*")
-        .eq("user_id", paymentRecord.user_id)
-        .eq("is_active", true)
-        .limit(1)
-        .single();
-
-      if (activeSub) {
-        const { error: slotsUpdateError } = await supabase
-          .from("subscriptions")
-          .update({ extra_tests_purchased: activeSub.extra_tests_purchased + slotsToAdd })
-          .eq("id", activeSub.id);
-        if (slotsUpdateError) throw slotsUpdateError;
-      } else {
-        // No active subscription, we just create a dummy one for extra slots or update profile
-        // But our schema expects subscriptions to hold extra tests.
-        // Let's create an "extra_only" plan or just use plan3 without tests_remaining.
-        const expiry = new Date();
-        expiry.setFullYear(expiry.getFullYear() + 1); // 1 year expiry for extra slots without plan
-        
-        const { error: slotsInsertError } = await supabase
-          .from("subscriptions")
-          .insert({
-            user_id: paymentRecord.user_id,
-            plan_type: "plan_3", // arbitrary since it's just extra slots
-            tests_remaining: 0,
-            extra_tests_purchased: slotsToAdd,
-            expires_at: expiry.toISOString(),
-            is_active: true
-          });
-        if (slotsInsertError) throw slotsInsertError;
-      }
-      await sendSlotsAddedEmail(paymentRecord.user_id, slotsToAdd, "extra");
-    } else if (paymentRecord.payment_type === "plan") {
-      // It's a plan subscription
-      // Get old sub to carry over extra tests
-      const { data: oldSub } = await supabase.from("subscriptions").select("extra_tests_purchased").eq("user_id", paymentRecord.user_id).eq("is_active", true).single();
-      const carriedOverExtra = oldSub ? (oldSub.extra_tests_purchased || 0) : 0;
-
-      // Deactivate old subscription
-      const { error: deactivateError } = await supabase
-        .from("subscriptions")
-        .update({ is_active: false })
-        .eq("user_id", paymentRecord.user_id)
-        .eq("is_active", true);
-      if (deactivateError) throw deactivateError;
-
-      // Create new one. 30 days from now.
-      const expiry = new Date();
-      expiry.setDate(expiry.getDate() + 30);
-      
-      const isPlan1 = paymentRecord.plan_type === "plan_1";
-      const isPlan2 = paymentRecord.plan_type === "plan_2";
-      // plan1 = 300 tests, plan2 = 300 tests, plan3 = 0 tests (weekly only)
-      const tests = (isPlan1 || isPlan2) ? 300 : 0;
-
-      const { data: subscription, error: planInsertError } = await supabase
-        .from("subscriptions")
-        .insert({
-          user_id: paymentRecord.user_id,
-          plan_type: paymentRecord.plan_type,
-          tests_remaining: tests,
-          extra_tests_purchased: carriedOverExtra,
-          expires_at: expiry.toISOString(),
-          is_active: true
+        .update({
+          metadata: {
+            ...(paymentRecord.metadata ?? {}),
+            fulfillmentError: fulfillmentError.message,
+          },
         })
-        .select("id")
-        .single();
-      if (planInsertError) throw planInsertError;
-      await deliverAccountApprovalNotifications({
-        userId: paymentRecord.user_id,
-        planType: paymentRecord.plan_type as PlanType,
-        expiresAt: expiry.toISOString(),
-        subscriptionId: subscription.id,
-      });
+        .eq("id", paymentRecord.id)
+        .eq("status", "pending");
+      return redirect(req, "error=fulfillment_pending");
     }
 
-    // Success redirect
-    return NextResponse.redirect(new URL("/subscription?success=true", req.url));
+    const fulfillment = (Array.isArray(data) ? data[0] : data) as FulfillmentResult | undefined;
+    if (!fulfillment) {
+      return redirect(req, "error=fulfillment_pending");
+    }
 
-  } catch (error: any) {
-    console.error("bKash Execute Error:", error);
-    // In case of a timeout during execute, we could queryPayment later, but for now we mark failed.
-    return NextResponse.redirect(new URL("/subscription?error=internal_error", req.url));
+    if (fulfillment.fulfilled_now) {
+      try {
+        if (fulfillment.fulfilled_payment_type === "extra_tests") {
+          await sendSlotsAddedEmail(
+            fulfillment.fulfilled_user_id,
+            fulfillment.fulfilled_slots,
+            "extra"
+          );
+        } else if (
+          fulfillment.fulfilled_plan_type &&
+          fulfillment.fulfilled_subscription_id &&
+          fulfillment.fulfilled_expires_at
+        ) {
+          await deliverAccountApprovalNotifications({
+            userId: fulfillment.fulfilled_user_id,
+            planType: fulfillment.fulfilled_plan_type,
+            expiresAt: fulfillment.fulfilled_expires_at,
+            subscriptionId: fulfillment.fulfilled_subscription_id,
+          });
+        }
+      } catch (notificationError: unknown) {
+        // Entitlement fulfillment has already committed. A notification outage
+        // must not turn a successful paid plan into a failed callback.
+        console.error("Paid plan notification failed:", notificationError);
+      }
+    }
+
+    return redirect(req, "success=true");
+  } catch (error: unknown) {
+    console.error("bKash callback error:", errorMessage(error));
+    // Keep the payment pending: bKash may have executed it even if the response
+    // timed out, and a later callback can query and fulfill it safely.
+    return redirect(req, "error=payment_verification_pending");
   }
 }

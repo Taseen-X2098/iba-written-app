@@ -17,6 +17,8 @@ export type PushDeliveryResult = {
   failed: number;
   transientFailures: number;
   skipped: boolean;
+  /** Distinct Firebase error codes, retained for actionable worker diagnostics. */
+  errorCodes?: string[];
 };
 
 const PERMANENT_FCM_ERRORS = new Set([
@@ -85,9 +87,11 @@ export async function deliverPushNotification(
 
   const permanentlyInvalidTokens: string[] = [];
   let transientFailures = 0;
+  const errorCodes = new Set<string>();
   response.responses.forEach((result, index) => {
     if (result.success) return;
-    const code = result.error?.code ?? "";
+    const code = result.error?.code || "messaging/unknown-error";
+    errorCodes.add(code);
     if (PERMANENT_FCM_ERRORS.has(code)) {
       permanentlyInvalidTokens.push(tokens[index]);
     } else {
@@ -110,5 +114,6 @@ export async function deliverPushNotification(
     failed: response.failureCount,
     transientFailures,
     skipped: false,
+    errorCodes: [...errorCodes].sort(),
   };
 }

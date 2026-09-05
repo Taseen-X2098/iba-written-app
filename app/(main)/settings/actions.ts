@@ -27,9 +27,7 @@ export async function submitMagnusPromoCode(rawCode: string): Promise<MagnusProm
     .eq("user_id", user.id)
     .maybeSingle();
   if (existingError) return { success: false, error: "Unable to verify your status right now." };
-  if (existing?.status === "approved" || existing?.status === "pending") {
-    return { success: true, status: existing.status };
-  }
+  if (existing?.status) return { success: true, status: existing.status };
 
   const { error } = await admin.from("magnus_memberships").insert({
     user_id: user.id,

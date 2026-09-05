@@ -35,8 +35,6 @@ async function verifyAdmin() {
   return { supabase, user };
 }
 
-const supabaseAdmin = createAdminClient();
-
 const magnusApprovalInputSchema = z.array(userIdSchema).min(1).max(2_000);
 
 async function wakeMagnusEmailWorker() {
@@ -76,9 +74,29 @@ export async function approveMagnusStudents(userIds: string[]) {
   }
 }
 
+export async function disableMagnusStudent(userId: string) {
+  try {
+    const { supabase } = await verifyAdmin();
+    const parsedUserId = userIdSchema.safeParse(userId);
+    if (!parsedUserId.success) throw new Error(validationError(parsedUserId.error));
+
+    const { data, error } = await supabase.rpc("disable_magnus_student", {
+      p_user_id: parsedUserId.data,
+    });
+    if (error) throw error;
+    if (!data) throw new Error("Student does not have an approved Magnus status");
+
+    revalidatePath("/admin/users");
+    return { success: true as const };
+  } catch (error: unknown) {
+    return { success: false as const, error: errorMessage(error) };
+  }
+}
+
 export async function retryMagnusWelcomeEmail(userId: string) {
   try {
     await verifyAdmin();
+    const supabaseAdmin = createAdminClient();
     const parsedUserId = userIdSchema.safeParse(userId);
     if (!parsedUserId.success) throw new Error(validationError(parsedUserId.error));
 
@@ -92,7 +110,7 @@ export async function retryMagnusWelcomeEmail(userId: string) {
 
     const { data: job, error: jobError } = await supabaseAdmin
       .from("retention_notification_jobs")
-      .select("id, status")
+      .select("id, status, email_sent_at, push_sent_at")
       .eq("user_id", parsedUserId.data)
       .eq("kind", "magnus_approved")
       .order("created_at", { ascending: false })
@@ -115,8 +133,11 @@ export async function retryMagnusWelcomeEmail(userId: string) {
       revalidatePath("/admin/users");
       return { success: true as const };
     }
-    if (!["failed", "cancelled"].includes(job.status)) {
-      throw new Error("There is no failed Magnus welcome email to requeue");
+    if (job.email_sent_at && job.push_sent_at) {
+      throw new Error("The Magnus welcome email and push were already delivered");
+    }
+    if (!["failed", "cancelled", "completed"].includes(job.status)) {
+      throw new Error("The Magnus welcome delivery is already queued or running");
     }
 
     const { error } = await supabaseAdmin
@@ -144,41 +165,30 @@ export async function retryMagnusWelcomeEmail(userId: string) {
 export async function adminActivateSubscription(userId: string, planType: string) {
   try {
     await verifyAdmin();
+    const supabaseAdmin = createAdminClient();
     const parsed = z.object({ userId: userIdSchema, planType: planTypeSchema }).safeParse({ userId, planType });
     if (!parsed.success) throw new Error(validationError(parsed.error));
     const input = parsed.data;
-    // 1. Fetch existing extra tests to carry over
-    const { data: oldSub } = await supabaseAdmin.from("subscriptions").select("extra_tests_purchased").eq("user_id", input.userId).eq("is_active", true).single();
-    const carriedOverExtra = oldSub ? (oldSub.extra_tests_purchased || 0) : 0;
-
-    // 2. Deactivate existing plans
-    await supabaseAdmin
-      .from("subscriptions")
-      .update({ is_active: false })
-      .eq("user_id", input.userId)
-      .eq("is_active", true);
-
-    // 3. Determine default tests based on plan
-    let testsRemaining = 300;
-    if (input.planType === "plan_3") testsRemaining = 0;
-
-    // 4. Create new subscription
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: subscription, error } = await supabaseAdmin.from("subscriptions").insert({
-      user_id: input.userId,
-      plan_type: input.planType,
-      tests_remaining: testsRemaining,
-      extra_tests_purchased: carriedOverExtra,
-      is_active: true,
-      expires_at: expiresAt, // 30 days
-    }).select("id").single();
-
+    const { data, error } = await supabaseAdmin.rpc("activate_subscription_plan", {
+      p_user_id: input.userId,
+      p_plan_type: input.planType,
+      p_transition: "replace",
+      p_expected_subscription_id: null,
+    });
     if (error) throw error;
+
+    const subscription = (Array.isArray(data) ? data[0] : data) as {
+      activated_subscription_id: string;
+      activated_expires_at: string;
+      activated_plan_type: PlanType;
+    } | undefined;
+    if (!subscription) throw new Error("Plan activation did not return a subscription");
+
     await deliverAccountApprovalNotifications({
       userId: input.userId,
-      planType: input.planType as PlanType,
-      expiresAt,
-      subscriptionId: subscription.id,
+      planType: subscription.activated_plan_type,
+      expiresAt: subscription.activated_expires_at,
+      subscriptionId: subscription.activated_subscription_id,
     });
     revalidatePath("/admin/users");
     return { success: true };
@@ -190,6 +200,7 @@ export async function adminActivateSubscription(userId: string, planType: string
 export async function adminDeactivateSubscription(userId: string) {
   try {
     await verifyAdmin();
+    const supabaseAdmin = createAdminClient();
     const parsedUserId = userIdSchema.safeParse(userId);
     if (!parsedUserId.success) throw new Error(validationError(parsedUserId.error));
     const { error } = await supabaseAdmin
@@ -209,6 +220,7 @@ export async function adminDeactivateSubscription(userId: string) {
 export async function adminAddSlots(userId: string, amount: number, slotType: "free" | "extra") {
   try {
     await verifyAdmin();
+    const supabaseAdmin = createAdminClient();
     const parsed = addSlotsSchema.safeParse({ userId, amount, slotType });
     if (!parsed.success) throw new Error(validationError(parsed.error));
     const input = parsed.data;
@@ -235,6 +247,7 @@ export async function adminAddSlots(userId: string, amount: number, slotType: "f
         .select("id, extra_tests_purchased")
         .eq("user_id", input.userId)
         .eq("is_active", true)
+        .gt("expires_at", new Date().toISOString())
         .single();
 
       if (!sub) throw new Error("No active subscription found to add extra slots");

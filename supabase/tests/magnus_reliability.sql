@@ -76,8 +76,9 @@ BEGIN
     RAISE EXCEPTION 'ASSERT: signup claim was not consumed';
   END IF;
 
-  -- Approval preserves paid time, carries remaining slots, adds 300 tests, and
-  -- queues exactly one durable welcome email.
+  -- Approval preserves paid time, grants up to 300 tests without stacking a
+  -- second 300-test allowance, and
+  -- queues exactly one durable welcome delivery.
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
   SELECT count(*) INTO v_count
   FROM public.approve_magnus_students(ARRAY[
@@ -100,14 +101,14 @@ BEGIN
     WHERE user_id = v_approval_candidate
       AND is_active = true
       AND plan_type = 'plan_2'
-      AND tests_remaining = 307
+      AND tests_remaining = 300
       AND extra_tests_purchased = 2
   ) THEN
-    RAISE EXCEPTION 'ASSERT: Magnus Plan 2 grant did not preserve test slots';
+    RAISE EXCEPTION 'ASSERT: Magnus Plan 2 grant stacked or lost test slots';
   END IF;
   IF (SELECT count(*) FROM public.retention_notification_jobs
       WHERE user_id = v_approval_candidate AND kind = 'magnus_approved') <> 1 THEN
-    RAISE EXCEPTION 'ASSERT: welcome email job was not queued exactly once';
+    RAISE EXCEPTION 'ASSERT: welcome delivery job was not queued exactly once';
   END IF;
   SELECT count(*) INTO v_count
   FROM public.approve_magnus_students(ARRAY[v_approval_candidate]);
@@ -115,6 +116,41 @@ BEGIN
   IF (SELECT count(*) FROM public.subscriptions
       WHERE user_id = v_approval_candidate AND is_active = true) <> 1 THEN
     RAISE EXCEPTION 'ASSERT: repeated approval duplicated the active plan';
+  END IF;
+  IF NOT public.disable_magnus_student(v_approval_candidate) THEN
+    RAISE EXCEPTION 'ASSERT: approved Magnus status was not disabled';
+  END IF;
+  IF (SELECT status FROM public.magnus_memberships
+      WHERE user_id = v_approval_candidate) <> 'disabled' THEN
+    RAISE EXCEPTION 'ASSERT: disabled Magnus status was not retained for audit';
+  END IF;
+  IF public.is_magnus_student(v_approval_candidate) THEN
+    RAISE EXCEPTION 'ASSERT: disabled student retained Magnus-only access';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.subscriptions
+    WHERE user_id = v_approval_candidate
+      AND is_active = true
+      AND plan_type = 'plan_2'
+      AND tests_remaining = 300
+      AND extra_tests_purchased = 2
+  ) THEN
+    RAISE EXCEPTION 'ASSERT: disabling Magnus changed the active plan or slots';
+  END IF;
+  IF public.disable_magnus_student(v_approval_candidate) THEN
+    RAISE EXCEPTION 'ASSERT: repeated Magnus disable was not idempotent';
+  END IF;
+  SELECT count(*) INTO v_count
+  FROM public.approve_magnus_students(ARRAY[v_approval_candidate]);
+  IF v_count <> 1
+    OR (SELECT status FROM public.magnus_memberships
+        WHERE user_id = v_approval_candidate) <> 'approved'
+  THEN
+    RAISE EXCEPTION 'ASSERT: disabled Magnus status could not be re-enabled';
+  END IF;
+  IF (SELECT count(*) FROM public.retention_notification_jobs
+      WHERE user_id = v_approval_candidate AND kind = 'magnus_approved') <> 2 THEN
+    RAISE EXCEPTION 'ASSERT: re-enabled Magnus status did not queue a new welcome delivery';
   END IF;
   SELECT count(*) INTO v_count
   FROM public.approve_magnus_students(ARRAY[v_direct]);

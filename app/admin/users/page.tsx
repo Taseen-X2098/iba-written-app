@@ -47,7 +47,7 @@ export default async function AdminUsersPage() {
       .select("user_id, status, source, requested_at, approved_at"),
     admin
       .from("retention_notification_jobs")
-      .select("user_id, status, email_sent_at, last_error, attempt_count, created_at")
+      .select("user_id, status, email_sent_at, push_sent_at, last_error, attempt_count, created_at")
       .eq("kind", "magnus_approved")
       .order("created_at", { ascending: false }),
   ]);
@@ -70,15 +70,25 @@ export default async function AdminUsersPage() {
   const users: AdminStudentRow[] = profiles.map((profile) => {
     const membership = membershipByUser.get(profile.id);
     const job = jobByUser.get(profile.id);
+    const terminalDelivery = job?.status === "failed" || job?.status === "cancelled" || job?.status === "completed";
     const emailStatus = !membership || membership.status !== "approved"
       ? null
       : !job
         ? "failed"
-        : job.email_sent_at || job.status === "completed"
+        : job.email_sent_at
         ? "sent"
-        : job.status === "failed" || job.status === "cancelled"
+        : terminalDelivery
           ? "failed"
           : "queued";
+    const pushStatus = !membership || membership.status !== "approved"
+      ? null
+      : !job
+        ? "failed"
+        : job.push_sent_at
+          ? "sent"
+          : terminalDelivery
+            ? "failed"
+            : "queued";
     return {
       id: profile.id,
       name: profile.name,
@@ -93,6 +103,7 @@ export default async function AdminUsersPage() {
       requestedAt: membership?.requested_at ?? null,
       approvedAt: membership?.approved_at ?? null,
       welcomeEmailStatus: emailStatus,
+      welcomePushStatus: pushStatus,
       welcomeEmailError: job?.last_error ?? (membership?.status === "approved" && !job ? "Welcome email job is missing" : null),
     };
   });

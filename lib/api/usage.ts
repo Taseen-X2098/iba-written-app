@@ -1,4 +1,4 @@
-import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import { getRedis } from "@/lib/redis";
 
 export async function checkTestLimit(userId: string): Promise<boolean> {
@@ -10,6 +10,7 @@ export async function checkTestLimit(userId: string): Promise<boolean> {
     .select("*")
     .eq("user_id", userId)
     .eq("is_active", true)
+    .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
@@ -54,6 +55,7 @@ export async function consumeTestSlot(userId: string): Promise<boolean> {
     .select("*")
     .eq("user_id", userId)
     .eq("is_active", true)
+    .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })
     .limit(1)
     .single();

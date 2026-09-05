@@ -51,6 +51,7 @@ describe("push notification delivery", () => {
       failed: 1,
       transientFailures: 0,
       skipped: false,
+      errorCodes: ["messaging/registration-token-not-registered"],
     });
 
     expect(sendEachForMulticast).toHaveBeenCalledWith(expect.objectContaining({
@@ -92,9 +93,43 @@ describe("push notification delivery", () => {
     }, admin as never)).resolves.toMatchObject({
       failed: 1,
       transientFailures: 1,
+      errorCodes: ["messaging/internal-error"],
     });
 
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("reports Firebase credential failures with the provider error code", async () => {
+    const single = jest.fn().mockResolvedValue({
+      data: { fcm_tokens: ["registered-token"] },
+      error: null,
+    });
+    const admin = {
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({ single }),
+        }),
+        update: jest.fn(),
+      }),
+    };
+    sendEachForMulticast.mockResolvedValue({
+      successCount: 0,
+      failureCount: 1,
+      responses: [{
+        success: false,
+        error: { code: "app/invalid-credential" },
+      }],
+    });
+
+    await expect(deliverPushNotification({
+      user_id: "10000000-0000-4000-8000-000000000001",
+      title: "Magnus approved",
+      message: "Your Magnus status is approved.",
+    }, admin as never)).resolves.toMatchObject({
+      delivered: 0,
+      transientFailures: 1,
+      errorCodes: ["app/invalid-credential"],
+    });
   });
 
   it("skips cleanly when Firebase server credentials are unavailable", async () => {

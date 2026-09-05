@@ -2,7 +2,7 @@
 
 import { useCallback, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { BadgeCheck, KeyRound, Settings, User, Lock, Loader2 } from "lucide-react";
+import { BadgeCheck, Ban, KeyRound, Settings, User, Lock, Loader2 } from "lucide-react";
 import type { MagnusMembershipStatus, Profile } from "@/lib/types";
 import { profileFieldsSchema } from "@/lib/validation/profile";
 import { submitMagnusPromoCode } from "./actions";
@@ -59,6 +59,8 @@ export default function SettingsPage() {
         type: "success",
         text: result.status === "approved"
           ? "Your Magnus student status is already approved."
+          : result.status === "disabled"
+            ? "Your Magnus student status has been disabled by an admin."
           : "Promocode accepted. Your status is awaiting admin approval.",
       });
     } else {
@@ -213,6 +215,14 @@ export default function SettingsPage() {
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
             <p className="font-semibold">Awaiting approval</p>
             <p className="mt-1 text-sm">Your promocode was accepted. An admin still needs to approve your Magnus student status.</p>
+          </div>
+        ) : magnusStatus === "disabled" ? (
+          <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
+            <Ban size={21} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">Magnus status disabled</p>
+              <p className="mt-1 text-sm">Your Magnus-only access has been disabled. Contact an administrator if you believe this is a mistake.</p>
+            </div>
           </div>
         ) : (
           <form onSubmit={handleSubmitPromo} className="space-y-3">

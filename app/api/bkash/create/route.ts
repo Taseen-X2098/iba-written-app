@@ -1,107 +1,119 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { getBkashClient } from "@/lib/bkash/client";
 import { randomUUID } from "crypto";
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { getBkashClient } from "@/lib/bkash/client";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
+import {
+  PlanTransitionError,
+  quotePlanPurchase,
+  type ActivePlanForTransition,
+} from "@/lib/subscriptions/transitions";
+import { EXTRA_TEST_PRICE } from "@/lib/types";
 
-const PLAN_PRICES = {
-  plan_1: 499,
-  plan_2: 699,
-  plan_3: 299,
-};
+const purchaseSchema = z.discriminatedUnion("purchaseType", [
+  z.object({
+    purchaseType: z.literal("plan"),
+    planId: z.enum(["plan_1", "plan_2", "plan_3"]),
+  }).strict(),
+  z.object({
+    purchaseType: z.literal("extra_slots"),
+    slots: z.number().int().min(1).max(10_000),
+  }).strict(),
+]);
 
-function getFridaysLeftInMonth(date = new Date()): number {
-  let count = 0;
-  const currentMonth = date.getMonth();
-  const d = new Date(date);
-  
-  while (d.getMonth() === currentMonth) {
-    if (d.getDay() === 5) { // Friday
-      count++;
-    }
-    d.setDate(d.getDate() + 1);
-  }
-  return count;
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown payment error";
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const sessionClient = await createClient();
+  const { data: { user } } = await sessionClient.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { purchaseType, planId, slots } = await req.json();
+  let rawBody: unknown;
+  try {
+    rawBody = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const parsed = purchaseSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message || "Invalid purchase request" },
+      { status: 400 }
+    );
+  }
 
-  // Fetch active subscription for validation
-  const { data: activeSub } = await supabase
+  // Authentication is verified with the cookie-bound client. The service-role
+  // client performs payment writes because end users intentionally have no RLS
+  // policy that permits inserting or updating their own payment records.
+  const supabase = await createAdminClient();
+  const now = new Date();
+  const { data: activeSub, error: subscriptionError } = await supabase
     .from("subscriptions")
-    .select("*")
+    .select("id, plan_type, expires_at")
     .eq("user_id", user.id)
     .eq("is_active", true)
+    .gt("expires_at", now.toISOString())
+    .order("created_at", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
+  if (subscriptionError) {
+    return NextResponse.json({ error: "Could not verify the active plan" }, { status: 500 });
+  }
 
-  let amount = 0;
-  let finalPlan = planId;
-  
-  // 1. Calculate amount
-  if (purchaseType === "extra_slots") {
-    if (!slots || slots <= 0) return NextResponse.json({ error: "Invalid slots" }, { status: 400 });
-    
-    // Validate that user is on Plan 1 or Plan 2
+  let amount: number;
+  let paymentType: "subscription" | "upgrade" | "extra_tests";
+  let planType: "plan_1" | "plan_2" | "plan_3" | null = null;
+  let metadata: Record<string, unknown>;
+
+  if (parsed.data.purchaseType === "extra_slots") {
     if (!activeSub || (activeSub.plan_type !== "plan_1" && activeSub.plan_type !== "plan_2")) {
-      return NextResponse.json({ error: "You must have an active Basic Practice or Complete Prep plan to buy extra slots." }, { status: 403 });
+      return NextResponse.json(
+        { error: "You must have an active Basic Practice or Complete Prep plan to buy extra slots." },
+        { status: 403 }
+      );
     }
-    
-    amount = slots * 5; // 5tk per test
-  } else if (purchaseType === "plan") {
-    if (!PLAN_PRICES[planId as keyof typeof PLAN_PRICES]) {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
-    }
-
-    // Check if upgrading
-
-    if (activeSub && activeSub.plan_type !== planId) {
-      // Upgrading logic
-      const currentPrice = PLAN_PRICES[activeSub.plan_type as keyof typeof PLAN_PRICES];
-      const newPrice = PLAN_PRICES[planId as keyof typeof PLAN_PRICES];
-      
-      if (newPrice > currentPrice) {
-        const diff = newPrice - currentPrice;
-        const fridaysLeft = getFridaysLeftInMonth(new Date());
-        amount = Math.ceil(diff * (fridaysLeft / 4));
-      } else {
-         return NextResponse.json({ error: "Downgrades are not allowed." }, { status: 400 });
-      }
-    } else if (activeSub && activeSub.plan_type === planId) {
-      // Renewing same plan (assuming it expires soon or they just want to buy again)
-      amount = PLAN_PRICES[planId as keyof typeof PLAN_PRICES];
-    } else {
-      // New subscription
-      amount = PLAN_PRICES[planId as keyof typeof PLAN_PRICES];
-    }
+    amount = parsed.data.slots * EXTRA_TEST_PRICE;
+    paymentType = "extra_tests";
+    metadata = {
+      slots: parsed.data.slots,
+      sourceSubscriptionId: activeSub.id,
+    };
   } else {
-    return NextResponse.json({ error: "Invalid purchase type" }, { status: 400 });
+    planType = parsed.data.planId;
+    try {
+      const quote = quotePlanPurchase(
+        activeSub as ActivePlanForTransition | null,
+        planType,
+        now
+      );
+      amount = quote.amount;
+      paymentType = quote.paymentType;
+      metadata = { sourceSubscriptionId: quote.sourceSubscriptionId };
+    } catch (error: unknown) {
+      if (error instanceof PlanTransitionError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
   }
 
-  // Ensure amount is valid
-  if (amount <= 0) {
-    return NextResponse.json({ error: "Amount must be greater than 0" }, { status: 400 });
-  }
-
-  // 2. Create Payment Intent in DB
   const invoiceId = `INV-${Date.now().toString().slice(-6)}-${randomUUID().slice(0, 4)}`;
-  
+  metadata.invoiceId = invoiceId;
+
   const { data: paymentRecord, error: dbError } = await supabase
     .from("payments")
     .insert({
       user_id: user.id,
-      amount: amount,
-      payment_type: purchaseType,
-      plan_type: purchaseType === "plan" ? finalPlan : null,
+      amount,
+      payment_type: paymentType,
+      plan_type: planType,
       status: "pending",
-      metadata: { slots: purchaseType === "extra_slots" ? slots : null, invoiceId },
+      metadata,
     })
     .select("id")
     .single();
@@ -110,42 +122,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to create payment record" }, { status: 500 });
   }
 
-  // 3. Initiate bKash Payment
   try {
     const bkash = getBkashClient();
-    const origin = req.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-    const callbackURL = `${origin}/api/bkash/callback?payment_id=${paymentRecord.id}`;
-    
-    // We use the user's phone or email as payer reference. Payer ref can't be too long, uuid is 36 chars.
+    const origin = process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin;
+    const callbackURL = `${origin.replace(/\/$/, "")}/api/bkash/callback?payment_id=${paymentRecord.id}`;
     const payerReference = user.phone || user.id.slice(0, 20);
 
     const bkashRes = await bkash.createPayment({
       amount: amount.toString(),
-      payerReference: payerReference,
-      callbackURL: callbackURL,
+      payerReference,
+      callbackURL,
       merchantInvoiceNumber: invoiceId,
     });
 
-    if (bkashRes.statusCode !== "0000") {
-      throw new Error(bkashRes.statusMessage || "bKash returned an error");
+    if (bkashRes.statusCode !== "0000" || !bkashRes.paymentID || !bkashRes.bkashURL) {
+      throw new Error(bkashRes.statusMessage || "bKash returned an invalid payment response");
     }
 
-    // Update DB with bkash_payment_id
-    await supabase
+    const { data: linkedPayment, error: paymentIdError } = await supabase
       .from("payments")
       .update({ bkash_payment_id: bkashRes.paymentID })
-      .eq("id", paymentRecord.id);
+      .eq("id", paymentRecord.id)
+      .eq("status", "pending")
+      .select("id")
+      .single();
+    if (paymentIdError || !linkedPayment) {
+      throw paymentIdError || new Error("Payment record changed before bKash was linked");
+    }
 
-    // Return the URL for the frontend to redirect to
     return NextResponse.json({ bkashURL: bkashRes.bkashURL });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("bKash Create Payment Error:", error);
-    
-    // Mark payment as failed in DB
     await supabase
       .from("payments")
-      .update({ status: "failed", metadata: { error: error.message } })
-      .eq("id", paymentRecord.id);
+      .update({ status: "failed", metadata: { ...metadata, createError: errorMessage(error) } })
+      .eq("id", paymentRecord.id)
+      .eq("status", "pending");
 
     return NextResponse.json({ error: "Payment gateway error" }, { status: 502 });
   }

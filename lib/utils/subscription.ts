@@ -21,7 +21,7 @@ export function getUsageColor(pct: number): string {
 }
 
 export function getUsageInfo(
-  profile: Profile | null,
+  profile: Pick<Profile, "free_tests_remaining"> | null,
   subscription: Subscription | null
 ): UsageInfo {
   const freeRemaining = profile?.free_tests_remaining ?? 3;
@@ -68,9 +68,11 @@ export function getUsageInfo(
     };
   }
 
-  // Plan 3 (exam only) - only has free tests
-  const total = 3;
-  const remaining = freeRemaining;
+  // Plan 3 has no monthly practice allowance, but separately purchased tests
+  // remain the student's property and are still consumable by the usage RPC.
+  const extraRemaining = subscription.extra_tests_purchased;
+  const total = extraRemaining + 3;
+  const remaining = extraRemaining + freeRemaining;
   const pct = total > 0 ? (remaining / total) * 100 : 0;
   return {
     label: "Exams Only",
@@ -78,10 +80,10 @@ export function getUsageInfo(
     total: total,
     percentage: pct,
     color: getUsageColor(pct),
-    showUpgrade: false, // exam plan doesn't need to upgrade practice tests necessarily, or maybe true? let's keep false
+    showUpgrade: true,
     expiresAt: subscription.expires_at,
     freeRemaining,
-    extraRemaining: 0,
+    extraRemaining,
     planRemaining: 0,
   };
 }

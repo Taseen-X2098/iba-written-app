@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Settings, Plus, Crown, X, CheckCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Crown, X, CheckCircle } from "lucide-react";
 import { adminActivateSubscription, adminDeactivateSubscription, adminAddSlots } from "@/app/admin/users/actions";
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function UserActions({ userId, userName, activePlan }: Props) {
+  const router = useRouter();
   const [modalType, setModalType] = useState<"plan" | "slots" | null>(null);
   
   const [planType, setPlanType] = useState<string>(activePlan || "plan_1");
@@ -26,6 +28,7 @@ export function UserActions({ userId, userName, activePlan }: Props) {
     const res = await adminActivateSubscription(userId, planType);
     if (res.success) {
       setMessage({ type: "success", text: `Plan activated successfully.` });
+      router.refresh();
     } else {
       setMessage({ type: "error", text: res.error || "Failed to activate plan" });
     }
@@ -39,6 +42,7 @@ export function UserActions({ userId, userName, activePlan }: Props) {
     const res = await adminDeactivateSubscription(userId);
     if (res.success) {
       setMessage({ type: "success", text: `Plan deactivated successfully.` });
+      router.refresh();
     } else {
       setMessage({ type: "error", text: res.error || "Failed to deactivate plan" });
     }
@@ -51,6 +55,7 @@ export function UserActions({ userId, userName, activePlan }: Props) {
     const res = await adminAddSlots(userId, slotAmount, slotType);
     if (res.success) {
       setMessage({ type: "success", text: `Slots added successfully.` });
+      router.refresh();
     } else {
       setMessage({ type: "error", text: res.error || "Failed to add slots" });
     }

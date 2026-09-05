@@ -449,8 +449,11 @@ async function processJob(job: RetentionJob) {
         if (push.skipped) {
           throw new Error("Firebase push is not configured");
         }
-        if (push.delivered === 0 && push.transientFailures > 0) {
-          throw new Error(`Firebase temporarily failed for ${push.transientFailures} device token(s)`);
+        if (push.transientFailures > 0) {
+          const codes = push.errorCodes?.length
+            ? ` (${push.errorCodes.join(", ")})`
+            : "";
+          throw new Error(`Firebase push failed${codes} for ${push.transientFailures} device token(s)`);
         }
         pushSentAt = new Date().toISOString();
         const { error: pushStateError } = await admin

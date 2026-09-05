@@ -2,7 +2,7 @@
 
 export type PlanType = "plan_1" | "plan_2" | "plan_3";
 
-export type MagnusMembershipStatus = "pending" | "approved";
+export type MagnusMembershipStatus = "pending" | "approved" | "disabled";
 export type MagnusMembershipSource = "promo" | "admin";
 
 export type QuestionCategory =
@@ -91,6 +91,8 @@ export interface Payment {
   bkash_payment_id: string | null;
   status: PaymentStatus;
   metadata: Record<string, unknown> | null;
+  fulfilled_at: string | null;
+  subscription_id: string | null;
   created_at: string;
 }
 

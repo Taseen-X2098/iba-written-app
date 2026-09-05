@@ -2,8 +2,12 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Check, Mail, RefreshCw, Search, Users } from "lucide-react";
-import { approveMagnusStudents, retryMagnusWelcomeEmail } from "@/app/admin/users/actions";
+import { BadgeCheck, Ban, Bell, Check, Mail, RefreshCw, Search, Users } from "lucide-react";
+import {
+  approveMagnusStudents,
+  disableMagnusStudent,
+  retryMagnusWelcomeEmail,
+} from "@/app/admin/users/actions";
 import { UserActions } from "@/components/admin/user-actions";
 import type { MagnusMembershipSource, MagnusMembershipStatus } from "@/lib/types";
 
@@ -21,6 +25,7 @@ export type AdminStudentRow = {
   requestedAt: string | null;
   approvedAt: string | null;
   welcomeEmailStatus: "queued" | "sent" | "failed" | null;
+  welcomePushStatus: "queued" | "sent" | "failed" | null;
   welcomeEmailError: string | null;
 };
 
@@ -96,7 +101,23 @@ export function MagnusUserManagement({ users }: { users: AdminStudentRow[] }) {
     startTransition(async () => {
       const result = await retryMagnusWelcomeEmail(userId);
       if (result.success) {
-        setMessage({ type: "success", text: "Welcome email requeued." });
+        setMessage({ type: "success", text: "Welcome delivery requeued." });
+        router.refresh();
+      } else {
+        setMessage({ type: "error", text: result.error });
+      }
+      setBusyUserId(null);
+    });
+  }
+
+  function disableMagnus(userId: string, userName: string) {
+    if (!confirm(`Disable Magnus status for ${userName || "this student"}? Their Magnus-only access will be revoked, but their current plan and test balance will remain unchanged.`)) return;
+    setMessage(null);
+    setBusyUserId(userId);
+    startTransition(async () => {
+      const result = await disableMagnusStudent(userId);
+      if (result.success) {
+        setMessage({ type: "success", text: "Magnus status disabled. The student's current plan was left unchanged." });
         router.refresh();
       } else {
         setMessage({ type: "error", text: result.error });
@@ -157,7 +178,7 @@ export function MagnusUserManagement({ users }: { users: AdminStudentRow[] }) {
                 <th className="px-5 py-4 font-semibold">Institute</th>
                 <th className="px-5 py-4 font-semibold">Magnus status</th>
                 <th className="px-5 py-4 font-semibold">Plan</th>
-                <th className="px-5 py-4 font-semibold">Welcome email</th>
+                <th className="px-5 py-4 font-semibold">Welcome delivery</th>
                 <th className="px-5 py-4 text-right font-semibold">Joined</th>
                 <th className="px-5 py-4 text-center font-semibold">Actions</th>
               </tr>
@@ -179,7 +200,7 @@ export function MagnusUserManagement({ users }: { users: AdminStudentRow[] }) {
                   <td className="px-5 py-4">
                     {user.activePlan ? <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-bold text-brand-700">{user.activePlan}</span> : <span className="text-xs text-muted-foreground">None</span>}
                   </td>
-                  <td className="px-5 py-4"><EmailStatus user={user} retry={() => retryEmail(user.id)} busy={busyUserId === user.id || isPending} /></td>
+                  <td className="px-5 py-4"><DeliveryStatus user={user} retry={() => retryEmail(user.id)} busy={busyUserId === user.id || isPending} /></td>
                   <td className="px-5 py-4 text-right text-muted-foreground">{new Date(user.createdAt).toLocaleDateString()}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-center gap-2">
@@ -190,7 +211,21 @@ export function MagnusUserManagement({ users }: { users: AdminStudentRow[] }) {
                           onClick={() => approve([user.id])}
                           className="inline-flex items-center gap-1.5 rounded-md bg-green-50 px-2.5 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50"
                         >
-                          <Check size={14} /> {busyUserId === user.id ? "Approving…" : "Approve Magnus"}
+                          <Check size={14} /> {busyUserId === user.id
+                            ? "Approving…"
+                            : user.magnusStatus === "disabled"
+                              ? "Re-enable Magnus"
+                              : "Approve Magnus"}
+                        </button>
+                      )}
+                      {user.magnusStatus === "approved" && (
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() => disableMagnus(user.id, user.name)}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                        >
+                          <Ban size={14} /> {busyUserId === user.id ? "Disabling…" : "Disable Magnus"}
                         </button>
                       )}
                       {tab === "all" && <UserActions userId={user.id} userName={user.name} activePlan={user.activePlan} />}
@@ -216,17 +251,29 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 function MagnusBadge({ status, source }: { status: MagnusMembershipStatus | null; source: MagnusMembershipSource | null }) {
   if (status === "approved") return <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-700"><BadgeCheck size={13} /> Approved</span>;
   if (status === "pending") return <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800">Pending{source === "promo" ? " · promo" : ""}</span>;
+  if (status === "disabled") return <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"><Ban size={13} /> Disabled</span>;
   return <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">Normal</span>;
 }
 
-function EmailStatus({ user, retry, busy }: { user: AdminStudentRow; retry: () => void; busy: boolean }) {
-  if (!user.welcomeEmailStatus) return <span className="text-xs text-muted-foreground">Not applicable</span>;
-  if (user.welcomeEmailStatus === "sent") return <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700"><Mail size={13} /> Sent</span>;
-  if (user.welcomeEmailStatus === "queued") return <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700"><RefreshCw size={13} /> Queued</span>;
+function DeliveryStatus({ user, retry, busy }: { user: AdminStudentRow; retry: () => void; busy: boolean }) {
+  if (!user.welcomeEmailStatus || !user.welcomePushStatus) return <span className="text-xs text-muted-foreground">Not applicable</span>;
+  const failed = user.welcomeEmailStatus === "failed" || user.welcomePushStatus === "failed";
   return (
-    <div>
-      <span className="text-xs font-semibold text-red-700" title={user.welcomeEmailError ?? undefined}>Failed</span>
-      <button type="button" onClick={retry} disabled={busy} className="ml-2 text-xs font-semibold text-brand-700 hover:underline disabled:opacity-50">Requeue</button>
+    <div className="space-y-1">
+      <ChannelStatus channel="Email" status={user.welcomeEmailStatus} />
+      <ChannelStatus channel="Push" status={user.welcomePushStatus} />
+      {failed && (
+        <button type="button" onClick={retry} disabled={busy} title={user.welcomeEmailError ?? undefined} className="text-xs font-semibold text-brand-700 hover:underline disabled:opacity-50">
+          Retry failed delivery
+        </button>
+      )}
     </div>
   );
+}
+
+function ChannelStatus({ channel, status }: { channel: "Email" | "Push"; status: "queued" | "sent" | "failed" }) {
+  const Icon = channel === "Email" ? Mail : Bell;
+  if (status === "sent") return <span className="flex items-center gap-1 text-xs font-semibold text-green-700"><Icon size={13} /> {channel}: Sent</span>;
+  if (status === "queued") return <span className="flex items-center gap-1 text-xs font-semibold text-amber-700"><RefreshCw size={13} /> {channel}: Queued</span>;
+  return <span className="flex items-center gap-1 text-xs font-semibold text-red-700"><Ban size={13} /> {channel}: Failed</span>;
 }
