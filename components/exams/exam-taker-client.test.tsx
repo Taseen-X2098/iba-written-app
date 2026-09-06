@@ -4,6 +4,7 @@
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ExamTakerClient from "./exam-taker-client";
+import { inProgressExamStorageKey, parseOwnedInProgressExam } from "@/lib/exams/in-progress-exam";
 import type { AttemptQuestion, Exam, ExamAttempt } from "@/lib/types";
 
 const mockPush = jest.fn();
@@ -304,5 +305,129 @@ describe.each([
       expect.stringContaining("/complete"),
       expect.objectContaining({ method: "POST" }),
     ));
+  });
+});
+
+describe("practice timeout lifecycle", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    Object.defineProperty(window, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(),
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: originalFetch,
+    });
+  });
+
+  it("keeps a timed-out practice in Active sessions while grading is pending", async () => {
+    const exam = { ...makeExam(false), results_published: true };
+    const attempt = {
+      ...makeAttempt(exam.id),
+      mode: "practice" as const,
+      expires_at: new Date(Date.now() - 1_000).toISOString(),
+    };
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/complete")) {
+          return {
+            ok: true,
+            json: async () => ({
+              attemptId: attempt.id,
+              availableSlots: 1,
+              selectable: [{ examQuestionId: examQuestion.id, marks: 10, prompt: examQuestion.questions.prompt }],
+              currentJob: null,
+            }),
+          } as Response;
+        }
+        throw new Error(`Unexpected request: ${String(input)}`);
+      }),
+    });
+
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[examQuestion]}
+        attempt={attempt}
+        writerToken="writer-token"
+        initialDrafts={{}}
+        isPractice
+      />,
+    );
+
+    expect(await screen.findByText("Choose answers to grade")).toBeInTheDocument();
+    expect(screen.getByText("Time is up.")).toBeInTheDocument();
+    const stored = parseOwnedInProgressExam(
+      localStorage.getItem(inProgressExamStorageKey(attempt.id)),
+      attempt.user_id,
+      Date.now() + 24 * 60 * 60_000,
+    );
+    expect(stored).toEqual(expect.objectContaining({
+      attemptId: attempt.id,
+      phase: "awaiting_grading",
+    }));
+  });
+
+  it("ends the active session and explains when grading is cancelled", async () => {
+    const exam = { ...makeExam(false), results_published: true };
+    const attempt = {
+      ...makeAttempt(exam.id),
+      mode: "practice" as const,
+      status: "grading" as const,
+      expires_at: new Date(Date.now() - 60 * 60_000).toISOString(),
+    };
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: jest.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/complete")) {
+          return {
+            ok: true,
+            json: async () => ({
+              attemptId: attempt.id,
+              availableSlots: 1,
+              selectable: [{ examQuestionId: examQuestion.id, marks: 10, prompt: examQuestion.questions.prompt }],
+              currentJob: { jobId: "job-1", status: "queued" },
+            }),
+          } as Response;
+        }
+        if (url === "/api/grading-jobs/job-1") {
+          return {
+            ok: true,
+            json: async () => ({
+              job: { status: "cancelled" },
+              items: [],
+              personalProgressionReports: {},
+            }),
+          } as Response;
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    });
+
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[examQuestion]}
+        attempt={attempt}
+        writerToken="writer-token"
+        initialDrafts={{}}
+        isPractice
+      />,
+    );
+
+    expect(await screen.findByText("Grading Cancelled")).toBeInTheDocument();
+    expect(localStorage.getItem(inProgressExamStorageKey(attempt.id))).toBeNull();
   });
 });

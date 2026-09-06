@@ -47,8 +47,17 @@ export default async function TakeExamPage({
     if (now < startsAt || now >= endsAt) {
       if (!hasResumableAttempt) redirect("/exams");
     }
-  } else if (!exam.results_published) {
-    redirect("/exams");
+  } else {
+    if (!exam.results_published) redirect("/exams");
+    const { data: resumable } = await supabase
+      .from("exam_attempts")
+      .select("id")
+      .eq("exam_id", id)
+      .eq("user_id", user.id)
+      .eq("mode", "practice")
+      .in("status", ["active", "locked", "awaiting_selection", "grading"])
+      .limit(1);
+    hasResumableAttempt = Boolean(resumable?.length);
   }
 
   return (

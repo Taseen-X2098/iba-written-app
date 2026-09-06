@@ -24,6 +24,8 @@ const sessions: ActiveSessionLink[] = [
     id: "exam-2",
     title: "Magnus Practice",
     isPractice: true,
+    phase: "grading",
+    timedOut: true,
     lastUpdatedAt: 2,
   },
   {
@@ -42,6 +44,7 @@ it("renders a separate sidenav link for every active session", () => {
   expect(screen.getByText("3")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Weekly Exam/i })).toHaveAttribute("href", "/exams/exam-1");
   expect(screen.getByRole("link", { name: /Magnus Practice/i })).toHaveAttribute("href", "/exams/exam-2?practice=true");
+  expect(screen.getByText("Time Up · Grading")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Practice Question/i })).toHaveAttribute("href", "/test/question-1");
 
   fireEvent.click(screen.getByRole("link", { name: /Practice Question/i }));

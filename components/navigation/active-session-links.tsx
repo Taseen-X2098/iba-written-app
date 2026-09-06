@@ -37,7 +37,11 @@ export function ActiveSessionSidenavLinks({
           <Play size={18} className="shrink-0" />
           <div className="min-w-0">
             <span className="mb-0.5 block text-[10px] uppercase leading-none tracking-wider opacity-80">
-              Active {session.type === "exam" ? session.isPractice ? "Practice Exam" : "Exam" : "Test"}
+              {session.type === "exam" && session.isPractice && session.phase === "grading"
+                ? `${session.timedOut ? "Time Up · " : ""}Grading`
+                : session.type === "exam" && session.isPractice && session.phase === "awaiting_grading"
+                  ? `${session.timedOut ? "Time Up · " : ""}Choose Grading`
+                  : `Active ${session.type === "exam" ? session.isPractice ? "Practice Exam" : "Exam" : "Test"}`}
             </span>
             <span className="block truncate">{session.title}</span>
           </div>

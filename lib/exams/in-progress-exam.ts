@@ -5,12 +5,16 @@ const EXAM_SESSION_PREFIX = "exam-attempt-session:";
 const EXAM_RECOVERY_DATA_PREFIX = "attempt-recovery-data:";
 const EXAM_RECOVERY_KEY_PREFIX = "attempt-recovery-key:";
 
+export type InProgressExamPhase = "taking" | "awaiting_grading" | "grading";
+
 export type InProgressExamRecord = {
   userId: string;
   examId: string;
   attemptId: string;
   title: string;
   isPractice: boolean;
+  phase: InProgressExamPhase;
+  gradingJobId?: string;
   expiresAt: string;
   lastUpdatedAt: number;
 };
@@ -37,9 +41,16 @@ export function parseOwnedInProgressExam(
     const value = JSON.parse(raw) as Partial<InProgressExamRecord>;
     const expiresAt = typeof value.expiresAt === "string" ? Date.parse(value.expiresAt) : Number.NaN;
     const lastUpdatedAt = Number(value.lastUpdatedAt);
-    const isActive = Number.isFinite(expiresAt)
+    const phase = value.phase === "awaiting_grading" || value.phase === "grading"
+      ? value.phase
+      : "taking";
+    // Once a practice timer has ended, the attempt remains an active workflow
+    // until grading reaches a terminal state. The exam page removes the record
+    // when grading completes or is cancelled.
+    const isPostTimerPractice = value.isPractice === true && phase !== "taking";
+    const isActive = isPostTimerPractice || (Number.isFinite(expiresAt)
       ? now <= expiresAt + 3 * 60_000
-      : Number.isFinite(lastUpdatedAt) && now - lastUpdatedAt <= 60 * 60_000;
+      : Number.isFinite(lastUpdatedAt) && now - lastUpdatedAt <= 60 * 60_000);
     if (
       value.userId !== userId
       || typeof value.examId !== "string"
@@ -59,6 +70,10 @@ export function parseOwnedInProgressExam(
       attemptId: value.attemptId,
       title: value.title,
       isPractice: value.isPractice,
+      phase,
+      gradingJobId: typeof value.gradingJobId === "string" && value.gradingJobId
+        ? value.gradingJobId
+        : undefined,
       expiresAt: value.expiresAt ?? "",
       lastUpdatedAt,
     };

@@ -32,6 +32,13 @@ describe("owned in-progress exam records", () => {
     expect(parseOwnedInProgressExam(record({ userId: undefined }), "user-1", NOW)).toBeNull();
     expect(parseOwnedInProgressExam(record({ expiresAt: "2026-08-29T11:50:00.000Z" }), "user-1", NOW)).toBeNull();
   });
+
+  it("keeps an expired practice workflow active while grading is pending", () => {
+    const expired = { expiresAt: "2026-08-29T11:50:00.000Z", isPractice: true };
+    expect(parseOwnedInProgressExam(record({ ...expired, phase: "taking" }), "user-1", NOW)).toBeNull();
+    expect(parseOwnedInProgressExam(record({ ...expired, phase: "awaiting_grading" }), "user-1", NOW)?.phase).toBe("awaiting_grading");
+    expect(parseOwnedInProgressExam(record({ ...expired, phase: "grading", gradingJobId: "job-1" }), "user-1", NOW)?.gradingJobId).toBe("job-1");
+  });
 });
 
 function memoryStorage(initial: Record<string, string>) {

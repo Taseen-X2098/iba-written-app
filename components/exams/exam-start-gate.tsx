@@ -96,7 +96,9 @@ export default function ExamStartGate({
         <h1 className="mb-3 text-2xl font-black text-foreground">{exam.title}</h1>
         <p className="mb-6 text-sm leading-6 text-muted-foreground">
           {hasResumableAttempt
-            ? "Your exam is already in progress. Resuming it will not reset the timer."
+            ? mode === "practice"
+              ? "Your practice exam is still active. If time has ended, your answers stay safe while you choose grading or wait for grading to finish."
+              : "Your exam is already in progress. Resuming it will not reset the timer."
             : `The ${exam.time_limit_minutes}-minute timer starts only after you press the button below. Questions remain hidden until then. Leaving the page will not pause the timer.`}
         </p>
         {mode === "official" && (
@@ -126,7 +128,7 @@ export default function ExamStartGate({
             {loading ? <Loader2 className="animate-spin" size={18} /> : hasResumableAttempt ? <RefreshCw size={18} /> : <Play size={18} />}
             {loading
               ? hasResumableAttempt ? "Resuming..." : "Starting..."
-              : hasResumableAttempt ? "Resume Exam" : mode === "practice" ? "Start Practice" : "Start Official Exam"}
+              : hasResumableAttempt ? mode === "practice" ? "Resume Practice" : "Resume Exam" : mode === "practice" ? "Start Practice" : "Start Official Exam"}
           </button>
         )}
       </div>

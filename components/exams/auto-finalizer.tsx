@@ -13,9 +13,10 @@ export default function AutoFinalizer({ examId, isPractice }: { examId: string, 
     const finalize = async () => {
       try {
         if (isPractice) {
-          removeInProgressExam(localStorage, { examId });
-          window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
-          router.push(`/exams`);
+          // Practice remains active after the timer so the student can choose
+          // answers and wait for grading. ExamTakerClient clears it only after
+          // grading completes or is cancelled.
+          router.push(`/exams/${examId}?practice=true`);
           router.refresh();
           return;
         }
@@ -36,8 +37,8 @@ export default function AutoFinalizer({ examId, isPractice }: { examId: string, 
         // Redirect to results page after finalizing
         router.push(`/exams/${examId}/results`);
         router.refresh();
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to finalize");
       }
     };
 
@@ -47,7 +48,7 @@ export default function AutoFinalizer({ examId, isPractice }: { examId: string, 
   return (
     <div className="flex flex-col items-center justify-center min-h-[50vh] animate-pulse">
       <Loader2 size={48} className="animate-spin text-brand-600 mb-6" />
-      <h2 className="text-xl font-bold text-foreground mb-2">Time's Up!</h2>
+      <h2 className="text-xl font-bold text-foreground mb-2">Time&apos;s Up!</h2>
       <p className="text-muted-foreground text-center max-w-md">
         Your timer expired. We are automatically finalizing your saved drafts and grading your exam...
       </p>

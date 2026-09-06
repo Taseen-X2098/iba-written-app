@@ -36,6 +36,7 @@ import {
 import {
   IN_PROGRESS_EXAM_UPDATED_EVENT,
   clearExamBrowserStateOnSignOut,
+  removeInProgressExam,
 } from "@/lib/exams/in-progress-exam";
 import {
   isActiveSessionStorageKey,
@@ -101,6 +102,7 @@ export default function MainShell({
   }, []);
 
   useEffect(() => {
+    let disposed = false;
     const refreshNotifications = () => {
       if (document.visibilityState === "visible") void loadNotifications();
     };
@@ -110,9 +112,36 @@ export default function MainShell({
     
     // Keep every active test and exam visible. Session metadata is stored per
     // question/attempt so opening another session cannot replace this list.
+    const reconcileFinishedPracticeGrading = async (sessions: ActiveSessionLink[]) => {
+      const gradingSessions = sessions.filter((session) => session.phase === "grading" && session.gradingJobId);
+      if (!gradingSessions.length) return;
+      const statuses = await Promise.all(gradingSessions.map(async (session) => {
+        try {
+          const response = await fetch(`/api/grading-jobs/${session.gradingJobId}`, { cache: "no-store" });
+          if (!response.ok) return null;
+          const data = await response.json();
+          return { session, status: String(data.job?.status ?? "") };
+        } catch {
+          return null;
+        }
+      }));
+      let changed = false;
+      for (const result of statuses) {
+        if (result && ["completed", "cancelled"].includes(result.status)) {
+          removeInProgressExam(localStorage, { attemptId: result.session.key.slice("exam:".length) });
+          changed = true;
+        }
+      }
+      if (changed && !disposed) {
+        setActiveSessions(listActiveSessionLinks(localStorage, profile.id));
+      }
+    };
+
     const checkTimer = () => {
       try {
-        setActiveSessions(listActiveSessionLinks(localStorage, profile.id));
+        const sessions = listActiveSessionLinks(localStorage, profile.id);
+        setActiveSessions(sessions);
+        void reconcileFinishedPracticeGrading(sessions);
       } catch {
         setActiveSessions([]);
       }
@@ -128,6 +157,7 @@ export default function MainShell({
     window.addEventListener(IN_PROGRESS_EXAM_UPDATED_EVENT, checkTimer);
     
     return () => {
+      disposed = true;
       clearInterval(interval);
       clearInterval(timerCheckpoint);
       window.removeEventListener("focus", refreshNotifications);

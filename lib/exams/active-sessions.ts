@@ -1,6 +1,7 @@
 import {
   isInProgressExamStorageKey,
   listOwnedInProgressExams,
+  type InProgressExamPhase,
 } from "./in-progress-exam";
 import {
   isStandaloneSessionStorageKey,
@@ -13,6 +14,9 @@ export type ActiveSessionLink = {
   id: string;
   title: string;
   isPractice?: boolean;
+  phase?: InProgressExamPhase;
+  gradingJobId?: string;
+  timedOut?: boolean;
   lastUpdatedAt: number;
 };
 
@@ -29,6 +33,9 @@ export function listActiveSessionLinks(
     id: record.examId,
     title: record.title,
     isPractice: record.isPractice,
+    phase: record.phase,
+    gradingJobId: record.gradingJobId,
+    timedOut: record.isPractice && Date.parse(record.expiresAt) <= now,
     lastUpdatedAt: record.lastUpdatedAt,
   }));
   const tests: ActiveSessionLink[] = listStandaloneSessions(storage, now).map((record) => ({

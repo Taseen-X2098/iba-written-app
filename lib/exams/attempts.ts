@@ -174,7 +174,10 @@ export async function startAttempt(input: {
       input.writerToken &&
       writerTokenMatches(input.writerToken, existing.writer_token_hash)
     ) {
-      if (Date.now() > new Date(existing.expires_at).getTime() + 3 * 60_000) {
+      if (
+        existing.mode === "official"
+        && Date.now() > new Date(existing.expires_at).getTime() + 3 * 60_000
+      ) {
         throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
       }
       const drafts = await getAttemptDrafts(existing.id);

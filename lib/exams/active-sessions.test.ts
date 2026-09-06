@@ -50,3 +50,24 @@ it("combines every active standalone test and exam into one newest-first list", 
     "test:question-1",
   ]);
 });
+
+it("lists an expired practice exam until its grading workflow ends", () => {
+  const storage = memoryStorage();
+  const examRecord = parseOwnedInProgressExam(JSON.stringify({
+    userId: "student-1",
+    examId: "exam-1",
+    attemptId: "attempt-1",
+    title: "Practice Exam",
+    isPractice: true,
+    phase: "grading",
+    gradingJobId: "job-1",
+    expiresAt: new Date(NOW - 60 * 60_000).toISOString(),
+    lastUpdatedAt: NOW - 60 * 60_000,
+  }), "student-1", NOW)!;
+
+  writeInProgressExam(storage, examRecord);
+
+  expect(listActiveSessionLinks(storage, "student-1", NOW)).toEqual([
+    expect.objectContaining({ key: "exam:attempt-1", phase: "grading", gradingJobId: "job-1", timedOut: true }),
+  ]);
+});

@@ -28,6 +28,7 @@ import {
   IN_PROGRESS_EXAM_UPDATED_EVENT,
   removeInProgressExam,
   writeInProgressExam,
+  type InProgressExamPhase,
 } from "@/lib/exams/in-progress-exam";
 import {
   CATEGORY_LABELS,
@@ -121,6 +122,7 @@ export default function ExamTakerClient({
   const [timeLeft, setTimeLeft] = useState(() =>
     Math.max(0, Math.ceil((new Date(attempt.expires_at).getTime() - Date.now()) / 1000)),
   );
+  const [timedOut, setTimedOut] = useState(() => Date.now() >= new Date(attempt.expires_at).getTime());
   const [activeCameraId, setActiveCameraId] = useState<string | null>(null);
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -144,6 +146,26 @@ export default function ExamTakerClient({
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
+
+  const persistActiveExam = useCallback((phase: InProgressExamPhase, gradingJobId?: string) => {
+    writeInProgressExam(localStorage, {
+      userId: attempt.user_id,
+      examId: exam.id,
+      attemptId: attempt.id,
+      title: exam.title,
+      isPractice,
+      phase,
+      gradingJobId,
+      expiresAt: attempt.expires_at,
+      lastUpdatedAt: Date.now(),
+    });
+    window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
+  }, [attempt.expires_at, attempt.id, attempt.user_id, exam.id, exam.title, isPractice]);
+
+  const endActiveExam = useCallback(() => {
+    removeInProgressExam(localStorage, { attemptId: attempt.id });
+    window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
+  }, [attempt.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,8 +331,6 @@ export default function ExamTakerClient({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Submission failed");
 
-      removeInProgressExam(localStorage, { attemptId: attempt.id });
-      window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
       if (isPractice) {
         setSelection(data as PracticeSelection);
         setSelectedIds(new Set());
@@ -318,8 +338,14 @@ export default function ExamTakerClient({
           setJobId(data.currentJob.jobId);
           setJobStatus(data.currentJob.status);
         }
+        if (["completed", "cancelled"].includes(data.currentJob?.status ?? "")) {
+          endActiveExam();
+        } else {
+          persistActiveExam(data.currentJob ? "grading" : "awaiting_grading", data.currentJob?.jobId);
+        }
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
+        endActiveExam();
         clearEncryptedRecovery(attempt.id);
         router.push(`/exams/${exam.id}/results`);
       }
@@ -330,7 +356,7 @@ export default function ExamTakerClient({
       completionInFlight.current = false;
       setIsSubmitting(false);
     }
-  }, [attempt.expires_at, attempt.id, exam.id, examQuestions, isPractice, router, writerToken]);
+  }, [attempt.expires_at, attempt.id, endActiveExam, exam.id, examQuestions, isPractice, persistActiveExam, router, writerToken]);
 
   const completeRef = useRef(completeAttempt);
   useEffect(() => {
@@ -343,29 +369,27 @@ export default function ExamTakerClient({
 
   useEffect(() => {
     const expiresAt = new Date(attempt.expires_at).getTime();
+    const phase: InProgressExamPhase = isPractice && (
+      attempt.status !== "active" || Date.now() >= expiresAt
+    )
+      ? attempt.status === "grading" ? "grading" : "awaiting_grading"
+      : "taking";
+    persistActiveExam(phase);
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
       setTimeLeft(remaining);
       if (remaining === 0 && !expiryTriggered.current) {
         expiryTriggered.current = true;
+        setTimedOut(true);
         setLocked(true);
+        if (isPractice) persistActiveExam("awaiting_grading");
         void completeRef.current();
       }
     };
     tick();
     const timer = window.setInterval(tick, 1_000);
-    writeInProgressExam(localStorage, {
-      userId: attempt.user_id,
-      examId: exam.id,
-      attemptId: attempt.id,
-      title: exam.title,
-      isPractice,
-      expiresAt: attempt.expires_at,
-      lastUpdatedAt: Date.now(),
-    });
-    window.dispatchEvent(new Event(IN_PROGRESS_EXAM_UPDATED_EVENT));
     return () => window.clearInterval(timer);
-  }, [attempt.expires_at, attempt.id, attempt.user_id, exam.id, exam.title, isPractice]);
+  }, [attempt.expires_at, attempt.status, isPractice, persistActiveExam]);
 
   function handleFileUpload(questionId: string, files: FileList | File[]) {
     if (completionInFlight.current) return Promise.resolve(false);
@@ -474,9 +498,11 @@ export default function ExamTakerClient({
       if (!data.jobId) {
         setJobItems([]);
         setJobStatus("completed");
+        endActiveExam();
       } else {
         setJobId(data.jobId);
         setJobStatus(data.status);
+        persistActiveExam("grading", data.jobId);
       }
     } catch (error) {
       setReadOnlyReason(error instanceof Error ? error.message : "Unable to start grading");
@@ -504,6 +530,11 @@ export default function ExamTakerClient({
       if (["completed", "failed", "cancelled"].includes(data.job.status)) {
         clearEncryptedRecovery(attempt.id);
       }
+      if (["completed", "cancelled"].includes(data.job.status)) {
+        endActiveExam();
+      } else if (data.job.status === "failed") {
+        persistActiveExam("awaiting_grading");
+      }
     };
     void poll();
     if (["completed", "failed", "cancelled"].includes(jobStatus ?? "")) {
@@ -516,7 +547,7 @@ export default function ExamTakerClient({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [attempt.id, jobId, jobStatus]);
+  }, [attempt.id, endActiveExam, jobId, jobStatus, persistActiveExam]);
 
   useEffect(() => {
     if (jobStatus !== "failed" || !jobItems) return;
@@ -596,10 +627,34 @@ export default function ExamTakerClient({
     );
   }
 
+  if (selection && jobStatus === "cancelled") {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-8 text-center">
+          <AlertCircle className="mx-auto mb-3 text-amber-700" size={42} />
+          <h2 className="text-2xl font-black text-amber-950">Grading Cancelled</h2>
+          <p className="mt-2 text-amber-900">Your practice session is no longer active because its grading was cancelled.</p>
+          <Link href="/exams" prefetch={false} className="mt-6 inline-block rounded-xl bg-amber-700 px-6 py-2.5 font-bold text-white">
+            Back to Exams
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (selection) {
     const limit = Math.min(selection.availableSlots, selection.selectable.length);
     return (
       <div className="mx-auto max-w-2xl px-4 py-12">
+        {timedOut && (
+          <div role="alert" className="mb-5 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900">
+            <Clock className="mt-0.5 shrink-0" size={22} />
+            <div>
+              <p className="font-black">Time is up.</p>
+              <p className="mt-1 text-sm">Your answers are locked and safe. This practice remains in Active sessions until grading finishes or is cancelled.</p>
+            </div>
+          </div>
+        )}
         <div className="rounded-3xl border border-border bg-card p-8">
           <Lock className="mb-4 text-brand-600" size={36} />
           <h2 className="text-2xl font-black">Choose answers to grade</h2>
@@ -633,7 +688,7 @@ export default function ExamTakerClient({
               Need every answer graded? <Link href="/subscription" prefetch={false} className="font-bold underline">Buy more test slots</Link>.
             </p>
           )}
-          {jobId && !["completed", "failed"].includes(jobStatus ?? "") ? (
+          {jobId && !["completed", "failed", "cancelled"].includes(jobStatus ?? "") ? (
             <div className="flex items-center gap-3 rounded-xl bg-brand-50 p-4 text-brand-800">
               <Loader2 className="animate-spin" size={20} /> Grading {jobItems?.filter((item) => item.status === "completed").length ?? 0} of {selectedIds.size} answers…
             </div>
@@ -663,9 +718,16 @@ export default function ExamTakerClient({
           <p className="text-xs text-muted-foreground">{examQuestions.length} questions · drafts save every 30 seconds when changed</p>
         </div>
         <div className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-2 ${timeLeft < 300 ? "border-red-200 bg-red-50 text-red-700" : "border-brand-200 bg-brand-50 text-brand-700"}`}>
-          <Clock size={19} /> <span className="font-mono text-xl font-bold">{formatTime(timeLeft)}</span>
+          <Clock size={19} /> <span className={timeLeft === 0 ? "text-base font-black" : "font-mono text-xl font-bold"}>{timeLeft === 0 ? "Time’s up" : formatTime(timeLeft)}</span>
         </div>
       </div>
+
+      {timedOut && (
+        <div role="alert" className="mb-6 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+          <AlertCircle className="shrink-0" size={20} />
+          <div><strong>Time is up.</strong> Your answers are locked while we safely finish submitting them.</div>
+        </div>
+      )}
 
       {readOnlyReason && (
         <div className="mb-6 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
