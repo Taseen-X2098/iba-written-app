@@ -4,6 +4,7 @@ import { Plus, Clock, FileText, BadgeCheck, Trophy, Gift } from "lucide-react";
 import type { Exam } from "@/lib/types";
 import { ForceGradeButton } from "./ForceGradeButton";
 import { ExtendTimerButton } from "./ExtendTimerButton";
+import { DeleteExamButton } from "./DeleteExamButton";
 
 export default async function AdminExamsPage() {
   const supabase = await createClient();
@@ -112,6 +113,7 @@ export default async function AdminExamsPage() {
                       <div className="flex justify-end gap-2 mt-1">
                         <ExtendTimerButton examId={exam.id} />
                         <ForceGradeButton examId={exam.id} />
+                        <DeleteExamButton examId={exam.id} title={exam.title} />
                       </div>
                     </div>
                   </td>

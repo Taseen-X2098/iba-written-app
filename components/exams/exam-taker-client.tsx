@@ -701,15 +701,15 @@ export default function ExamTakerClient({
               />
               {isPractice && question.questions.category === "translation" && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Translation is image-only, is never read or graded by AI, and does not use a test slot in practice.
+                  Translation answers must be submitted as page photos and do not use a test slot in practice.
                 </div>
               )}
               <div className="mb-5 flex items-start gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
                 <CheckCircle size={16} className="mt-0.5 shrink-0" />
                 {question.questions.category === "translation" ? (
                   <span>
-                    <strong>Human grading only: upload a maximum of {answerPageLabel()}.</strong>{" "}
-                    The original photos are stored privately for the administrator. No OCR, transcription, or AI feedback is performed.
+                    <strong>Upload a maximum of {answerPageLabel()}.</strong>{" "}
+                    Make sure every page is clear, complete, and easy to read.
                   </span>
                 ) : (
                   <span>
@@ -724,7 +724,7 @@ export default function ExamTakerClient({
                 <div className="flex flex-col items-center rounded-xl border border-border bg-muted/30 p-12">
                   <Loader2 className="mb-3 animate-spin text-brand-600" size={30} />
                   <p className="text-sm text-muted-foreground">
-                    {question.questions.category === "translation" ? "Saving photos for human grading…" : "Extracting text…"}
+                    {question.questions.category === "translation" ? "Saving page photos…" : "Extracting text…"}
                   </p>
                 </div>
               ) : activeCameraId === question.id ? (
@@ -754,7 +754,7 @@ export default function ExamTakerClient({
                             className="h-64 w-full object-contain"
                           />
                           <span className="block border-t border-border px-3 py-2 text-xs font-bold">
-                            Page {image.pageIndex} · saved for human grading
+                            Page {image.pageIndex} · uploaded
                           </span>
                         </a>
                       ))}

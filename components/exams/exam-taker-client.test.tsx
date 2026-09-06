@@ -214,7 +214,9 @@ describe.each([
     );
 
     expect(screen.queryByText("Type Answer")).not.toBeInTheDocument();
-    expect(screen.getByText(/No OCR, transcription, or AI feedback/)).toBeInTheDocument();
+    expect(screen.getByText(/Upload a maximum of/)).toBeInTheDocument();
+    expect(screen.queryByText(/Human grading only/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No OCR, transcription, or AI feedback/i)).not.toBeInTheDocument();
     const uploadLabel = screen.getByText("Upload Page Photos").closest("label");
     const upload = uploadLabel?.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(upload!, {
