@@ -1,6 +1,17 @@
 jest.mock("server-only", () => ({}));
 
-import { canAccessExamAudience, canStartOfficialExam } from "./access";
+import { canAccessExamAudience, canStartOfficialExam, isExamPlan } from "./access";
+
+describe("exam plan access", () => {
+  it.each([
+    [null, false],
+    ["plan_1", false],
+    ["plan_2", true],
+    ["plan_3", true],
+  ] as const)("maps %s to %s", (planType, expected) => {
+    expect(isExamPlan(planType)).toBe(expected);
+  });
+});
 
 describe("exam audience access", () => {
   it("preserves normal exam access", () => {

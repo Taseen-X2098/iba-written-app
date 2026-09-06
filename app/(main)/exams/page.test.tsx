@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { createClient } from "@/lib/supabase/server";
 import { getMainUserContext } from "@/lib/main-user-context";
 import StudentExamsPage from "./page";
@@ -94,8 +94,11 @@ describe("student free exam access", () => {
     );
     expect(screen.getByText("Subscriber Assessment")).toBeVisible();
     expect(screen.getByText("Locked").closest("a")).toHaveAttribute("href", "#");
-
-    const pastSection = screen.getByText("Published Assessment").closest("div.rounded-2xl");
-    expect(pastSection?.querySelector('a[href="/exams/past-exam/results"]')).not.toBeNull();
+    const pastExamLock = screen.getByRole("region", { name: "Past exam practice is locked" });
+    expect(within(pastExamLock).getByText(/Complete Prep/)).toBeVisible();
+    expect(within(pastExamLock).getByText(/Exams Only/)).toBeVisible();
+    expect(within(pastExamLock).getByRole("link", { name: /View Plans/ })).toHaveAttribute("href", "/subscription");
+    expect(screen.queryByText("Published Assessment")).not.toBeInTheDocument();
+    expect(screen.queryByText(/View Past Exams/)).not.toBeInTheDocument();
   });
 });

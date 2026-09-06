@@ -4,12 +4,13 @@ import Link from "next/link";
 import Image from "next/image";
 import type { Exam } from "@/lib/types";
 import { getMainUserContext } from "@/lib/main-user-context";
+import { isExamPlan } from "@/lib/exams/access";
 
 export default async function StudentExamsPage() {
   const supabase = await createClient();
   const context = await getMainUserContext();
   if (!context) return null;
-  const hasExamPlan = context.subscription?.plan_type === "plan_2" || context.subscription?.plan_type === "plan_3";
+  const hasExamPlan = isExamPlan(context.subscription?.plan_type);
 
   // 2. Fetch published exams
   const [{ data: exams, error }, { data: attempts }] = await Promise.all([
@@ -189,7 +190,33 @@ export default async function StudentExamsPage() {
         )}
       </div>
 
-      {pastExams.length > 0 && (
+      {!hasExamPlan ? (
+        <section
+          aria-labelledby="past-exams-locked-title"
+          className="rounded-2xl border border-brand-200 bg-brand-50 p-6 sm:p-8"
+        >
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm">
+              <Lock size={22} />
+            </div>
+            <div>
+              <h3 id="past-exams-locked-title" className="text-lg font-bold text-brand-900">
+                Past exam practice is locked
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-brand-800">
+                Subscribe to the <strong>Complete Prep</strong> or <strong>Exams Only</strong> plan to view previous exams and practice them.
+              </p>
+              <Link
+                href="/subscription"
+                prefetch={false}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-700"
+              >
+                View Plans <ChevronRight size={16} />
+              </Link>
+            </div>
+          </div>
+        </section>
+      ) : pastExams.length > 0 ? (
         <details className="group">
           <summary className="flex items-center gap-2 cursor-pointer list-none text-muted-foreground hover:text-foreground font-bold mb-6 transition-colors">
             <span className="bg-muted px-3 py-1.5 rounded-lg border border-border group-open:bg-brand-50 group-open:text-brand-700 group-open:border-brand-200 transition-colors flex items-center gap-2">
@@ -267,7 +294,7 @@ export default async function StudentExamsPage() {
             })}
           </div>
         </details>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requirePageUser } from "@/lib/auth";
 import ExamStartGate from "@/components/exams/exam-start-gate";
 import type { Exam, ExamAttemptMode } from "@/lib/types";
+import { getMainUserContext } from "@/lib/main-user-context";
+import { isExamPlan } from "@/lib/exams/access";
 
 export default async function TakeExamPage({
   params,
@@ -14,7 +15,12 @@ export default async function TakeExamPage({
   const { id } = await params;
   const { practice } = await searchParams;
   const mode: ExamAttemptMode = practice === "true" ? "practice" : "official";
-  const user = await requirePageUser();
+  const context = await getMainUserContext();
+  if (!context) redirect("/login");
+  if (mode === "practice" && !isExamPlan(context.subscription?.plan_type)) {
+    redirect("/exams");
+  }
+  const { user } = context;
 
   // This GET is deliberately read-only. Questions and attempt content are
   // returned exclusively by the explicit start POST.

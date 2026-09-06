@@ -27,10 +27,18 @@ function freeExam(endsAt: string): Exam {
   };
 }
 
-function adminClientFor(exam: Exam) {
+function adminClientFor(exam: Exam, subscriptionRows?: Array<{ id: string }>) {
   const from = jest.fn((table: string) => {
     if (table === "subscriptions") {
-      throw new Error("A free official exam must not query subscriptions");
+      if (subscriptionRows === undefined) {
+        throw new Error("A free official exam must not query subscriptions");
+      }
+      const limit = jest.fn().mockResolvedValue({ data: subscriptionRows, error: null });
+      const gt = jest.fn().mockReturnValue({ limit });
+      const planIn = jest.fn().mockReturnValue({ gt });
+      const activeEq = jest.fn().mockReturnValue({ in: planIn });
+      const userEq = jest.fn().mockReturnValue({ eq: activeEq });
+      return { select: jest.fn().mockReturnValue({ eq: userEq }) };
     }
     if (table === "exams") {
       const single = jest.fn().mockResolvedValue({ data: exam, error: null });
@@ -115,5 +123,38 @@ describe("attempt resume windows", () => {
 
     expect(isAttemptResumeWindowClosed({ mode: "practice", expires_at: expiresAt }, now)).toBe(false);
     expect(isAttemptResumeWindowClosed({ mode: "official", expires_at: expiresAt }, now)).toBe(true);
+  });
+});
+
+describe("past exam practice access", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(NOW));
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("rejects practice mode before loading or creating an attempt when there is no exam plan", async () => {
+    const exam = {
+      ...freeExam("2026-09-05T11:00:00.000Z"),
+      results_published: true,
+    };
+    const client = adminClientFor(exam, []);
+    jest.mocked(createAdminClient).mockReturnValue(client as never);
+
+    await expect(startAttempt({
+      examId: exam.id,
+      userId: "free-student",
+      mode: "practice",
+    })).rejects.toMatchObject({
+      code: "PLAN_REQUIRED",
+      status: 403,
+      message: "An active Complete or Exams Only plan is required to practice past exams",
+    });
+
+    expect(client.rpc).not.toHaveBeenCalled();
   });
 });

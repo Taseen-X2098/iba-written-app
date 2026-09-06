@@ -112,6 +112,15 @@ async function hasOfficialExamPlan(userId: string) {
   return Boolean(data?.length);
 }
 
+async function requirePastExamPracticePlan(userId: string) {
+  if (await hasOfficialExamPlan(userId)) return;
+  throw new ApiError(
+    "PLAN_REQUIRED",
+    "An active Complete or Exams Only plan is required to practice past exams",
+    403,
+  );
+}
+
 export async function getAttempt(attemptId: string, userId?: string) {
   const admin = await createAdminClient();
   let query = admin.from("exam_attempts").select("*").eq("id", attemptId);
@@ -125,6 +134,7 @@ export async function getAttempt(attemptId: string, userId?: string) {
 export async function requireAttemptWriter(attemptId: string, userId: string, token: string) {
   const attempt = await getAttempt(attemptId, userId);
   await assertExamAudienceAccess({ examId: attempt.exam_id, userId });
+  if (attempt.mode === "practice") await requirePastExamPracticePlan(userId);
   if (!writerTokenMatches(token, attempt.writer_token_hash)) {
     throw new ApiError(
       "WRITER_REVOKED",
@@ -160,6 +170,8 @@ export async function startAttempt(input: {
   const now = Date.now();
   const startsAt = new Date(exam.starts_at).getTime();
   const endsAt = new Date(exam.ends_at).getTime();
+
+  if (input.mode === "practice") await requirePastExamPracticePlan(input.userId);
 
   let existingQuery = admin
     .from("exam_attempts")
@@ -259,6 +271,7 @@ export async function takeOverAttempt(attemptId: string, userId: string) {
   const admin = await createAdminClient();
   const existing = await getAttempt(attemptId, userId);
   await assertExamAudienceAccess({ examId: existing.exam_id, userId });
+  if (existing.mode === "practice") await requirePastExamPracticePlan(userId);
   const writerToken = createWriterToken();
   const { data, error } = await admin.rpc("take_over_exam_attempt", {
     p_attempt_id: attemptId,

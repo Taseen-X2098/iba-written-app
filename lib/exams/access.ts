@@ -1,5 +1,10 @@
 import { ApiError } from "@/lib/api/api-error";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { PlanType } from "@/lib/types";
+
+export function isExamPlan(planType: PlanType | null | undefined) {
+  return planType === "plan_2" || planType === "plan_3";
+}
 
 export function canAccessExamAudience(input: {
   isMagnusOnly: boolean;
