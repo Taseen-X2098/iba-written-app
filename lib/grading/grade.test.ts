@@ -96,6 +96,96 @@ describe('AI Grading Utility', () => {
     expect(result.studentFeedback.score).toBe('0/10');
   });
 
+  it('forces a fully irrelevant story-completion response to exactly zero', async () => {
+    const mockResponse = JSON.stringify({
+      internal: {
+        task_fulfillment: 'fully_irrelevant',
+        task_fulfillment_reason: 'The response is an argumentative essay and does not continue the supplied story.',
+        total: 1.5,
+        max: 10,
+        criteria: [
+          {
+            criterion: 'Continuity with the opening and prompt adherence',
+            marks_awarded: 0,
+            marks_possible: 2,
+            reasoning: 'The supplied opening is not used.',
+          },
+          {
+            criterion: 'Grammar and sentence quality',
+            marks_awarded: 1.5,
+            marks_possible: 2,
+            reasoning: 'The unrelated essay contains some correct sentences.',
+          },
+        ],
+      },
+      student_feedback: {
+        score: '1.5/10',
+        remarks: 'This is an essay about discipline. It does not continue the story.',
+        ways_to_improve: [
+          'Write a narrative that continues the supplied opening.',
+          'Keep the same characters and situation from the story starter.',
+        ],
+        grammar_errors: [],
+        highlights: [],
+      },
+    });
+
+    const result = await grade(
+      createMockClient(mockResponse),
+      'Discipline is important for every student. It helps people succeed in life.',
+      'story_completion',
+      10,
+      { questionPrompt: 'Complete the story: Rahim opened the old wooden door and saw...' },
+    );
+
+    expect(result.internal.taskFulfillment).toBe('fully_irrelevant');
+    expect(result.internal.total).toBe(0);
+    expect(result.studentFeedback.score).toBe('0/10');
+    expect(result.internal.criteria.every((criterion) => criterion.marksAwarded === 0)).toBe(true);
+    expect(result.internal.criteria[1].reasoning).toContain('fully irrelevant');
+  });
+
+  it('does not force a genuine but partial attempt to zero', async () => {
+    const mockResponse = JSON.stringify({
+      internal: {
+        task_fulfillment: 'partially_responsive',
+        task_fulfillment_reason: 'The response attempts a continuation but changes details from the opening.',
+        total: 4,
+        max: 10,
+        criteria: [
+          {
+            criterion: 'Continuity with the opening and prompt adherence',
+            marks_awarded: 4,
+            marks_possible: 10,
+            reasoning: 'There is a recognizable but weak continuation.',
+          },
+        ],
+      },
+      student_feedback: {
+        score: '4/10',
+        remarks: 'The answer tries to continue the story but changes an important detail.',
+        ways_to_improve: [
+          'Keep the facts from the supplied opening.',
+          'Develop the next event more clearly.',
+        ],
+        grammar_errors: [],
+        highlights: [],
+      },
+    });
+
+    const result = await grade(
+      createMockClient(mockResponse),
+      'Rahim stepped through the door, but the room was empty.',
+      'story_completion',
+      10,
+      { questionPrompt: 'Complete the story: Rahim opened the old wooden door and saw...' },
+    );
+
+    expect(result.internal.taskFulfillment).toBe('partially_responsive');
+    expect(result.internal.total).toBe(3.5);
+    expect(result.studentFeedback.score).toBe('3.5/10');
+  });
+
   it('should not calibrate a 6-mark question', async () => {
     const mockResponse = JSON.stringify({
       internal: {

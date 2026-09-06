@@ -323,6 +323,8 @@ export type PersonalProgressionCardDTO =
 
 export interface GradingResultJSON {
   internal: {
+    taskFulfillment?: "responsive" | "partially_responsive" | "fully_irrelevant";
+    taskFulfillmentReason?: string;
     total: number;
     max: number;
     normalizationVersion?: number;

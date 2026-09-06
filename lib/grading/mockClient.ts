@@ -67,6 +67,8 @@ export function createMockClient(options: MockOptions): ResponsesClient {
           ?? "This is canned mock feedback for testing — no real grading happened. The response addresses the task and provides a usable starting point for revision.";
         const mockResult = {
           internal: {
+            task_fulfillment: "responsive",
+            task_fulfillment_reason: "The mock response treats the submission as an attempt at the assigned task.",
             total: mockScore,
             max: options.marks,
             criteria: [

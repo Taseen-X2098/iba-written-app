@@ -1171,7 +1171,7 @@
         {
           "criterion": "Continuity with the opening and prompt adherence",
           "marks": 0.5,
-          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; a fully irrelevant response that makes no genuine attempt to continue the supplied story receives exactly zero."
         },
         {
           "criterion": "Plot development, causality and pacing",
@@ -1216,7 +1216,7 @@
         {
           "criterion": "Continuity with the opening and prompt adherence",
           "marks": 0.5,
-          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; a fully irrelevant response that makes no genuine attempt to continue the supplied story receives exactly zero."
         },
         {
           "criterion": "Plot development, causality and pacing",
@@ -1261,7 +1261,7 @@
         {
           "criterion": "Continuity with the opening and prompt adherence",
           "marks": 0.5,
-          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; a fully irrelevant response that makes no genuine attempt to continue the supplied story receives exactly zero."
         },
         {
           "criterion": "Plot development, causality and pacing",
@@ -1306,7 +1306,7 @@
         {
           "criterion": "Continuity with the opening and prompt adherence",
           "marks": 0.5,
-          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; a fully irrelevant response that makes no genuine attempt to continue the supplied story receives exactly zero."
         },
         {
           "criterion": "Plot development, causality and pacing",
@@ -1351,7 +1351,7 @@
         {
           "criterion": "Continuity with the opening and prompt adherence",
           "marks": 0.5,
-          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; a fully irrelevant response that makes no genuine attempt to continue the supplied story receives exactly zero."
         },
         {
           "criterion": "Plot development, causality and pacing",
@@ -1396,7 +1396,7 @@
         {
           "criterion": "Continuity with the opening and prompt adherence",
           "marks": 0.5,
-          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; an unrelated story caps the raw total at 50%."
+          "guidance": "The supplied opening is copied and continued directly. Mention missing or inaccurate copying in feedback; a fully irrelevant response that makes no genuine attempt to continue the supplied story receives exactly zero."
         },
         {
           "criterion": "Plot development, causality and pacing",

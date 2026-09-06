@@ -59,6 +59,11 @@ const GRADING_RESULT_FORMAT = {
       internal: {
         type: "object",
         properties: {
+          task_fulfillment: {
+            type: "string",
+            enum: ["responsive", "partially_responsive", "fully_irrelevant"],
+          },
+          task_fulfillment_reason: { type: "string" },
           total: { type: "number" },
           max: { type: "number" },
           criteria: {
@@ -76,7 +81,7 @@ const GRADING_RESULT_FORMAT = {
             },
           },
         },
-        required: ["total", "max", "criteria"],
+        required: ["task_fulfillment", "task_fulfillment_reason", "total", "max", "criteria"],
         additionalProperties: false,
       },
       student_feedback: {
@@ -147,6 +152,8 @@ export interface GrammarError {
 
 export interface GradingResult {
   internal: {
+    taskFulfillment?: "responsive" | "partially_responsive" | "fully_irrelevant";
+    taskFulfillmentReason?: string;
     total: number;
     max: number;
     /** Prevents the canonical score policy from being applied more than once. */
@@ -497,6 +504,8 @@ export async function grade(
 
   let parsed: {
     internal: {
+      task_fulfillment?: "responsive" | "partially_responsive" | "fully_irrelevant";
+      task_fulfillment_reason?: string;
       total: number;
       max: number;
       criteria: { criterion: string; marks_awarded: number; marks_possible: number; reasoning: string }[];
@@ -530,12 +539,20 @@ export async function grade(
       reasoning: criterion.reasoning,
     })),
   );
-  const normalizedTotal = calibrateAiFinalMark(paragraphAdjusted.modelTotal, marks);
-  const criteria = calibrateCriteria(
-    paragraphAdjusted.criteria,
-    paragraphAdjusted.modelTotal,
-    normalizedTotal,
-  );
+  const fullyIrrelevant = parsed.internal.task_fulfillment === "fully_irrelevant";
+  const modelTotal = fullyIrrelevant ? 0 : paragraphAdjusted.modelTotal;
+  const normalizedTotal = calibrateAiFinalMark(modelTotal, marks);
+  const criteria = fullyIrrelevant
+    ? paragraphAdjusted.criteria.map((criterion) => ({
+        ...criterion,
+        marksAwarded: 0,
+        reasoning: `${criterion.reasoning.trim()} No marks were awarded because the response was fully irrelevant to the assigned task.`.trim(),
+      }))
+    : calibrateCriteria(
+        paragraphAdjusted.criteria,
+        modelTotal,
+        normalizedTotal,
+      );
   const legacySummary = String(parsed.student_feedback.summary ?? "").trim();
   const modelRemarks = String(parsed.student_feedback.remarks ?? legacySummary).trim()
     || "Your response addresses the task, but the available feedback could not be expanded further.";
@@ -549,6 +566,8 @@ export async function grade(
 
   return {
     internal: {
+      taskFulfillment: parsed.internal.task_fulfillment,
+      taskFulfillmentReason: String(parsed.internal.task_fulfillment_reason ?? "").trim() || undefined,
       total: normalizedTotal,
       max: marks,
       normalizationVersion: MARK_NORMALIZATION_VERSION,

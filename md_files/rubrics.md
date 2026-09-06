@@ -61,8 +61,9 @@ Missing or inaccurate copying must be mentioned in student feedback and judged
 inside **Continuity with the opening and prompt adherence**; do not invent a
 separate deduction. An unexplained point-of-view or tense switch weakens
 continuity or flow, while a deliberate, controlled shift remains valid. An
-earned ambiguous ending can receive full credit. A completely unrelated story
-must not receive more than 50% of the raw marks.
+earned ambiguous ending can receive full credit. A fully irrelevant response
+that makes no genuine attempt to continue the supplied story must receive
+exactly zero, even if its language is otherwise polished.
 
 ### Story Completion — 15 Marks
 

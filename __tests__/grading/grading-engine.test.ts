@@ -198,6 +198,8 @@ describe("grade() with mock client", () => {
     expect(capturedParams?.tool_choice).toEqual({ type: "file_search" });
     expect(capturedParams?.instructions).toContain("call file_search");
     expect(capturedParams?.instructions).not.toContain("call get_rubric");
+    expect(JSON.stringify(capturedParams?.text)).toContain("task_fulfillment");
+    expect(JSON.stringify(capturedParams?.text)).toContain("fully_irrelevant");
     expect(JSON.stringify(capturedParams?.input)).toContain("<question-prompt-");
     expect(JSON.stringify(capturedParams?.input)).toContain("A reference question prompt.");
   });
@@ -319,7 +321,8 @@ describe("SYSTEM_PROMPT", () => {
   it("defines Story Completion continuity and copying rules", () => {
     expect(SYSTEM_PROMPT).toContain("Story completion");
     expect(SYSTEM_PROMPT).toContain("copy the supplied opening");
-    expect(SYSTEM_PROMPT).toContain("must not exceed 50%");
+    expect(SYSTEM_PROMPT).toContain("classify it as `fully_irrelevant` and award exactly 0");
+    expect(SYSTEM_PROMPT).toContain("argumentative essay about the importance of discipline");
   });
 
   it("instructs never to grade from memory", () => {
