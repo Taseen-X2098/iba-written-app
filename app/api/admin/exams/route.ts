@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
       p_ends_at: input.endsAt,
       p_is_published: input.isPublished,
       p_is_magnus_only: input.isMagnusOnly,
+      p_is_free: input.isFree,
       p_questions: input.questions,
     });
     if (error) throw error;

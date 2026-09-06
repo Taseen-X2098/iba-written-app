@@ -19,7 +19,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     const admin = await createAdminClient();
     const { data: existingExam, error: existingExamError } = await admin
       .from("exams")
-      .select("is_published, is_magnus_only")
+      .select("is_published, is_magnus_only, is_free")
       .eq("id", id)
       .single();
     if (existingExamError || !existingExam) throw existingExamError ?? new Error("Exam not found");
@@ -32,6 +32,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
       p_ends_at: input.endsAt,
       p_is_published: input.isPublished,
       p_is_magnus_only: input.isMagnusOnly,
+      p_is_free: input.isFree,
       p_questions: input.questions,
     });
     if (error) {

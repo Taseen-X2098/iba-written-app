@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Plus, Clock, FileText, BadgeCheck, Trophy } from "lucide-react";
+import { Plus, Clock, FileText, BadgeCheck, Trophy, Gift } from "lucide-react";
 import type { Exam } from "@/lib/types";
 import { ForceGradeButton } from "./ForceGradeButton";
 import { ExtendTimerButton } from "./ExtendTimerButton";
@@ -60,6 +60,11 @@ export default async function AdminExamsPage() {
                       {exam.is_magnus_only && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700">
                           <BadgeCheck size={12} /> Magnus
+                        </span>
+                      )}
+                      {exam.is_free && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                          <Gift size={12} /> Free for all
                         </span>
                       )}
                     </div>

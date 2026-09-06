@@ -21,7 +21,7 @@ export default async function TakeExamPage({
   const supabase = await createClient();
   const { data: exam, error } = await supabase
     .from("exams")
-    .select("id, title, description, time_limit_minutes, starts_at, ends_at, is_published, results_published, results_version, is_magnus_only, created_by, created_at, updated_at")
+    .select("id, title, description, time_limit_minutes, starts_at, ends_at, is_published, results_published, results_version, is_magnus_only, is_free, created_by, created_at, updated_at")
     .eq("id", id)
     .eq("is_published", true)
     .single();

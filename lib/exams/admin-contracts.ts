@@ -8,6 +8,7 @@ export const examDefinitionSchema = z.object({
   endsAt: z.string().datetime(),
   isPublished: z.boolean(),
   isMagnusOnly: z.boolean().default(false),
+  isFree: z.boolean().default(false),
   questions: z.array(z.object({
     questionId: z.string().uuid(),
     orderIndex: z.number().int().min(0),
@@ -19,5 +20,12 @@ export const examDefinitionSchema = z.object({
   }
   if (new Set(value.questions.map((question) => question.questionId)).size !== value.questions.length) {
     context.addIssue({ code: "custom", message: "An exam cannot contain duplicate questions", path: ["questions"] });
+  }
+  if (value.isFree && value.isMagnusOnly) {
+    context.addIssue({
+      code: "custom",
+      message: "A free-for-all exam cannot be restricted to Magnus students",
+      path: ["isFree"],
+    });
   }
 });

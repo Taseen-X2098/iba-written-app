@@ -1,6 +1,6 @@
 jest.mock("server-only", () => ({}));
 
-import { canAccessExamAudience } from "./access";
+import { canAccessExamAudience, canStartOfficialExam } from "./access";
 
 describe("exam audience access", () => {
   it("preserves normal exam access", () => {
@@ -30,5 +30,16 @@ describe("exam audience access", () => {
       isAdmin: true,
       isApprovedMagnus: false,
     })).toBe(true);
+  });
+});
+
+describe("official exam plan access", () => {
+  it("lets every signed-in student start a free exam", () => {
+    expect(canStartOfficialExam({ isFree: true, hasActiveExamPlan: false })).toBe(true);
+  });
+
+  it("preserves the active-plan requirement for regular exams", () => {
+    expect(canStartOfficialExam({ isFree: false, hasActiveExamPlan: true })).toBe(true);
+    expect(canStartOfficialExam({ isFree: false, hasActiveExamPlan: false })).toBe(false);
   });
 });

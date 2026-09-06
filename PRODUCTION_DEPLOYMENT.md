@@ -637,7 +637,8 @@ npm run check
 ```
 
 Run `supabase/tests/exam_reliability.sql` and
-`supabase/tests/magnus_reliability.sql` only against a disposable or staging
+`supabase/tests/magnus_reliability.sql` and
+`supabase/tests/free_exam_reliability.sql` only against a disposable or staging
 database. They deliberately create test identities and records inside rollback
 transactions. `supabase/tests/local_auth_bootstrap.sql` is only for a disposable
 plain-PostgreSQL test cluster and must never be run against Supabase.

@@ -43,6 +43,7 @@ export default async function AdminEditExamPage({ params }: { params: Promise<{ 
           endsAt: exam.ends_at,
           isPublished: exam.is_published,
           isMagnusOnly: exam.is_magnus_only,
+          isFree: exam.is_free,
           questions: selected,
         }}
       />

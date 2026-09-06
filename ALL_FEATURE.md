@@ -219,7 +219,7 @@ Every successful grade produces a compact coaching summary and 1-4 evidence-back
 ## 6. Weekly Exams
 
 ### 6.1 Access and Explicit Start
-Plan 2 and Plan 3 can start an official exam while its global window is open. A page GET fetches metadata only: it neither starts an attempt nor returns questions, so prefetch and link scanning are harmless. The explicit start POST validates the plan, time window, and published state, then returns questions. Once started, an attempt can be completed even if the subscription later expires.
+Plan 2 and Plan 3 can start a regular official exam while its global window is open. An administrator can instead mark an exam “Free for every student”; every signed-in student can start that official exam without a subscription. Free-for-all and Magnus-only are mutually exclusive, and both access choices lock on first publication. A page GET fetches metadata only: it neither starts an attempt nor returns questions, so prefetch and link scanning are harmless. The explicit start POST validates the entitlement, time window, and published state, then returns questions. Once started, an attempt can be completed even if the subscription later expires.
 
 ### 6.2 Authoritative Attempt Model
 `exam_attempts` stores mode, status, server start/expiry, submission/finalization timestamps, and a versioned writer-token hash. A partial unique index permits one official attempt per student/exam while completed practice attempts do not block a new run. Official and live-practice creation is concurrency-safe.
@@ -242,7 +242,7 @@ Selected practice answers and official admin grading run through `grading_jobs` 
 ### 6.8 Publication and Leaderboard
 Publication is one database transaction. It rejects early publication, non-final attempts, missing answer rows, and incomplete grades; rebuilds `exam_results`; assigns competition ranks with `RANK()` (`1, 2, 2, 4`); increments `results_version`; and triggers notifications only on the first false→true publication. “Recalculate & Republish” repeats the transaction after corrections.
 
-The signed-in leaderboard RPC returns only name, institute, score, maximum, rank, total count, and result version. Pages contain at most 100 rows and are cached by exam/version/page. Student details expose submitted text, score, safe feedback, and verified highlights only after publication—never rubric reasoning or grader source.
+The signed-in leaderboard RPC returns only name, institute, score, maximum, rank, total count, and result version. Published results for normal exams are visible to every signed-in student, including nonparticipants. Student and administrator leaderboards contain at most 100 rows per page; student pages are cached by exam/version/page. Student details expose submitted text, score, safe feedback, and verified highlights only after publication—never rubric reasoning or grader source.
 
 ---
 

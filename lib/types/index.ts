@@ -134,6 +134,7 @@ export interface Exam {
   results_published: boolean;
   results_version: number;
   is_magnus_only: boolean;
+  is_free: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown, BadgeCheck } from "lucide-react";
+import { Calendar, Clock, Save, GripVertical, Trash2, Plus, ChevronDown, BadgeCheck, Gift } from "lucide-react";
 import type { Question, QuestionCategory, Difficulty } from "@/lib/types";
 import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "@/lib/types";
 import { STORY_COMPLETION_MARKS } from "@/lib/questions/story-completion";
@@ -18,6 +18,7 @@ interface Props {
     endsAt: string;
     isPublished: boolean;
     isMagnusOnly: boolean;
+    isFree: boolean;
     questions: { q: Question; marks: number }[];
   };
   locked?: boolean;
@@ -38,6 +39,7 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
   const [startsAt, setStartsAt] = useState(toLocalInput(initialExam?.startsAt));
   const [endsAt, setEndsAt] = useState(toLocalInput(initialExam?.endsAt));
   const [isMagnusOnly, setIsMagnusOnly] = useState(initialExam?.isMagnusOnly ?? false);
+  const [isFree, setIsFree] = useState(initialExam?.isFree ?? false);
   
   // Selected questions with order and marks
   const [selectedQuestions, setSelectedQuestions] = useState<{q: Question, marks: number}[]>(initialExam?.questions ?? []);
@@ -123,6 +125,7 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
           endsAt: new Date(endsAt).toISOString(),
           isPublished: initialExam?.isPublished || publish,
           isMagnusOnly,
+          isFree,
           questions: finalQuestions
         })
       });
@@ -348,8 +351,31 @@ export default function ExamBuilderClient({ availableQuestions, initialExam, loc
           <label className={`mt-5 flex items-start gap-3 rounded-xl border p-3 ${initialExam?.isPublished ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
             <input
               type="checkbox"
+              checked={isFree}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setIsFree(checked);
+                if (checked) setIsMagnusOnly(false);
+              }}
+              disabled={locked || initialExam?.isPublished}
+              className="mt-1"
+            />
+            <span>
+              <span className="flex items-center gap-1.5 text-sm font-semibold"><Gift size={15} className="text-brand-600" /> Free for every student</span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Any signed-in student can take the official exam without an exam plan. Timing, one-attempt rules, grading, and result publication stay unchanged.
+              </span>
+            </span>
+          </label>
+          <label className={`mt-3 flex items-start gap-3 rounded-xl border p-3 ${initialExam?.isPublished ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}>
+            <input
+              type="checkbox"
               checked={isMagnusOnly}
-              onChange={(event) => setIsMagnusOnly(event.target.checked)}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setIsMagnusOnly(checked);
+                if (checked) setIsFree(false);
+              }}
               disabled={locked || initialExam?.isPublished}
               className="mt-1"
             />

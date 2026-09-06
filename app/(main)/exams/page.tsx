@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { Clock, FileText, Lock, ChevronRight, Trophy } from "lucide-react";
+import { Clock, FileText, Lock, ChevronRight, Trophy, Gift } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import type { Exam } from "@/lib/types";
@@ -9,7 +9,7 @@ export default async function StudentExamsPage() {
   const supabase = await createClient();
   const context = await getMainUserContext();
   if (!context) return null;
-  const hasAccess = context.subscription?.plan_type === "plan_2" || context.subscription?.plan_type === "plan_3";
+  const hasExamPlan = context.subscription?.plan_type === "plan_2" || context.subscription?.plan_type === "plan_3";
 
   // 2. Fetch published exams
   const [{ data: exams, error }, { data: attempts }] = await Promise.all([
@@ -55,13 +55,13 @@ export default async function StudentExamsPage() {
         </div>
       </div>
 
-      {!hasAccess && (
+      {!hasExamPlan && (
         <div className="mb-8 p-6 bg-brand-50 border border-brand-200 rounded-xl flex items-start gap-4">
           <Lock className="text-brand-600 shrink-0 mt-1" size={24} />
           <div>
-            <h3 className="font-bold text-brand-900 text-lg">Exams Locked</h3>
+            <h3 className="font-bold text-brand-900 text-lg">Paid Exams Locked</h3>
             <p className="text-brand-800 text-sm mt-1 mb-4">
-              You need the <strong>Complete Prep</strong> or <strong>Exams Only</strong> plan to participate in weekly exams.
+              Free exams are open to you. You need the <strong>Complete Prep</strong> or <strong>Exams Only</strong> plan to participate in other weekly exams.
             </p>
             <Link 
               href="/subscription"
@@ -107,6 +107,7 @@ export default async function StudentExamsPage() {
                 <div className="mb-2 flex items-center gap-3 pr-16">
                   {exam.is_magnus_only && <MagnusExamLogo />}
                   <h3 className="text-lg font-bold text-foreground">{exam.title}</h3>
+                  {exam.is_free && <FreeExamBadge />}
                 </div>
                 {exam.description && (
                   <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
@@ -135,6 +136,7 @@ export default async function StudentExamsPage() {
                       const hasSubmitted = attempt?.status === "finalized";
                       const isOngoing = attempt && ["active", "locked"].includes(attempt.status);
                       const canContinue = isOngoing && now < new Date(attempt.expires_at).getTime() + 3 * 60 * 1000;
+                      const canEnter = hasExamPlan || exam.is_free || isOngoing;
 
                       if (hasSubmitted) {
                         return (
@@ -158,10 +160,10 @@ export default async function StudentExamsPage() {
 
                       return (
                         <Link
-                          href={hasAccess || isOngoing ? `/exams/${exam.id}` : "#"}
+                          href={canEnter ? `/exams/${exam.id}` : "#"}
                           prefetch={false}
                           className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${
-                            hasAccess || isOngoing
+                            canEnter
                               ? canContinue 
                                 ? "bg-amber-500 text-white hover:bg-amber-600 shadow-md shadow-amber-200/50"
                                 : isOngoing 
@@ -170,7 +172,7 @@ export default async function StudentExamsPage() {
                               : "bg-muted text-muted-foreground cursor-not-allowed opacity-50"
                           }`}
                         >
-                          {hasAccess || isOngoing ? buttonText : "Locked"}
+                          {canEnter ? buttonText : "Locked"}
                           <ChevronRight size={16} />
                         </Link>
                       );
@@ -213,6 +215,7 @@ export default async function StudentExamsPage() {
                   <div className="mb-2 flex items-center gap-3 pr-16">
                     {exam.is_magnus_only && <MagnusExamLogo />}
                     <h3 className="text-lg font-bold text-foreground">{exam.title}</h3>
+                    {exam.is_free && <FreeExamBadge />}
                   </div>
                   {exam.description && (
                     <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{exam.description}</p>
@@ -284,6 +287,14 @@ function MagnusExamLogo() {
   return (
     <span className="flex h-12 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-900 p-1" title="Magnus Academy exam">
       <Image src="/magnus/magnus-transparent.png" alt="Magnus Academy" width={28} height={44} className="h-10 w-auto object-contain" />
+    </span>
+  );
+}
+
+function FreeExamBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+      <Gift size={12} /> Free
     </span>
   );
 }

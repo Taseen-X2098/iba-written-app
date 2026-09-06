@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
 import { getWordLimitViolation } from "@/lib/answers/word-limit";
-import { assertExamAudienceAccess } from "@/lib/exams/access";
+import { assertExamAudienceAccess, canStartOfficialExam } from "@/lib/exams/access";
 import { getTranslationAnswerImagePreviews } from "@/lib/exams/translation-images";
 import type {
   AttemptDrafts,
@@ -207,8 +207,13 @@ export async function startAttempt(input: {
     throw new ApiError("RESULTS_EMBARGOED", "Practice opens after official results are published", 403);
   }
 
-  if (input.mode === "official" && !(await hasOfficialExamPlan(input.userId))) {
-    throw new ApiError("PLAN_REQUIRED", "An active Complete or Exam plan is required to start", 403);
+  if (input.mode === "official") {
+    const hasActiveExamPlan = exam.is_free
+      ? false
+      : await hasOfficialExamPlan(input.userId);
+    if (!canStartOfficialExam({ isFree: exam.is_free, hasActiveExamPlan })) {
+      throw new ApiError("PLAN_REQUIRED", "An active Complete or Exam plan is required to start", 403);
+    }
   }
 
   const writerToken = createWriterToken();

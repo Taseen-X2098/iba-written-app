@@ -9,6 +9,13 @@ export function canAccessExamAudience(input: {
   return !input.isMagnusOnly || input.isAdmin || input.isApprovedMagnus;
 }
 
+export function canStartOfficialExam(input: {
+  isFree: boolean;
+  hasActiveExamPlan: boolean;
+}) {
+  return input.isFree || input.hasActiveExamPlan;
+}
+
 export async function assertExamAudienceAccess(input: {
   examId: string;
   userId: string;

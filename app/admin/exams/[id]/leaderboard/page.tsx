@@ -6,6 +6,8 @@ import { createAdminClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+const LEADERBOARD_PAGE_SIZE = 100;
+
 type LeaderboardResult = {
   user_id: string;
   total_score: number | string;
@@ -29,13 +31,23 @@ function profileFromJoin(value: unknown) {
 
 export default async function AdminExamLeaderboardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   const { id } = await params;
+  const { page: rawPage } = await searchParams;
+  const requestedPage = Number(rawPage ?? "1");
+  const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const offset = (page - 1) * LEADERBOARD_PAGE_SIZE;
   await requireAdminUser();
   const admin = await createAdminClient();
-  const [{ data: exam }, { data: results, error }] = await Promise.all([
+  const [
+    { data: exam },
+    { data: results, error, count },
+    { data: topResult, error: topResultError },
+  ] = await Promise.all([
     admin
       .from("exams")
       .select("id, title, results_published")
@@ -43,15 +55,28 @@ export default async function AdminExamLeaderboardPage({
       .maybeSingle(),
     admin
       .from("exam_results")
-      .select("user_id, total_score, max_score, rank, profiles(name, institute)")
+      .select("user_id, total_score, max_score, rank, profiles(name, institute)", { count: "exact" })
       .eq("exam_id", id)
-      .order("rank", { ascending: true }),
+      .order("rank", { ascending: true, nullsFirst: false })
+      .order("user_id", { ascending: true })
+      .range(offset, offset + LEADERBOARD_PAGE_SIZE - 1),
+    admin
+      .from("exam_results")
+      .select("total_score")
+      .eq("exam_id", id)
+      .order("total_score", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   if (!exam) notFound();
 
-  if (error) {
-    console.error("Unable to load the admin leaderboard", error);
+  const totalCount = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / LEADERBOARD_PAGE_SIZE));
+  if (error || topResultError) {
+    console.error("Unable to load the admin leaderboard", error ?? topResultError);
+  } else if (page > totalPages) {
+    notFound();
   }
 
   const leaderboard = ((results ?? []) as LeaderboardResult[]).map((result) => {
@@ -68,7 +93,7 @@ export default async function AdminExamLeaderboardPage({
     };
   });
 
-  const topScore = leaderboard.length ? Math.max(...leaderboard.map((row) => row.totalScore)) : 0;
+  const topScore = Number(topResult?.total_score ?? 0);
 
   return (
     <div className="mx-auto max-w-6xl animate-fade-in">
@@ -103,7 +128,7 @@ export default async function AdminExamLeaderboardPage({
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Users size={17} /> Participants
           </div>
-          <p className="mt-2 text-3xl font-black text-foreground">{leaderboard.length}</p>
+          <p className="mt-2 text-3xl font-black text-foreground">{totalCount}</p>
         </div>
         <div className="rounded-2xl border border-border bg-card p-5">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -114,7 +139,7 @@ export default async function AdminExamLeaderboardPage({
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-border bg-card">
-        {error ? (
+        {error || topResultError ? (
           <div className="p-10 text-center text-sm text-red-700">
             The leaderboard could not be loaded. Refresh the page to try again.
           </div>
@@ -162,6 +187,29 @@ export default async function AdminExamLeaderboardPage({
           </div>
         )}
       </section>
+      {totalPages > 1 && (
+        <nav className="mt-5 flex items-center justify-center gap-4" aria-label="Leaderboard pages">
+          {page > 1 ? (
+            <Link
+              prefetch={false}
+              href={`/admin/exams/${id}/leaderboard?page=${page - 1}`}
+              className="rounded-lg border border-border px-4 py-2 font-bold"
+            >
+              Previous
+            </Link>
+          ) : <span />}
+          <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+          {page < totalPages ? (
+            <Link
+              prefetch={false}
+              href={`/admin/exams/${id}/leaderboard?page=${page + 1}`}
+              className="rounded-lg border border-border px-4 py-2 font-bold"
+            >
+              Next
+            </Link>
+          ) : <span />}
+        </nav>
+      )}
     </div>
   );
 }
