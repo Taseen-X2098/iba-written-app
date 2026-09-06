@@ -27,6 +27,7 @@ export async function fetchHistoryQuery(
       id,
       created_at,
       time_taken_seconds,
+      is_exam_submission,
       grading_result,
       edited_text,
       ocr_text,

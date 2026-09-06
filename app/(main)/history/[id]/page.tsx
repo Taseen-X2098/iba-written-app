@@ -24,6 +24,7 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
       id,
       created_at,
       time_taken_seconds,
+      is_exam_submission,
       grading_result,
       edited_text,
       ocr_text,
@@ -75,6 +76,11 @@ export default async function HistoryDetailPage({ params }: { params: Promise<{ 
             <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 text-[10px] font-bold uppercase tracking-wider">
               {CATEGORY_LABELS[question.category as keyof typeof CATEGORY_LABELS] || question.category}
             </span>
+            {sub.is_exam_submission ? (
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                Practice Exam
+              </span>
+            ) : null}
             <span className="text-xs text-muted-foreground flex items-center gap-1">
               <Calendar size={12} />
               {new Date(sub.created_at).toLocaleDateString("en-US", {

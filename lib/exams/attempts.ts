@@ -34,6 +34,14 @@ export function writerTokenMatches(token: string, expectedHash: string) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+export function isAttemptResumeWindowClosed(
+  attempt: Pick<ExamAttempt, "mode" | "expires_at">,
+  now = Date.now(),
+) {
+  return attempt.mode === "official"
+    && now > new Date(attempt.expires_at).getTime() + 3 * 60_000;
+}
+
 export async function getAttemptDrafts(attemptId: string) {
   return (await getRedis().hgetall<AttemptDrafts>(CacheKeys.attemptDrafts(attemptId))) ?? {};
 }
@@ -174,10 +182,7 @@ export async function startAttempt(input: {
       input.writerToken &&
       writerTokenMatches(input.writerToken, existing.writer_token_hash)
     ) {
-      if (
-        existing.mode === "official"
-        && Date.now() > new Date(existing.expires_at).getTime() + 3 * 60_000
-      ) {
+      if (isAttemptResumeWindowClosed(existing)) {
         throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
       }
       const drafts = await getAttemptDrafts(existing.id);

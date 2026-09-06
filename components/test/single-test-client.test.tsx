@@ -10,6 +10,7 @@ import {
   standaloneSessionStorageKey,
 } from "@/lib/exams/standalone-session";
 import type { GradingResultJSON, Question } from "@/lib/types";
+import { USAGE_BALANCE_UPDATED_EVENT } from "@/lib/usage/balance-client";
 
 const mockPush = jest.fn();
 const mockRefresh = jest.fn();
@@ -90,6 +91,8 @@ describe("SingleTestClient grading completion", () => {
   });
 
   it("shows feedback without refreshing the route after a successful grade", async () => {
+    const usageUpdated = jest.fn();
+    window.addEventListener(USAGE_BALANCE_UPDATED_EVENT, usageUpdated);
     render(<SingleTestClient question={question} hasTestsAvailable />);
 
     expect(screen.getByText("Paragraph Writing")).toBeInTheDocument();
@@ -109,8 +112,10 @@ describe("SingleTestClient grading completion", () => {
 
     expect(await screen.findByText("Your evaluated submission")).toBeInTheDocument();
     expect(mockRefresh).not.toHaveBeenCalled();
+    expect(usageUpdated).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(STANDALONE_SESSION_KEY)).toBeNull();
     expect(localStorage.getItem(standaloneSessionStorageKey(question.id))).toBeNull();
+    window.removeEventListener(USAGE_BALANCE_UPDATED_EVENT, usageUpdated);
   });
 
   it("processes another selected image and keeps session controls in the editor", async () => {

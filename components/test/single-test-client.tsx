@@ -21,6 +21,7 @@ import {
   STANDALONE_SESSION_UPDATED_EVENT,
   writeStandaloneSession,
 } from "@/lib/exams/standalone-session";
+import { notifyUsageBalanceUpdated } from "@/lib/usage/balance-client";
 import { countWords, wordLimitForMarks } from "@/lib/answers/word-limit";
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import { consumeSelectedFiles } from "@/lib/answers/image-input";
@@ -457,6 +458,8 @@ export default function SingleTestClient({ question, hasTestsAvailable }: Props)
       if (receivedResponse) gradingRequestIdRef.current = null;
       setError(err.message);
       setState("editing"); // go back so they can try again
+    } finally {
+      if (receivedResponse) notifyUsageBalanceUpdated();
     }
   };
 

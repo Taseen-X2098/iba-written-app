@@ -24,6 +24,7 @@ import { countWords, getWordLimitViolation, wordLimitForMarks } from "@/lib/answ
 import { ANSWER_PAGE_LIMIT, answerPageLabel, getPageLimitViolation } from "@/lib/answers/page-limit";
 import { consumeSelectedFiles } from "@/lib/answers/image-input";
 import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
+import { notifyUsageBalanceUpdated } from "@/lib/usage/balance-client";
 import {
   IN_PROGRESS_EXAM_UPDATED_EVENT,
   removeInProgressExam,
@@ -495,6 +496,7 @@ export default function ExamTakerClient({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Unable to start grading");
+      notifyUsageBalanceUpdated();
       if (!data.jobId) {
         setJobItems([]);
         setJobStatus("completed");
@@ -529,6 +531,7 @@ export default function ExamTakerClient({
       });
       if (["completed", "failed", "cancelled"].includes(data.job.status)) {
         clearEncryptedRecovery(attempt.id);
+        notifyUsageBalanceUpdated();
       }
       if (["completed", "cancelled"].includes(data.job.status)) {
         endActiveExam();

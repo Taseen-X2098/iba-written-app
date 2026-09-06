@@ -26,6 +26,7 @@ import type { MagnusMembershipStatus, Profile, Subscription } from "@/lib/types"
 import { messaging } from "@/lib/firebase";
 import { getToken, onMessage } from "firebase/messaging";
 import { getUsageInfo, type UsageInfo } from "@/lib/utils/subscription";
+import { USAGE_BALANCE_UPDATED_EVENT } from "@/lib/usage/balance-client";
 import { registerAppServiceWorker } from "@/lib/pwa";
 import { NavigationLoadingOverlay } from "@/components/ui/navigation-loading-overlay";
 import { ActiveSessionSidenavLinks } from "@/components/navigation/active-session-links";
@@ -84,7 +85,10 @@ export default function MainShell({
   const router = useRouter();
   const [sidenavOpen, setSidenavOpen] = useState(false);
   const profile = initialProfile;
-  const subscription = initialSubscription;
+  const [usageBalance, setUsageBalance] = useState<{
+    profile: Pick<Profile, "free_tests_remaining">;
+    subscription: Subscription | null;
+  } | null>(null);
   const isApprovedMagnusStudent = initialMagnusStatus === "approved";
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
 
@@ -100,6 +104,30 @@ export default function MainShell({
       // Keep the last known count while offline.
     }
   }, []);
+
+  const loadUsageBalance = useCallback(async () => {
+    try {
+      const response = await fetch("/api/usage-balance", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setUsageBalance({
+        profile: data.profile,
+        subscription: data.subscription ?? null,
+      });
+    } catch {
+      // Keep the last confirmed balance while offline.
+    }
+  }, []);
+
+  useEffect(() => {
+    const refreshUsage = () => void loadUsageBalance();
+    window.addEventListener(USAGE_BALANCE_UPDATED_EVENT, refreshUsage);
+    window.addEventListener("focus", refreshUsage);
+    return () => {
+      window.removeEventListener(USAGE_BALANCE_UPDATED_EVENT, refreshUsage);
+      window.removeEventListener("focus", refreshUsage);
+    };
+  }, [loadUsageBalance]);
 
   useEffect(() => {
     let disposed = false;
@@ -134,6 +162,7 @@ export default function MainShell({
       }
       if (changed && !disposed) {
         setActiveSessions(listActiveSessionLinks(localStorage, profile.id));
+        void loadUsageBalance();
       }
     };
 
@@ -165,7 +194,7 @@ export default function MainShell({
       window.removeEventListener(STANDALONE_SESSION_UPDATED_EVENT, checkTimer);
       window.removeEventListener(IN_PROGRESS_EXAM_UPDATED_EVENT, checkTimer);
     };
-  }, [loadNotifications, profile.id]);
+  }, [loadNotifications, loadUsageBalance, profile.id]);
 
   // State to track if we should show the notification banner
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
@@ -262,8 +291,9 @@ export default function MainShell({
   }
 
   // Calculate usage percentage for the plan bar
-  const usageInfo = getUsageInfo(profile, subscription);
-  const personalReportLocked = !subscription && !profile.is_admin;
+  const currentSubscription = usageBalance ? usageBalance.subscription : initialSubscription;
+  const usageInfo = getUsageInfo(usageBalance?.profile ?? profile, currentSubscription);
+  const personalReportLocked = !currentSubscription && !profile.is_admin;
 
   return (
     <div className="flex min-h-dvh">

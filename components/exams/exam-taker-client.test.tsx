@@ -5,6 +5,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ExamTakerClient from "./exam-taker-client";
 import { inProgressExamStorageKey, parseOwnedInProgressExam } from "@/lib/exams/in-progress-exam";
+import { USAGE_BALANCE_UPDATED_EVENT } from "@/lib/usage/balance-client";
 import type { AttemptQuestion, Exam, ExamAttempt } from "@/lib/types";
 
 const mockPush = jest.fn();
@@ -339,7 +340,8 @@ describe("practice timeout lifecycle", () => {
       configurable: true,
       writable: true,
       value: jest.fn(async (input: RequestInfo | URL) => {
-        if (String(input).endsWith("/complete")) {
+        const url = String(input);
+        if (url.endsWith("/complete")) {
           return {
             ok: true,
             json: async () => ({
@@ -350,7 +352,13 @@ describe("practice timeout lifecycle", () => {
             }),
           } as Response;
         }
-        throw new Error(`Unexpected request: ${String(input)}`);
+        if (url.endsWith("/practice/grade")) {
+          return {
+            ok: true,
+            json: async () => ({ jobId: null, status: "completed" }),
+          } as Response;
+        }
+        throw new Error(`Unexpected request: ${url}`);
       }),
     });
 
@@ -376,6 +384,14 @@ describe("practice timeout lifecycle", () => {
       attemptId: attempt.id,
       phase: "awaiting_grading",
     }));
+
+    const usageUpdated = jest.fn();
+    window.addEventListener(USAGE_BALANCE_UPDATED_EVENT, usageUpdated);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Grade 1 Selected Answer" }));
+    expect(await screen.findByText("Practice Complete")).toBeInTheDocument();
+    expect(usageUpdated).toHaveBeenCalledTimes(1);
+    window.removeEventListener(USAGE_BALANCE_UPDATED_EVENT, usageUpdated);
   });
 
   it("ends the active session and explains when grading is cancelled", async () => {

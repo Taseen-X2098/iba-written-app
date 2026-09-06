@@ -5,6 +5,7 @@ import { getRedis, CacheKeys } from "@/lib/redis";
 import { ApiError } from "@/lib/api/api-error";
 import {
   assertAttemptDraftWordLimits,
+  getAttempt,
   getAttemptDrafts,
   requireAttemptWriter,
 } from "@/lib/exams/attempts";
@@ -12,6 +13,7 @@ import { grade, type ResponsesClient } from "@/lib/grading/grade";
 import { createMockClient } from "@/lib/grading/mockClient";
 import { rubricSourceForGrader } from "@/lib/grading/config";
 import { prepareLearnerProfilePlan, recordLearnerProfileUpdate } from "@/lib/learning/profile";
+import { buildPracticeHistorySubmission } from "@/lib/grading/practice-history";
 
 type ClaimedItem = {
   id: string;
@@ -276,12 +278,13 @@ async function processItem(item: ClaimedItem) {
   try {
     const { data: eq, error: eqError } = await admin
       .from("exam_questions")
-      .select("id, marks, questions(category, prompt)")
+      .select("id, marks, questions(id, category, prompt)")
       .eq("id", item.exam_question_id)
       .single();
     if (eqError || !eq) throw eqError ?? new Error("Question not found");
     const question = joinedRecord(eq.questions);
     const category = question?.category;
+    const questionId = question?.id;
     const questionPrompt = typeof question?.prompt === "string" ? question.prompt : undefined;
     if (typeof category !== "string") throw new Error("Question category is missing");
 
@@ -300,10 +303,19 @@ async function processItem(item: ClaimedItem) {
 
     let submissionText = "";
     let studentUserId = job.requested_by as string;
+    let practiceHistoryContext: {
+      draft: { ocrText?: string; editedText?: string };
+      attempt: Awaited<ReturnType<typeof getAttempt>>;
+    } | null = null;
     if (job.kind === "practice_exam") {
       if (!attemptId) throw new Error("Practice job has no attempt");
       const drafts = await getAttemptDrafts(attemptId);
-      submissionText = drafts[item.exam_question_id]?.editedText?.trim() ?? "";
+      const draft = drafts[item.exam_question_id] ?? { ocrText: "", editedText: "" };
+      submissionText = draft.editedText?.trim() ?? "";
+      practiceHistoryContext = {
+        draft,
+        attempt: await getAttempt(attemptId, studentUserId),
+      };
     } else {
       if (!item.exam_submission_id) throw new Error("Official grading item has no submission");
       const { data: submission, error: submissionError } = await admin
@@ -343,6 +355,21 @@ async function processItem(item: ClaimedItem) {
     const result = profilePlan.result;
 
     if (job.kind === "practice_exam") {
+      if (!practiceHistoryContext || typeof questionId !== "string") {
+        throw new Error("Practice history context is incomplete");
+      }
+      const { error: historyError } = await admin.from("submissions").upsert(
+        buildPracticeHistorySubmission({
+          gradingItemId: item.id,
+          userId: studentUserId,
+          questionId,
+          draft: practiceHistoryContext.draft,
+          result,
+          attempt: practiceHistoryContext.attempt,
+        }),
+        { onConflict: "practice_grading_item_id" },
+      );
+      if (historyError) throw historyError;
       await admin.rpc("finish_usage_charge", {
         p_attempt_id: attemptId,
         p_exam_question_id: item.exam_question_id,

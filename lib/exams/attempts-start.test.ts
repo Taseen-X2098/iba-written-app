@@ -1,7 +1,7 @@
 jest.mock("server-only", () => ({}));
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { startAttempt } from "./attempts";
+import { isAttemptResumeWindowClosed, startAttempt } from "./attempts";
 import type { Exam } from "@/lib/types";
 
 jest.mock("@/lib/supabase/admin", () => ({ createAdminClient: jest.fn() }));
@@ -105,5 +105,15 @@ describe("free official exam starts", () => {
     }));
     expect(result.attempt.expires_at).toBe(expectedExpiry);
     expect(result.resumed).toBe(false);
+  });
+});
+
+describe("attempt resume windows", () => {
+  it("keeps an expired practice attempt resumable for grading selection", () => {
+    const expiresAt = "2026-09-06T09:00:00.000Z";
+    const now = Date.parse("2026-09-06T10:00:00.000Z");
+
+    expect(isAttemptResumeWindowClosed({ mode: "practice", expires_at: expiresAt }, now)).toBe(false);
+    expect(isAttemptResumeWindowClosed({ mode: "official", expires_at: expiresAt }, now)).toBe(true);
   });
 });
