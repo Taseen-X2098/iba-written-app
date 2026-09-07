@@ -9,7 +9,8 @@ import {
   reserveExamOcrOperationSchema,
   uuidSchema,
 } from "@/lib/exams/contracts";
-import { getAvailableTestSlots, requireAttemptWriter } from "@/lib/exams/attempts";
+import { requireAttemptWriter } from "@/lib/exams/attempts";
+import { requireOcrAccess } from "@/lib/ocr/access";
 import { beginExamOcrOperation } from "@/lib/ocr/exam-operations";
 
 export async function POST(
@@ -39,13 +40,7 @@ export async function POST(
     if (requestStartedAt > new Date(attempt.expires_at).getTime()) {
       throw new ApiError("ATTEMPT_EXPIRED", "The exam time has ended", 409);
     }
-    if (await getAvailableTestSlots(user.id) < 1) {
-      throw new ApiError(
-        "INSUFFICIENT_SLOTS",
-        "OCR is available only while you have at least one test slot remaining.",
-        403,
-      );
-    }
+    await requireOcrAccess({ userId: user.id, attemptId: attempt.id });
 
     const operation = await beginExamOcrOperation({
       operationId: randomUUID(),

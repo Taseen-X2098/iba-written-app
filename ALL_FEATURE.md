@@ -149,7 +149,7 @@ Camera permissions are requested on demand with a descriptive error if denied.
 ### 4.7 OCR (Optical Character Recognition)
 Uploaded JPEG or PNG images are sent to `/api/ocr`, which uses Z.ai's GLM-OCR layout-parsing endpoint to extract handwritten text.
 A mock mode (`Z_AI_MOCK=true`) returns deterministic sample text without contacting Z.ai; every other value selects the real API and requires `Z_AI_API_KEY`.
-Both paths require an authorized question context and at least one remaining test slot, but OCR itself does not consume a slot. Identical images are cached; short burst and generous daily limits apply only as user-level bulk-abuse safeguards, with no retry ceiling on an individual answer.
+Both paths require an authorized question context. OCR normally also requires at least one remaining test slot, but an active official attempt for an exam whose server-owned `is_free` flag is true is explicitly included even when the student's balance is zero. Standalone questions, paid exams, and past-exam practice remain slot-gated; OCR itself does not consume a slot. Identical images are cached; short burst and generous daily limits apply only as user-level bulk-abuse safeguards, with no retry ceiling on an individual answer.
 Extracted text is presented in an editable textarea so students can correct any OCR errors before grading.
 
 ### 4.8 Text Editing

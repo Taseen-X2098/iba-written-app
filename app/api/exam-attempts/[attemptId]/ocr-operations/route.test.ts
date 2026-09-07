@@ -1,15 +1,17 @@
 import { NextRequest } from "next/server";
 
+import { ApiError } from "@/lib/api/errors";
 import { requireApiUser } from "@/lib/auth";
-import { getAvailableTestSlots, requireAttemptWriter } from "@/lib/exams/attempts";
+import { requireAttemptWriter } from "@/lib/exams/attempts";
+import { requireOcrAccess } from "@/lib/ocr/access";
 import { beginExamOcrOperation } from "@/lib/ocr/exam-operations";
 import { POST } from "./route";
 
 jest.mock("@/lib/auth", () => ({ requireApiUser: jest.fn() }));
 jest.mock("@/lib/exams/attempts", () => ({
-  getAvailableTestSlots: jest.fn(),
   requireAttemptWriter: jest.fn(),
 }));
+jest.mock("@/lib/ocr/access", () => ({ requireOcrAccess: jest.fn() }));
 jest.mock("@/lib/ocr/exam-operations", () => ({
   beginExamOcrOperation: jest.fn(),
 }));
@@ -39,7 +41,7 @@ describe("POST exam OCR operation reservation", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.mocked(requireApiUser).mockResolvedValue({ id: USER_ID } as never);
-    jest.mocked(getAvailableTestSlots).mockResolvedValue(1);
+    jest.mocked(requireOcrAccess).mockResolvedValue();
     jest.mocked(requireAttemptWriter).mockResolvedValue({
       id: ATTEMPT_ID,
       exam_id: EXAM_ID,
@@ -77,6 +79,28 @@ describe("POST exam OCR operation reservation", () => {
       userId: USER_ID,
       writerToken: WRITER_TOKEN,
     }));
+    expect(requireOcrAccess).toHaveBeenCalledWith({
+      userId: USER_ID,
+      attemptId: ATTEMPT_ID,
+    });
+  });
+
+  it("does not create a scan barrier when the verified attempt lacks OCR entitlement", async () => {
+    jest.mocked(requireOcrAccess).mockRejectedValue(new ApiError(
+      "INSUFFICIENT_SLOTS",
+      "OCR is available only while you have at least one test slot remaining.",
+      403,
+    ));
+
+    const response = await POST(makeRequest(), {
+      params: Promise.resolve({ attemptId: ATTEMPT_ID }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      code: "INSUFFICIENT_SLOTS",
+    }));
+    expect(beginExamOcrOperation).not.toHaveBeenCalled();
   });
 
   it("does not let a new scan be reserved after the exam deadline", async () => {

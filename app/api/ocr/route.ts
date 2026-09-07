@@ -6,7 +6,7 @@ import { ApiError, apiErrorResponse } from "@/lib/api/errors";
 import { parseRequestValue } from "@/lib/api/request";
 import { getWordLimitViolation } from "@/lib/answers/word-limit";
 import { requireApiUser } from "@/lib/auth";
-import { getAvailableTestSlots, persistAttemptDraftUpdates } from "@/lib/exams/attempts";
+import { persistAttemptDraftUpdates } from "@/lib/exams/attempts";
 import { uuidSchema } from "@/lib/exams/contracts";
 import { finalizeOfficialAttempt, lockPracticeAttempt } from "@/lib/exams/finalize";
 import { resolveOcrContext } from "@/lib/ocr/context";
@@ -19,6 +19,7 @@ import {
   enforceOcrDailyProviderLimit,
   enforceOcrRateLimit,
 } from "@/lib/ocr/rate-limit";
+import { requireOcrAccess } from "@/lib/ocr/access";
 import { completeOcrRequest, reserveOcrRequest } from "@/lib/ocr/usage";
 import { extractTextWithZai, normalizeZaiOcrMarkdown, ZaiOcrError } from "@/lib/ocr/zai";
 import { validateAnswerImageEntries } from "@/lib/answers/image-validation";
@@ -50,16 +51,6 @@ export async function POST(request: Request) {
       examOperation = { id: headerOperationId, userId: user.id };
       examOperationPending = true;
     }
-    const availableSlots = await getAvailableTestSlots(user.id);
-
-    if (availableSlots < 1) {
-      throw new ApiError(
-        "INSUFFICIENT_SLOTS",
-        "OCR is available only while you have at least one test slot remaining.",
-        403,
-      );
-    }
-
     const formData = await request.formData();
     const rawReservedOperationId = formData.get("ocrOperationId");
     const reservedOperationId = rawReservedOperationId === null
@@ -87,6 +78,7 @@ export async function POST(request: Request) {
       // after it without reopening post-timeout editing.
       allowReservedOperationAfterExpiry: reservedOperationId !== null,
     });
+    await requireOcrAccess({ userId: user.id, attemptId: context.attemptId });
 
     if (
       context.attemptId

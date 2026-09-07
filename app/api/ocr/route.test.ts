@@ -1,6 +1,8 @@
 import { requireApiUser } from "@/lib/auth";
-import { getAvailableTestSlots, persistAttemptDraftUpdates } from "@/lib/exams/attempts";
+import { ApiError } from "@/lib/api/errors";
+import { persistAttemptDraftUpdates } from "@/lib/exams/attempts";
 import { finalizeOfficialAttempt, lockPracticeAttempt } from "@/lib/exams/finalize";
+import { requireOcrAccess } from "@/lib/ocr/access";
 import { resolveOcrContext } from "@/lib/ocr/context";
 import {
   beginExamOcrOperation,
@@ -14,7 +16,6 @@ import { POST } from "./route";
 
 jest.mock("@/lib/auth", () => ({ requireApiUser: jest.fn() }));
 jest.mock("@/lib/exams/attempts", () => ({
-  getAvailableTestSlots: jest.fn(),
   persistAttemptDraftUpdates: jest.fn(),
 }));
 jest.mock("@/lib/exams/finalize", () => ({
@@ -22,6 +23,7 @@ jest.mock("@/lib/exams/finalize", () => ({
   lockPracticeAttempt: jest.fn(),
 }));
 jest.mock("@/lib/ocr/context", () => ({ resolveOcrContext: jest.fn() }));
+jest.mock("@/lib/ocr/access", () => ({ requireOcrAccess: jest.fn() }));
 jest.mock("@/lib/ocr/exam-operations", () => ({
   beginExamOcrOperation: jest.fn(),
   finishExamOcrOperation: jest.fn(),
@@ -46,7 +48,7 @@ const ATTEMPT_ID = "40000000-0000-4000-8000-000000000004";
 const EXAM_QUESTION_ID = "50000000-0000-4000-8000-000000000005";
 const OCR_OPERATION_ID = "60000000-0000-4000-8000-000000000006";
 const mockedRequireUser = jest.mocked(requireApiUser);
-const mockedGetSlots = jest.mocked(getAvailableTestSlots);
+const mockedRequireOcrAccess = jest.mocked(requireOcrAccess);
 const mockedPersistDrafts = jest.mocked(persistAttemptDraftUpdates);
 const mockedFinalize = jest.mocked(finalizeOfficialAttempt);
 const mockedLockPractice = jest.mocked(lockPracticeAttempt);
@@ -96,7 +98,7 @@ describe("POST /api/ocr", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedRequireUser.mockResolvedValue({ id: USER_ID } as Awaited<ReturnType<typeof requireApiUser>>);
-    mockedGetSlots.mockResolvedValue(1);
+    mockedRequireOcrAccess.mockResolvedValue();
     mockedResolveContext.mockResolvedValue({
       contextKey: `standalone:${QUESTION_ID}:0`,
       questionId: QUESTION_ID,
@@ -163,7 +165,11 @@ describe("POST /api/ocr", () => {
 
   it("blocks OCR without consuming anything when no slot remains", async () => {
     process.env.Z_AI_MOCK = "true";
-    mockedGetSlots.mockResolvedValue(0);
+    mockedRequireOcrAccess.mockRejectedValue(new ApiError(
+      "INSUFFICIENT_SLOTS",
+      "OCR is available only while you have at least one test slot remaining.",
+      403,
+    ));
 
     const response = await POST(makeRequest());
 
@@ -171,14 +177,31 @@ describe("POST /api/ocr", () => {
     await expect(response.json()).resolves.toEqual(expect.objectContaining({
       code: "INSUFFICIENT_SLOTS",
     }));
-    expect(mockedResolveContext).not.toHaveBeenCalled();
+    expect(mockedRequireOcrAccess).toHaveBeenCalledWith({
+      userId: USER_ID,
+      attemptId: null,
+    });
     expect(mockedReserve).not.toHaveBeenCalled();
     expect(mockedExtract).not.toHaveBeenCalled();
   });
 
   it("releases an early reservation if eligibility changes before image processing", async () => {
     process.env.Z_AI_MOCK = "true";
-    mockedGetSlots.mockResolvedValue(0);
+    mockedResolveContext.mockResolvedValue({
+      contextKey: `exam:${ATTEMPT_ID}:${EXAM_QUESTION_ID}`,
+      questionId: null,
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      writerToken: "writer-token-that-is-long-enough",
+      attemptMode: "official",
+      attemptExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      questionMarks: 10,
+    });
+    mockedRequireOcrAccess.mockRejectedValue(new ApiError(
+      "INSUFFICIENT_SLOTS",
+      "OCR is available only while you have at least one test slot remaining.",
+      403,
+    ));
 
     const response = await POST(makeExamRequest());
 
@@ -188,8 +211,35 @@ describe("POST /api/ocr", () => {
       userId: USER_ID,
       success: false,
     });
-    expect(mockedResolveContext).not.toHaveBeenCalled();
+    expect(mockedRequireOcrAccess).toHaveBeenCalledWith({
+      userId: USER_ID,
+      attemptId: ATTEMPT_ID,
+    });
     expect(mockedReserve).not.toHaveBeenCalled();
+  });
+
+  it("authorizes exam OCR using the server-validated attempt context", async () => {
+    process.env.Z_AI_MOCK = "true";
+    mockedResolveContext.mockResolvedValue({
+      contextKey: `exam:${ATTEMPT_ID}:${EXAM_QUESTION_ID}`,
+      questionId: null,
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      writerToken: "writer-token-that-is-long-enough",
+      attemptMode: "official",
+      attemptExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      questionMarks: 10,
+    });
+
+    const response = await POST(makeExamRequest());
+
+    expect(response.status).toBe(200);
+    expect(mockedRequireOcrAccess).toHaveBeenCalledWith({
+      userId: USER_ID,
+      attemptId: ATTEMPT_ID,
+    });
+    expect(mockedRequireExamOperation).toHaveBeenCalled();
+    expect(mockedReserve).toHaveBeenCalled();
   });
 
   it("uses the local OCR path only when Z_AI_MOCK is exactly true", async () => {
