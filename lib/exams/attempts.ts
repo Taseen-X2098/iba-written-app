@@ -46,6 +46,17 @@ export async function getAttemptDrafts(attemptId: string) {
   return (await getRedis().hgetall<AttemptDrafts>(CacheKeys.attemptDrafts(attemptId))) ?? {};
 }
 
+export async function persistAttemptDraftUpdates(
+  attemptId: string,
+  updates: AttemptDrafts,
+) {
+  if (!Object.keys(updates).length) return;
+  const redis = getRedis();
+  const key = CacheKeys.attemptDrafts(attemptId);
+  await redis.hset(key, updates);
+  await redis.expire(key, CacheTTL.ATTEMPT);
+}
+
 export async function assertAttemptDraftWordLimits(
   attemptId: string,
   examId: string,
@@ -336,8 +347,6 @@ export async function saveAttemptDrafts(input: {
     }
   }
 
-  const redis = getRedis();
-  const key = CacheKeys.attemptDrafts(attempt.id);
   const updatedAt = new Date().toISOString();
   const updates: AttemptDrafts = {};
   for (const answer of input.answers) {
@@ -350,8 +359,7 @@ export async function saveAttemptDrafts(input: {
   // HSET merges all fields atomically under one attempt key, so overlapping
   // visibility/manual/interval saves cannot overwrite another acknowledged
   // answer with an older read-modify-write snapshot.
-  await redis.hset(key, updates);
-  await redis.expire(key, CacheTTL.ATTEMPT);
+  await persistAttemptDraftUpdates(attempt.id, updates);
   return { savedQuestionIds: ids, updatedAt };
 }
 

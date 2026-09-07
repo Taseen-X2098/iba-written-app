@@ -1,14 +1,32 @@
 import { requireApiUser } from "@/lib/auth";
-import { getAvailableTestSlots } from "@/lib/exams/attempts";
+import { getAvailableTestSlots, persistAttemptDraftUpdates } from "@/lib/exams/attempts";
+import { finalizeOfficialAttempt, lockPracticeAttempt } from "@/lib/exams/finalize";
 import { resolveOcrContext } from "@/lib/ocr/context";
+import {
+  beginExamOcrOperation,
+  finishExamOcrOperation,
+  requirePendingExamOcrOperation,
+} from "@/lib/ocr/exam-operations";
 import { enforceOcrDailyProviderLimit, enforceOcrRateLimit } from "@/lib/ocr/rate-limit";
 import { completeOcrRequest, reserveOcrRequest } from "@/lib/ocr/usage";
-import { extractTextWithZai } from "@/lib/ocr/zai";
+import { extractTextWithZai, ZaiOcrError } from "@/lib/ocr/zai";
 import { POST } from "./route";
 
 jest.mock("@/lib/auth", () => ({ requireApiUser: jest.fn() }));
-jest.mock("@/lib/exams/attempts", () => ({ getAvailableTestSlots: jest.fn() }));
+jest.mock("@/lib/exams/attempts", () => ({
+  getAvailableTestSlots: jest.fn(),
+  persistAttemptDraftUpdates: jest.fn(),
+}));
+jest.mock("@/lib/exams/finalize", () => ({
+  finalizeOfficialAttempt: jest.fn(),
+  lockPracticeAttempt: jest.fn(),
+}));
 jest.mock("@/lib/ocr/context", () => ({ resolveOcrContext: jest.fn() }));
+jest.mock("@/lib/ocr/exam-operations", () => ({
+  beginExamOcrOperation: jest.fn(),
+  finishExamOcrOperation: jest.fn(),
+  requirePendingExamOcrOperation: jest.fn(),
+}));
 jest.mock("@/lib/ocr/rate-limit", () => ({
   enforceOcrDailyProviderLimit: jest.fn(),
   enforceOcrRateLimit: jest.fn(),
@@ -24,9 +42,18 @@ jest.mock("@/lib/ocr/zai", () => {
 
 const USER_ID = "10000000-0000-0000-0000-000000000001";
 const QUESTION_ID = "20000000-0000-0000-0000-000000000002";
+const ATTEMPT_ID = "40000000-0000-4000-8000-000000000004";
+const EXAM_QUESTION_ID = "50000000-0000-4000-8000-000000000005";
+const OCR_OPERATION_ID = "60000000-0000-4000-8000-000000000006";
 const mockedRequireUser = jest.mocked(requireApiUser);
 const mockedGetSlots = jest.mocked(getAvailableTestSlots);
+const mockedPersistDrafts = jest.mocked(persistAttemptDraftUpdates);
+const mockedFinalize = jest.mocked(finalizeOfficialAttempt);
+const mockedLockPractice = jest.mocked(lockPracticeAttempt);
 const mockedResolveContext = jest.mocked(resolveOcrContext);
+const mockedBeginExamOperation = jest.mocked(beginExamOcrOperation);
+const mockedFinishExamOperation = jest.mocked(finishExamOcrOperation);
+const mockedRequireExamOperation = jest.mocked(requirePendingExamOcrOperation);
 const mockedRateLimit = jest.mocked(enforceOcrRateLimit);
 const mockedDailyLimit = jest.mocked(enforceOcrDailyProviderLimit);
 const mockedReserve = jest.mocked(reserveOcrRequest);
@@ -43,6 +70,25 @@ function makeRequest(imageCount = 1) {
   return new Request("http://localhost/api/ocr", { method: "POST", body: formData });
 }
 
+function makeExamRequest(reserved = true) {
+  const formData = new FormData();
+  formData.append("image", new File([
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    "exam answer",
+  ], "exam-answer.png", { type: "image/png" }));
+  formData.append("attemptId", ATTEMPT_ID);
+  formData.append("examQuestionId", EXAM_QUESTION_ID);
+  formData.append("writerToken", "writer-token-that-is-long-enough");
+  if (reserved) formData.append("ocrOperationId", OCR_OPERATION_ID);
+  return new Request("http://localhost/api/ocr", {
+    method: "POST",
+    body: formData,
+    ...(reserved
+      ? { headers: { "x-exam-ocr-operation-id": OCR_OPERATION_ID } }
+      : {}),
+  });
+}
+
 describe("POST /api/ocr", () => {
   const originalMock = process.env.Z_AI_MOCK;
   const originalKey = process.env.Z_AI_API_KEY;
@@ -56,6 +102,10 @@ describe("POST /api/ocr", () => {
       questionId: QUESTION_ID,
       attemptId: null,
       examQuestionId: null,
+      writerToken: null,
+      attemptMode: null,
+      attemptExpiresAt: null,
+      questionMarks: null,
     });
     mockedRateLimit.mockResolvedValue();
     mockedDailyLimit.mockResolvedValue();
@@ -66,6 +116,42 @@ describe("POST /api/ocr", () => {
       extracted_text: null,
     }));
     mockedComplete.mockResolvedValue();
+    mockedPersistDrafts.mockResolvedValue();
+    mockedBeginExamOperation.mockImplementation(async (input) => ({
+      id: input.operationId,
+      attempt_id: input.attemptId,
+      exam_question_id: input.examQuestionId,
+      user_id: input.userId,
+      status: "pending",
+      extracted_text: null,
+      started_at: new Date().toISOString(),
+      lease_expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+      completed_at: null,
+    }));
+    mockedRequireExamOperation.mockImplementation(async (input) => ({
+      id: input.operationId,
+      attempt_id: input.attemptId,
+      exam_question_id: input.examQuestionId,
+      user_id: input.userId,
+      status: "pending",
+      extracted_text: null,
+      started_at: new Date().toISOString(),
+      lease_expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+      completed_at: null,
+    }));
+    mockedFinishExamOperation.mockImplementation(async (input) => ({
+      id: "60000000-0000-4000-8000-000000000006",
+      attempt_id: ATTEMPT_ID,
+      exam_question_id: EXAM_QUESTION_ID,
+      user_id: input.userId,
+      status: input.success ? "succeeded" : "failed",
+      extracted_text: input.extractedText ?? null,
+      started_at: new Date().toISOString(),
+      lease_expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+      completed_at: new Date().toISOString(),
+    }));
+    mockedFinalize.mockResolvedValue({ alreadyFinalized: false, attempt: {} as never });
+    mockedLockPractice.mockResolvedValue({} as never);
   });
 
   afterAll(() => {
@@ -88,6 +174,22 @@ describe("POST /api/ocr", () => {
     expect(mockedResolveContext).not.toHaveBeenCalled();
     expect(mockedReserve).not.toHaveBeenCalled();
     expect(mockedExtract).not.toHaveBeenCalled();
+  });
+
+  it("releases an early reservation if eligibility changes before image processing", async () => {
+    process.env.Z_AI_MOCK = "true";
+    mockedGetSlots.mockResolvedValue(0);
+
+    const response = await POST(makeExamRequest());
+
+    expect(response.status).toBe(403);
+    expect(mockedFinishExamOperation).toHaveBeenCalledWith({
+      operationId: OCR_OPERATION_ID,
+      userId: USER_ID,
+      success: false,
+    });
+    expect(mockedResolveContext).not.toHaveBeenCalled();
+    expect(mockedReserve).not.toHaveBeenCalled();
   });
 
   it("uses the local OCR path only when Z_AI_MOCK is exactly true", async () => {
@@ -187,6 +289,81 @@ describe("POST /api/ocr", () => {
     expect(mockedReserve).toHaveBeenCalledWith(expect.objectContaining({
       contextKey: `standalone:${QUESTION_ID}:0:processor:zai:glm-ocr:v3`,
     }));
+  });
+
+  it("durably saves a last-second exam scan before triggering finalization", async () => {
+    process.env.Z_AI_MOCK = "false";
+    process.env.Z_AI_API_KEY = "zai-real-key";
+    mockedExtract.mockResolvedValue("Last-second recognized answer");
+    mockedResolveContext.mockResolvedValue({
+      contextKey: `exam:${ATTEMPT_ID}:${EXAM_QUESTION_ID}`,
+      questionId: null,
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      writerToken: "writer-token-that-is-long-enough",
+      attemptMode: "official",
+      attemptExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+      questionMarks: 10,
+    });
+
+    const response = await POST(makeExamRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      text: "Last-second recognized answer",
+      cached: false,
+      draftSaved: true,
+      completionTriggered: true,
+    });
+    expect(mockedRequireExamOperation).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: OCR_OPERATION_ID,
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+    }));
+    expect(mockedBeginExamOperation).not.toHaveBeenCalled();
+    expect(mockedPersistDrafts).toHaveBeenCalledWith(ATTEMPT_ID, {
+      [EXAM_QUESTION_ID]: expect.objectContaining({
+        ocrText: "Last-second recognized answer",
+        editedText: "Last-second recognized answer",
+      }),
+    });
+    expect(mockedFinishExamOperation).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      extractedText: "Last-second recognized answer",
+    }));
+    expect(mockedFinalize).toHaveBeenCalledWith({ attemptId: ATTEMPT_ID });
+    expect(mockedLockPractice).not.toHaveBeenCalled();
+
+    const requireOrder = mockedRequireExamOperation.mock.invocationCallOrder[0];
+    const finishOrder = mockedFinishExamOperation.mock.invocationCallOrder[0];
+    const finalizeOrder = mockedFinalize.mock.invocationCallOrder[0];
+    expect(requireOrder).toBeLessThan(finishOrder);
+    expect(finishOrder).toBeLessThan(finalizeOrder);
+  });
+
+  it("releases the finalization barrier when an exam scan fails", async () => {
+    process.env.Z_AI_MOCK = "false";
+    process.env.Z_AI_API_KEY = "zai-real-key";
+    mockedExtract.mockRejectedValue(new ZaiOcrError("Provider unavailable", 502));
+    mockedResolveContext.mockResolvedValue({
+      contextKey: `exam:${ATTEMPT_ID}:${EXAM_QUESTION_ID}`,
+      questionId: null,
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      writerToken: "writer-token-that-is-long-enough",
+      attemptMode: "official",
+      attemptExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      questionMarks: 10,
+    });
+
+    const response = await POST(makeExamRequest());
+
+    expect(response.status).toBe(502);
+    expect(mockedFinishExamOperation).toHaveBeenCalledWith(expect.objectContaining({
+      success: false,
+    }));
+    expect(mockedPersistDrafts).not.toHaveBeenCalled();
+    expect(mockedFinalize).not.toHaveBeenCalled();
   });
 
   it("strips provider HTML again before returning or storing the response", async () => {

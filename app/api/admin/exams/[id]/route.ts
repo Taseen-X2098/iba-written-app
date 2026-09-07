@@ -64,6 +64,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
         title: input.title,
         instructions: input.description,
         totalMarks: input.questions.reduce((total, question) => total + question.marks, 0),
+        startsAt: input.startsAt,
         deadline: input.endsAt,
         durationMinutes: input.timeLimitMinutes,
         isMagnusOnly: input.isMagnusOnly,

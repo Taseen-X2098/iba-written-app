@@ -27,6 +27,11 @@ export const completeAttemptSchema = z.object({
   writerToken: z.string().min(32).max(256),
 });
 
+export const reserveExamOcrOperationSchema = z.object({
+  writerToken: z.string().min(32).max(256),
+  examQuestionId: uuidSchema,
+});
+
 export const practiceSelectionSchema = z.object({
   writerToken: z.string().min(32).max(256),
   examQuestionIds: z.array(uuidSchema).max(100),

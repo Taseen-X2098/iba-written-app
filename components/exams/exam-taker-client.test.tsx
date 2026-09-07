@@ -13,6 +13,7 @@ const mockClearEncryptedRecovery = jest.fn((..._args: unknown[]) => undefined);
 const mockLoadEncryptedRecovery = jest.fn(async (..._args: unknown[]) => ({}));
 const mockSaveEncryptedRecovery = jest.fn(async (..._args: unknown[]) => undefined);
 const originalFetch = globalThis.fetch;
+const OCR_OPERATION_ID = "60000000-0000-4000-8000-000000000006";
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush }),
@@ -88,6 +89,12 @@ describe.each([
     localStorage.clear();
     const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/ocr-operations")) {
+        return {
+          ok: true,
+          json: async () => ({ operationId: OCR_OPERATION_ID }),
+        };
+      }
       if (url === "/api/ocr") {
         return {
           ok: true,
@@ -144,7 +151,17 @@ describe.each([
     });
 
     expect(await screen.findByDisplayValue("Replacement text from another exam image.")).toBeInTheDocument();
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3));
+    const calls = jest.mocked(globalThis.fetch).mock.calls;
+    const reservationIndex = calls.findIndex(([input]) => String(input).endsWith("/ocr-operations"));
+    const uploadIndex = calls.findIndex(([input]) => String(input) === "/api/ocr");
+    expect(reservationIndex).toBeGreaterThanOrEqual(0);
+    expect(reservationIndex).toBeLessThan(uploadIndex);
+    const uploadRequest = calls[uploadIndex][1];
+    expect(uploadRequest).toEqual(expect.objectContaining({
+      headers: { "x-exam-ocr-operation-id": OCR_OPERATION_ID },
+    }));
+    expect((uploadRequest?.body as FormData).get("ocrOperationId")).toBe(OCR_OPERATION_ID);
   });
 
   it("shows the question type without exposing grading instructions", () => {
@@ -306,6 +323,162 @@ describe.each([
       expect.stringContaining("/complete"),
       expect.objectContaining({ method: "POST" }),
     ));
+  });
+
+  it("waits for the early reservation and replacement OCR before finalizing", async () => {
+    let finishReservation!: (response: Response) => void;
+    let finishOcr!: (response: Response) => void;
+    jest.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/ocr-operations")) {
+        return new Promise<Response>((resolve) => {
+          finishReservation = resolve;
+        });
+      }
+      if (url === "/api/ocr") {
+        return new Promise<Response>((resolve) => {
+          finishOcr = resolve;
+        });
+      }
+      if (url.endsWith("/complete")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, alreadyCompleted: true }),
+        } as Response);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const exam = makeExam(isMagnusOnly);
+    const attempt = {
+      ...makeAttempt(exam.id),
+      expires_at: new Date(Date.now() + 100).toISOString(),
+    };
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[examQuestion]}
+        attempt={attempt}
+        writerToken="writer-token"
+        initialDrafts={{
+          [examQuestion.id]: {
+            ocrText: "The previously saved answer.",
+            editedText: "The previously saved answer.",
+            updatedAt: "2026-09-05T00:00:00.000Z",
+          },
+        }}
+      />,
+    );
+
+    const upload = screen.getByText("Upload Another Image")
+      .closest("label")
+      ?.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(upload!, {
+      target: { files: [new File(["answer"], "answer.jpg", { type: "image/jpeg" })] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Waiting for Image Upload…" })).toBeDisabled();
+    }, { timeout: 2_000 });
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/complete"),
+      expect.anything(),
+    );
+
+    await act(async () => {
+      finishReservation({
+        ok: true,
+        json: async () => ({ operationId: OCR_OPERATION_ID }),
+      } as Response);
+    });
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/ocr",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/complete"),
+      expect.anything(),
+    );
+
+    await act(async () => {
+      finishOcr({
+        ok: true,
+        json: async () => ({
+          text: "The answer recovered from the last-second scan.",
+          draftSaved: true,
+          completionTriggered: true,
+        }),
+      } as Response);
+    });
+
+    expect(await screen.findByDisplayValue("The answer recovered from the last-second scan.")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("The previously saved answer.")).not.toBeInTheDocument();
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/complete"),
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/drafts"),
+      expect.anything(),
+    );
+  });
+
+  it("never finalizes a blank answer when the last-second scan fails", async () => {
+    let failOcr!: (response: Response) => void;
+    jest.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/ocr-operations")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ operationId: OCR_OPERATION_ID }),
+        } as Response);
+      }
+      if (url === "/api/ocr") {
+        return new Promise<Response>((resolve) => {
+          failOcr = resolve;
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const exam = makeExam(isMagnusOnly);
+    const attempt = {
+      ...makeAttempt(exam.id),
+      expires_at: new Date(Date.now() + 100).toISOString(),
+    };
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[examQuestion]}
+        attempt={attempt}
+        writerToken="writer-token"
+        initialDrafts={{}}
+      />,
+    );
+
+    const upload = screen.getByText("Upload Page Photos")
+      .closest("label")
+      ?.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(upload!, {
+      target: { files: [new File(["answer"], "answer.jpg", { type: "image/jpeg" })] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Waiting for Image Upload…" })).toBeDisabled();
+    }, { timeout: 2_000 });
+
+    await act(async () => {
+      failOcr({
+        ok: false,
+        json: async () => ({ error: "OCR provider failed" }),
+      } as Response);
+    });
+
+    expect(await screen.findAllByText(/not finalized because a selected image could not be saved/i)).not.toHaveLength(0);
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/complete"),
+      expect.anything(),
+    );
   });
 });
 

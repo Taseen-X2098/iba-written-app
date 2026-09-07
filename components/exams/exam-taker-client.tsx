@@ -60,6 +60,13 @@ type PracticeSelection = {
   currentJob?: { jobId: string; status: string } | null;
 };
 
+type AttemptCompletionResponse = Partial<PracticeSelection> & {
+  success?: boolean;
+  alreadyCompleted?: boolean;
+  error?: string;
+  code?: string;
+};
+
 type JobItem = {
   exam_question_id: string;
   status: string;
@@ -314,23 +321,29 @@ export default function ExamTakerClient({
     setIsSubmitting(true);
     try {
       const uploadResults = await Promise.all([...pendingUploads.current]);
-      if (
-        uploadResults.some((uploaded) => !uploaded)
-        && Date.now() < new Date(attempt.expires_at).getTime()
-      ) {
-        throw new Error("Wait for every selected image to be saved successfully before submitting.");
+      if (uploadResults.some((uploaded) => !uploaded)) {
+        throw new Error("The exam was not finalized because a selected image could not be saved successfully.");
       }
       const saved = await saveRef.current();
-      if (!saved && Date.now() < new Date(attempt.expires_at).getTime()) {
-        throw new Error("Save the corrected answers before submitting.");
+      if (!saved) {
+        throw new Error("The exam was not finalized because the latest answer could not be saved.");
       }
-      const response = await fetch(`/api/exam-attempts/${attempt.id}/complete`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ writerToken }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Submission failed");
+      let response: Response;
+      let data: AttemptCompletionResponse;
+      while (true) {
+        response = await fetch(`/api/exam-attempts/${attempt.id}/complete`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ writerToken }),
+        });
+        data = await response.json();
+        if (response.ok) break;
+        if (data.code !== "OCR_PENDING") {
+          throw new Error(data.error ?? "Submission failed");
+        }
+        setReadOnlyReason(data.error ?? "Waiting for the last page photo to finish scanning.");
+        await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+      }
 
       if (isPractice) {
         setSelection(data as PracticeSelection);
@@ -420,17 +433,44 @@ export default function ExamTakerClient({
       [questionId]: { ...current[questionId], uploading: true, error: undefined },
     }));
     try {
+      const translation = question.questions.category === "translation";
+      let ocrOperationId: string | null = null;
+      if (!translation) {
+        const reservationResponse = await fetch(
+          `/api/exam-attempts/${attempt.id}/ocr-operations`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ writerToken, examQuestionId: questionId }),
+          },
+        );
+        const reservation = await reservationResponse.json();
+        if (!reservationResponse.ok) {
+          throw new Error(reservation.error ?? "Unable to reserve this page scan");
+        }
+        if (typeof reservation.operationId !== "string") {
+          throw new Error("The page-scan reservation was invalid");
+        }
+        ocrOperationId = reservation.operationId;
+      }
+
       const formData = new FormData();
       for (const file of selectedFiles) formData.append("image", file);
       formData.append("attemptId", attempt.id);
       formData.append("examQuestionId", questionId);
       formData.append("writerToken", writerToken);
-      const translation = question.questions.category === "translation";
+      if (ocrOperationId) formData.append("ocrOperationId", ocrOperationId);
       const response = await fetch(
         translation
           ? `/api/exam-attempts/${attempt.id}/translation-images`
           : "/api/ocr",
-        { method: "POST", body: formData },
+        {
+          method: "POST",
+          body: formData,
+          ...(ocrOperationId
+            ? { headers: { "x-exam-ocr-operation-id": ocrOperationId } }
+            : {}),
+        },
       );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? (translation ? "Image upload failed" : "OCR failed"));
@@ -458,10 +498,12 @@ export default function ExamTakerClient({
           editedText,
           uploading: false,
           editorOpen: true,
-          isDirty: true,
+          isDirty: !data.draftSaved,
         },
       }));
-      await persistEntries([[questionId, { ocrText: editedText, editedText }]]);
+      if (!data.draftSaved) {
+        await persistEntries([[questionId, { ocrText: editedText, editedText }]]);
+      }
       return true;
     } catch (error) {
       setAnswers((current) => ({

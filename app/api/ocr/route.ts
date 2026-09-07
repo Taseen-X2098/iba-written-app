@@ -3,9 +3,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { ApiError, apiErrorResponse } from "@/lib/api/errors";
+import { parseRequestValue } from "@/lib/api/request";
+import { getWordLimitViolation } from "@/lib/answers/word-limit";
 import { requireApiUser } from "@/lib/auth";
-import { getAvailableTestSlots } from "@/lib/exams/attempts";
+import { getAvailableTestSlots, persistAttemptDraftUpdates } from "@/lib/exams/attempts";
+import { uuidSchema } from "@/lib/exams/contracts";
+import { finalizeOfficialAttempt, lockPracticeAttempt } from "@/lib/exams/finalize";
 import { resolveOcrContext } from "@/lib/ocr/context";
+import {
+  beginExamOcrOperation,
+  finishExamOcrOperation,
+  requirePendingExamOcrOperation,
+} from "@/lib/ocr/exam-operations";
 import {
   enforceOcrDailyProviderLimit,
   enforceOcrRateLimit,
@@ -21,8 +30,26 @@ const MOCK_OCR_TEXT =
   "The quick brown fox jumps over the lazy dog. This is sample OCR text extracted from the uploaded image.";
 
 export async function POST(request: Request) {
+  const requestStartedAt = Date.now();
+  let examOperation: { id: string; userId: string } | null = null;
+  let examOperationPending = false;
+  let headerOperationId: string | null = null;
+
   try {
     const user = await requireApiUser();
+    const rawHeaderOperationId = request.headers.get("x-exam-ocr-operation-id");
+    if (rawHeaderOperationId) {
+      headerOperationId = parseRequestValue(
+        uuidSchema,
+        rawHeaderOperationId,
+        "A valid page-scan reservation is required",
+      );
+      // Remember the reservation before parsing the potentially large
+      // multipart body. If parsing or validation fails, the catch path can
+      // release this user's lease immediately instead of waiting for expiry.
+      examOperation = { id: headerOperationId, userId: user.id };
+      examOperationPending = true;
+    }
     const availableSlots = await getAvailableTestSlots(user.id);
 
     if (availableSlots < 1) {
@@ -34,8 +61,69 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
+    const rawReservedOperationId = formData.get("ocrOperationId");
+    const reservedOperationId = rawReservedOperationId === null
+      ? null
+      : parseRequestValue(
+        uuidSchema,
+        rawReservedOperationId,
+        "A valid page-scan reservation is required",
+      );
+    if (headerOperationId && headerOperationId !== reservedOperationId) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "The page-scan reservation does not match this upload",
+        400,
+      );
+    }
+    if (reservedOperationId && !examOperation) {
+      examOperation = { id: reservedOperationId, userId: user.id };
+      examOperationPending = true;
+    }
+
+    const context = await resolveOcrContext(formData, user.id, requestStartedAt, {
+      // The reservation endpoint already proved the operation began before
+      // the deadline. The image transfer and OCR may legitimately finish
+      // after it without reopening post-timeout editing.
+      allowReservedOperationAfterExpiry: reservedOperationId !== null,
+    });
+
+    if (
+      context.attemptId
+      && context.examQuestionId
+      && context.writerToken
+    ) {
+      if (reservedOperationId) {
+        await requirePendingExamOcrOperation({
+          operationId: reservedOperationId,
+          attemptId: context.attemptId,
+          examQuestionId: context.examQuestionId,
+          userId: user.id,
+          writerToken: context.writerToken,
+        });
+      } else {
+        // Compatibility for clients that loaded immediately before this
+        // deployment. Current clients reserve before uploading the image.
+        const operationId = randomUUID();
+        await beginExamOcrOperation({
+          operationId,
+          attemptId: context.attemptId,
+          examQuestionId: context.examQuestionId,
+          userId: user.id,
+          writerToken: context.writerToken,
+        });
+        examOperation = { id: operationId, userId: user.id };
+        examOperationPending = true;
+      }
+    } else if (reservedOperationId) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        "Page-scan reservations can only be used for an active exam question",
+        400,
+      );
+    }
+
     const images = await validateAnswerImageEntries(formData.getAll("image"));
-    const context = await resolveOcrContext(formData, user.id);
 
     const isMock = process.env.Z_AI_MOCK === "true";
     const apiKey = process.env.Z_AI_API_KEY?.trim();
@@ -131,11 +219,93 @@ export async function POST(request: Request) {
       allCached = false;
     }
 
+    const extractedText = normalizeZaiOcrMarkdown(extractedPages.join("\n\n"));
+    let draftSaved = false;
+    let completionTriggered = false;
+
+    if (examOperation && context.attemptId && context.examQuestionId) {
+      const violation = context.questionMarks === null
+        ? null
+        : getWordLimitViolation(extractedText, context.questionMarks);
+      if (violation) {
+        throw new ApiError(
+          "VALIDATION_ERROR",
+          `Scanned answer exceeds the ${violation.wordLimit}-word limit (${violation.wordCount} words).`,
+          400,
+          { examQuestionId: context.examQuestionId, ...violation },
+        );
+      }
+
+      const updatedAt = new Date().toISOString();
+      try {
+        await persistAttemptDraftUpdates(context.attemptId, {
+          [context.examQuestionId]: {
+            ocrText: extractedText,
+            editedText: extractedText,
+            updatedAt,
+          },
+        });
+        draftSaved = true;
+      } catch (error) {
+        // Postgres still stores the successful OCR result below and the
+        // finalization function can snapshot it directly, so a cache outage
+        // cannot turn this recognized answer into a blank submission.
+        console.error("Failed to mirror OCR result to the attempt draft cache:", error);
+      }
+
+      await finishExamOcrOperation({
+        operationId: examOperation.id,
+        userId: examOperation.userId,
+        success: true,
+        extractedText,
+      });
+      examOperationPending = false;
+      // The operation row is a durable, finalizer-readable copy even when the
+      // Redis mirror was temporarily unavailable.
+      draftSaved = true;
+
+      if (
+        context.attemptExpiresAt
+        && context.attemptMode
+        && Date.now() >= new Date(context.attemptExpiresAt).getTime()
+      ) {
+        try {
+          if (context.attemptMode === "official") {
+            await finalizeOfficialAttempt({ attemptId: context.attemptId });
+          } else if (context.writerToken) {
+            await lockPracticeAttempt({
+              attemptId: context.attemptId,
+              userId: user.id,
+              writerToken: context.writerToken,
+            });
+          }
+          completionTriggered = true;
+          draftSaved = true;
+        } catch (error) {
+          // Another image from the same attempt may still be running. Its
+          // request becomes the finalizer when it is the last operation to
+          // finish; the client also retries the idempotent completion call.
+          if (!(error instanceof ApiError && error.code === "OCR_PENDING")) {
+            console.error("OCR finished but automatic attempt completion failed:", error);
+          }
+        }
+      }
+    }
+
     return NextResponse.json({
-      text: normalizeZaiOcrMarkdown(extractedPages.join("\n\n")),
+      text: extractedText,
       cached: allCached,
+      ...(context.attemptId ? { draftSaved, completionTriggered } : {}),
     });
   } catch (error) {
+    if (examOperation && examOperationPending) {
+      await finishExamOcrOperation({
+        operationId: examOperation.id,
+        userId: examOperation.userId,
+        success: false,
+      }).catch(() => undefined);
+    }
+
     if (error instanceof ApiError) {
       return apiErrorResponse(error);
     }

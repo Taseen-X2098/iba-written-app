@@ -46,6 +46,9 @@ describe("admin exam creation", () => {
       p_is_magnus_only: false,
       p_is_free: true,
     }));
-    expect(deliverExamPublicationNotifications).toHaveBeenCalledTimes(1);
+    expect(deliverExamPublicationNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      startsAt: "2026-09-06T10:00:00.000Z",
+      deadline: "2026-09-06T11:00:00.000Z",
+    }));
   });
 });

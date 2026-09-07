@@ -42,6 +42,13 @@ export async function finalizeOfficialAttempt(input: {
   if (finalizeError) {
     if (finalizeError.message.includes("WRITER_REVOKED")) throw new ApiError("WRITER_REVOKED", "This writer was revoked", 409);
     if (finalizeError.message.includes("ATTEMPT_EXPIRED")) throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
+    if (finalizeError.message.includes("OCR_PENDING")) {
+      throw new ApiError(
+        "OCR_PENDING",
+        "A page photo is still being scanned. Finalization will continue automatically when it finishes.",
+        409,
+      );
+    }
     throw finalizeError;
   }
   const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData;
@@ -74,6 +81,13 @@ export async function lockPracticeAttempt(input: {
   });
   if (lockError) {
     if (lockError.message.includes("WRITER_REVOKED")) throw new ApiError("WRITER_REVOKED", "This writer was revoked", 409);
+    if (lockError.message.includes("OCR_PENDING")) {
+      throw new ApiError(
+        "OCR_PENDING",
+        "A page photo is still being scanned. Completion will continue automatically when it finishes.",
+        409,
+      );
+    }
     throw new ApiError("ATTEMPT_NOT_ACTIVE", "Practice attempt is no longer active", 409);
   }
   const attempt = (Array.isArray(attemptData) ? attemptData[0] : attemptData) as Awaited<ReturnType<typeof getAttempt>>;

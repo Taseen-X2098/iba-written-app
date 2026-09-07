@@ -40,6 +40,7 @@ describe("resolveOcrContext", () => {
   it("rejects an exam translation before any OCR provider can receive its image", async () => {
     const query = queryReturning({
       id: EXAM_QUESTION_ID,
+      marks: 10,
       questions: { category: "translation" },
     });
     jest.mocked(createAdminClient).mockResolvedValue({
@@ -55,5 +56,96 @@ describe("resolveOcrContext", () => {
       status: 409,
       message: expect.stringContaining("never sent to OCR"),
     });
+  });
+
+  it("accepts an exam upload that reached the route before the timer expired", async () => {
+    const expiresAt = Date.now() - 250;
+    jest.mocked(requireAttemptWriter).mockResolvedValue({
+      id: ATTEMPT_ID,
+      exam_id: EXAM_ID,
+      user_id: USER_ID,
+      mode: "official",
+      status: "active",
+      expires_at: new Date(expiresAt).toISOString(),
+    } as Awaited<ReturnType<typeof requireAttemptWriter>>);
+    const query = queryReturning({
+      id: EXAM_QUESTION_ID,
+      marks: 10,
+      questions: { category: "argumentative_essay" },
+    });
+    jest.mocked(createAdminClient).mockResolvedValue({
+      from: jest.fn(() => query),
+    } as unknown as Awaited<ReturnType<typeof createAdminClient>>);
+    const formData = new FormData();
+    formData.set("attemptId", ATTEMPT_ID);
+    formData.set("examQuestionId", EXAM_QUESTION_ID);
+    formData.set("writerToken", "writer-token-that-is-long-enough");
+
+    await expect(resolveOcrContext(formData, USER_ID, expiresAt - 1)).resolves.toEqual({
+      contextKey: `exam:${ATTEMPT_ID}:${EXAM_QUESTION_ID}`,
+      questionId: null,
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      writerToken: "writer-token-that-is-long-enough",
+      attemptMode: "official",
+      attemptExpiresAt: new Date(expiresAt).toISOString(),
+      questionMarks: 10,
+    });
+  });
+
+  it("rejects an exam upload whose request began after the timer expired", async () => {
+    const expiresAt = Date.now() - 250;
+    jest.mocked(requireAttemptWriter).mockResolvedValue({
+      id: ATTEMPT_ID,
+      exam_id: EXAM_ID,
+      user_id: USER_ID,
+      mode: "official",
+      status: "active",
+      expires_at: new Date(expiresAt).toISOString(),
+    } as Awaited<ReturnType<typeof requireAttemptWriter>>);
+    const formData = new FormData();
+    formData.set("attemptId", ATTEMPT_ID);
+    formData.set("examQuestionId", EXAM_QUESTION_ID);
+    formData.set("writerToken", "writer-token-that-is-long-enough");
+
+    await expect(resolveOcrContext(formData, USER_ID, expiresAt + 1)).rejects.toMatchObject({
+      code: "ATTEMPT_EXPIRED",
+      status: 409,
+    });
+    expect(createAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("accepts post-deadline image transfer only when an earlier operation was reserved", async () => {
+    const expiresAt = Date.now() - 30_000;
+    jest.mocked(requireAttemptWriter).mockResolvedValue({
+      id: ATTEMPT_ID,
+      exam_id: EXAM_ID,
+      user_id: USER_ID,
+      mode: "official",
+      status: "active",
+      expires_at: new Date(expiresAt).toISOString(),
+    } as Awaited<ReturnType<typeof requireAttemptWriter>>);
+    const query = queryReturning({
+      id: EXAM_QUESTION_ID,
+      marks: 10,
+      questions: { category: "argumentative_essay" },
+    });
+    jest.mocked(createAdminClient).mockResolvedValue({
+      from: jest.fn(() => query),
+    } as unknown as Awaited<ReturnType<typeof createAdminClient>>);
+    const formData = new FormData();
+    formData.set("attemptId", ATTEMPT_ID);
+    formData.set("examQuestionId", EXAM_QUESTION_ID);
+    formData.set("writerToken", "writer-token-that-is-long-enough");
+
+    await expect(resolveOcrContext(
+      formData,
+      USER_ID,
+      Date.now(),
+      { allowReservedOperationAfterExpiry: true },
+    )).resolves.toEqual(expect.objectContaining({
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+    }));
   });
 });

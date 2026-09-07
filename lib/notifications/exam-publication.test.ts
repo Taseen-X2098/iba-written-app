@@ -45,6 +45,7 @@ describe("exam publication notifications", () => {
       title: "Weekly Assessment",
       instructions: "Answer every question.",
       totalMarks: 30,
+      startsAt: "2026-09-06T09:00:00.000Z",
       deadline: "2026-09-06T12:00:00.000Z",
       durationMinutes: 90,
       isMagnusOnly: false,

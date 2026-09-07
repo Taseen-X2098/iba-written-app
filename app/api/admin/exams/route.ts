@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
         title: input.title,
         instructions: input.description,
         totalMarks: input.questions.reduce((total, question) => total + question.marks, 0),
+        startsAt: input.startsAt,
         deadline: input.endsAt,
         durationMinutes: input.timeLimitMinutes,
         isMagnusOnly: input.isMagnusOnly,

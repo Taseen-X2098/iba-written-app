@@ -14,6 +14,7 @@ export type PublishedExamEmailDetails = {
   title: string;
   instructions: string | null;
   totalMarks: number;
+  startsAt: string;
   deadline: string;
   durationMinutes: number;
   isMagnusOnly: boolean;
@@ -61,9 +62,10 @@ function formatDateTime(date: string) {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    hour12: true,
     timeZone: "Asia/Dhaka",
     timeZoneName: "short",
-  }).format(new Date(date));
+  }).format(new Date(date)).replace(/\b(am|pm)\b/gi, (period) => period.toUpperCase());
 }
 
 function formatDuration(minutes: number) {
@@ -285,21 +287,22 @@ export async function sendExamPublishedEmails(exam: PublishedExamEmailDetails) {
 
   try {
     const recipients = await getEligibleExamRecipients(exam.isMagnusOnly);
-    const subject = `Exam started: ${exam.title}`;
+    const subject = `Exam available: ${exam.title}`;
     const instructions = escapeHtml(exam.instructions?.trim() || "Please read each question carefully before submitting.")
       .replace(/\r?\n/g, "<br>");
     const htmlContent = (recipient: Recipient) => emailLayout({
-      preview: `${exam.title} has started. Complete it before the deadline.`,
-      title: "Your exam has started",
+      preview: `${exam.title} is available. It starts ${formatDateTime(exam.startsAt)}.`,
+      title: "A new exam is available",
       body: `<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;">Hi ${escapeHtml(recipient.name)},</p>
-<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;"><strong style="color:#15803d;">${escapeHtml(exam.title)}</strong> is now available.</p>
+<p style="color:#334155;font-size:16px;line-height:1.65;margin:0 0 16px;"><strong style="color:#15803d;">${escapeHtml(exam.title)}</strong> has been made available.</p>
 <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;color:#166534;font-size:14px;line-height:1.7;margin:20px 0 0;padding:14px 16px;">
   <strong>Instructions:</strong><br>${instructions}<br><br>
   <strong>Total marks:</strong> ${exam.totalMarks}<br>
+  <strong>Starts:</strong> ${formatDateTime(exam.startsAt)}<br>
   <strong>Deadline:</strong> ${formatDateTime(exam.deadline)}<br>
   <strong>Duration:</strong> ${formatDuration(exam.durationMinutes)}
 </div>`,
-      ctaLabel: "Start exam",
+      ctaLabel: "View exam",
       ctaUrl: `${getSiteUrl()}/exams/${exam.id}`,
     });
 

@@ -124,6 +124,7 @@ describe("Brevo account-update emails", () => {
       title: "Magnus Standard Exam",
       instructions: "Answer every question.",
       totalMarks: 30,
+      startsAt: "2026-09-20T09:00:00.000Z",
       deadline: "2026-09-20T12:30:00.000Z",
       durationMinutes: 90,
       isMagnusOnly: true,
@@ -151,7 +152,7 @@ describe("Brevo account-update emails", () => {
     expect(request.htmlContent).toContain("https://example.com/subscription");
   });
 
-  it("sends exam-start emails only to students with an active, unexpired eligible plan", async () => {
+  it("sends exam-available emails with scheduled times only to eligible students", async () => {
     const gt = jest.fn().mockResolvedValue({
       data: [
         { user_id: "eligible-student", profiles: { name: "Ayesha" } },
@@ -181,6 +182,7 @@ describe("Brevo account-update emails", () => {
       title: "Weekly Assessment 1",
       instructions: "Answer every question.",
       totalMarks: 25,
+      startsAt: "2026-09-20T09:00:00.000Z",
       deadline: "2026-09-20T12:30:00.000Z",
       durationMinutes: 90,
       isMagnusOnly: false,
@@ -194,11 +196,16 @@ describe("Brevo account-update emails", () => {
     const request = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(request).toMatchObject({
       to: [{ email: "ayesha@example.com", name: "Ayesha" }],
-      subject: "Exam started: Weekly Assessment 1",
+      subject: "Exam available: Weekly Assessment 1",
     });
+    expect(request.htmlContent).toContain("A new exam is available");
+    expect(request.htmlContent).toContain("has been made available");
+    expect(request.htmlContent).not.toContain("has started");
     expect(request.htmlContent).toContain("Total marks:</strong> 25");
-    expect(request.htmlContent).toContain("Deadline:</strong>");
+    expect(request.htmlContent).toContain("Starts:</strong> 20 September 2026 at 3:00 PM GMT+6");
+    expect(request.htmlContent).toContain("Deadline:</strong> 20 September 2026 at 6:30 PM GMT+6");
     expect(request.htmlContent).toContain("Duration:</strong> 1 hour 30 minutes");
+    expect(request.htmlContent).toContain(">View exam</a>");
     expect(request.htmlContent).not.toContain("Question 1");
   });
 

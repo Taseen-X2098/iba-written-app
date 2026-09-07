@@ -3,6 +3,7 @@ import { requireQuestionAccess } from "@/lib/auth";
 import { ApiError } from "@/lib/api/errors";
 import { requireAttemptWriter } from "@/lib/exams/attempts";
 import { createAdminClient } from "@/lib/supabase/server";
+import type { ExamAttemptMode } from "@/lib/types";
 
 const uuid = z.string().uuid();
 
@@ -11,11 +12,17 @@ export interface OcrContext {
   questionId: string | null;
   attemptId: string | null;
   examQuestionId: string | null;
+  writerToken: string | null;
+  attemptMode: ExamAttemptMode | null;
+  attemptExpiresAt: string | null;
+  questionMarks: number | null;
 }
 
 export async function resolveOcrContext(
   formData: FormData,
   userId: string,
+  requestStartedAt = Date.now(),
+  options: { allowReservedOperationAfterExpiry?: boolean } = {},
 ): Promise<OcrContext> {
   const questionId = formData.get("questionId");
   const attemptId = formData.get("attemptId");
@@ -44,6 +51,10 @@ export async function resolveOcrContext(
       questionId: parsedQuestionId.data,
       attemptId: null,
       examQuestionId: null,
+      writerToken: null,
+      attemptMode: null,
+      attemptExpiresAt: null,
+      questionMarks: null,
     };
   }
 
@@ -64,14 +75,19 @@ export async function resolveOcrContext(
   if (attempt.status !== "active") {
     throw new ApiError("ATTEMPT_NOT_ACTIVE", "The exam attempt is locked", 409);
   }
-  if (Date.now() > new Date(attempt.expires_at).getTime()) {
+  // Judge a last-second upload by when this server request began, not by how
+  // long authentication or multipart parsing happened to take.
+  if (
+    !options.allowReservedOperationAfterExpiry
+    && requestStartedAt > new Date(attempt.expires_at).getTime()
+  ) {
     throw new ApiError("ATTEMPT_EXPIRED", "The exam time has ended", 409);
   }
 
   const admin = await createAdminClient();
   const { data: examQuestion, error } = await admin
     .from("exam_questions")
-    .select("id, questions(category)")
+    .select("id, marks, questions(category)")
     .eq("id", parsed.data.examQuestionId)
     .eq("exam_id", attempt.exam_id)
     .single();
@@ -93,5 +109,9 @@ export async function resolveOcrContext(
     questionId: null,
     attemptId: attempt.id,
     examQuestionId: examQuestion.id,
+    writerToken: parsed.data.writerToken,
+    attemptMode: attempt.mode,
+    attemptExpiresAt: attempt.expires_at,
+    questionMarks: examQuestion.marks,
   };
 }

@@ -12,6 +12,7 @@ DECLARE
   v_translation uuid;
   v_eq uuid;
   v_translation_eq uuid;
+  v_ocr_operation constant uuid := '30000000-0000-0000-0000-000000000001';
   v_attempt_1 exam_attempts;
   v_attempt_2 exam_attempts;
   v_practice_1 exam_attempts;
@@ -19,6 +20,7 @@ DECLARE
   v_charge usage_charges;
   v_standalone_1 standalone_usage_charges;
   v_standalone_2 standalone_usage_charges;
+  v_previous_drafts jsonb;
   v_version integer;
   v_count integer;
 BEGIN
@@ -53,13 +55,28 @@ BEGIN
   SELECT * INTO v_attempt_2 FROM start_exam_attempt(
     v_exam, v_user_2, 'official', now() + interval '30 minutes', 'writer-2'
   );
-  PERFORM finalize_exam_attempt(v_attempt_1.id, v_user_1, 'writer-1', '{}'::jsonb);
-  PERFORM finalize_exam_attempt(
-    v_attempt_2.id,
-    v_user_2,
-    'writer-2',
-    jsonb_build_object(v_eq::text, jsonb_build_object('ocrText', '', 'editedText', 'A nonblank answer.'))
+  v_previous_drafts := jsonb_build_object(
+    v_eq::text,
+    jsonb_build_object(
+      'ocrText', 'The previously saved answer.',
+      'editedText', 'The previously saved answer.',
+      'updatedAt', now() - interval '1 minute'
+    )
   );
+  PERFORM finalize_exam_attempt(v_attempt_1.id, v_user_1, 'writer-1', '{}'::jsonb);
+  PERFORM begin_exam_ocr_operation(
+    v_ocr_operation, v_attempt_2.id, v_eq, v_user_2, 'writer-2'
+  );
+  BEGIN
+    PERFORM finalize_exam_attempt(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
+    RAISE EXCEPTION 'ASSERT: finalization overtook a pending OCR operation';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%OCR_PENDING%' THEN RAISE; END IF;
+  END;
+  PERFORM finish_exam_ocr_operation(
+    v_ocr_operation, v_user_2, true, 'A nonblank answer recovered by OCR.'
+  );
+  PERFORM finalize_exam_attempt(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
 
   SELECT count(*) INTO v_count FROM exam_submissions WHERE attempt_id = v_attempt_1.id;
   IF v_count <> 2 THEN RAISE EXCEPTION 'ASSERT: finalization did not snapshot every answer'; END IF;
@@ -68,6 +85,13 @@ BEGIN
     WHERE attempt_id = v_attempt_1.id
       AND ((grading_result #>> '{internal,total}')::numeric <> 0 OR graded_by <> 'admin')
   ) THEN RAISE EXCEPTION 'ASSERT: blanks must have explicit admin zero grades'; END IF;
+  IF (
+    SELECT edited_text
+    FROM exam_submissions
+    WHERE attempt_id = v_attempt_2.id AND question_id = v_eq
+  ) <> 'A nonblank answer recovered by OCR.' THEN
+    RAISE EXCEPTION 'ASSERT: finalization kept the previous draft instead of the replacement OCR result';
+  END IF;
 
   BEGIN
     PERFORM publish_exam_results_once(v_exam);
@@ -87,6 +111,14 @@ BEGIN
   PERFORM save_manual_exam_grade(
     (SELECT id FROM exam_submissions WHERE attempt_id = v_attempt_2.id AND question_id = v_eq),
     '{"internal":{"total":0,"max":10,"criteria":[]},"studentFeedback":{"score":"0/10","summary":"Reviewed","highlights":[]}}'::jsonb
+  );
+  PERFORM save_manual_exam_grade(
+    (SELECT id FROM exam_submissions WHERE attempt_id = v_attempt_1.id AND question_id = v_translation_eq),
+    '{"internal":{"total":0,"max":5,"criteria":[]},"studentFeedback":{"score":"0/5","summary":"Translation reviewed","highlights":[]}}'::jsonb
+  );
+  PERFORM save_manual_exam_grade(
+    (SELECT id FROM exam_submissions WHERE attempt_id = v_attempt_2.id AND question_id = v_translation_eq),
+    '{"internal":{"total":0,"max":5,"criteria":[]},"studentFeedback":{"score":"0/5","summary":"Translation reviewed","highlights":[]}}'::jsonb
   );
   SELECT publish_exam_results_once(v_exam) INTO v_version;
   IF v_version <> 1 THEN RAISE EXCEPTION 'ASSERT: first publication version must be 1'; END IF;
