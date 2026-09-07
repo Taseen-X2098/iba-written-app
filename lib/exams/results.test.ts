@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getOfficialExamResponse } from "./results";
 
 jest.mock("@/lib/supabase/server", () => ({ createClient: jest.fn() }));
+jest.mock("@/lib/supabase/admin", () => ({ createAdminClient: jest.fn() }));
 
 type QueryResult = { data: unknown; error: unknown };
 
@@ -41,10 +43,10 @@ describe("getOfficialExamResponse", () => {
       ],
       error: null,
     });
-    const from = jest.fn()
-      .mockReturnValueOnce(attemptQuery)
-      .mockReturnValueOnce(responseQuery);
+    const from = jest.fn().mockReturnValue(attemptQuery);
+    const adminFrom = jest.fn().mockReturnValue(responseQuery);
     jest.mocked(createClient).mockResolvedValue({ from } as never);
+    jest.mocked(createAdminClient).mockReturnValue({ from: adminFrom } as never);
 
     await expect(getOfficialExamResponse("exam-1", "user-1")).resolves.toEqual([
       { id: "submission-1", orderIndex: 1, prompt: "First question", answer: "First answer" },
@@ -65,6 +67,7 @@ describe("getOfficialExamResponse", () => {
     });
     const from = jest.fn().mockReturnValue(attemptQuery);
     jest.mocked(createClient).mockResolvedValue({ from } as never);
+    jest.mocked(createAdminClient).mockReturnValue({ from: jest.fn() } as never);
 
     await expect(getOfficialExamResponse("exam-1", "user-1")).resolves.toEqual([]);
     expect(from).toHaveBeenCalledTimes(1);
@@ -74,10 +77,11 @@ describe("getOfficialExamResponse", () => {
     const attemptQuery = chain({ data: null, error: null });
     attemptQuery.maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
     const responseQuery = chain({ data: [], error: null });
-    const from = jest.fn()
-      .mockReturnValueOnce(attemptQuery)
-      .mockReturnValueOnce(responseQuery);
+    const from = jest.fn().mockReturnValue(attemptQuery);
     jest.mocked(createClient).mockResolvedValue({ from } as never);
+    jest.mocked(createAdminClient).mockReturnValue({
+      from: jest.fn().mockReturnValue(responseQuery),
+    } as never);
 
     await getOfficialExamResponse("exam-1", "user-1");
 

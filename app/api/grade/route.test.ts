@@ -1,12 +1,17 @@
 import { requireApiUser, requireQuestionAccess } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { POST } from "./route";
+import { requireStandaloneQuestionNotEmbargoed } from "@/lib/exams/standalone-access";
+import { ApiError } from "@/lib/api/errors";
 
 jest.mock("@/lib/auth", () => ({
   requireApiUser: jest.fn(),
   requireQuestionAccess: jest.fn(),
 }));
 jest.mock("@/lib/supabase/server", () => ({ createAdminClient: jest.fn() }));
+jest.mock("@/lib/exams/standalone-access", () => ({
+  requireStandaloneQuestionNotEmbargoed: jest.fn(),
+}));
 
 const QUESTION_ID = "20000000-0000-4000-8000-000000000002";
 
@@ -14,7 +19,9 @@ describe("POST /api/grade safeguards", () => {
   const originalMockGrader = process.env.USE_MOCK_GRADER;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     process.env.USE_MOCK_GRADER = "true";
+    jest.mocked(requireStandaloneQuestionNotEmbargoed).mockResolvedValue();
   });
 
   afterAll(() => {
@@ -60,6 +67,34 @@ describe("POST /api/grade safeguards", () => {
       details: { wordCount: 181, wordLimit: 180 },
     }));
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not grade a standalone copy of an unreleased official exam question", async () => {
+    jest.mocked(requireApiUser).mockResolvedValue({ id: "user-1" } as Awaited<ReturnType<typeof requireApiUser>>);
+    jest.mocked(requireQuestionAccess).mockResolvedValue(undefined);
+    jest.mocked(requireStandaloneQuestionNotEmbargoed).mockRejectedValue(new ApiError(
+      "RESULTS_EMBARGOED",
+      "Official results are not published",
+      403,
+    ));
+
+    const response = await POST(new Request("http://localhost/api/grade", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        questionId: QUESTION_ID,
+        idempotencyKey: "30000000-0000-4000-8000-000000000003",
+        submissionText: "A standalone answer.",
+        ocrText: "",
+        timeTakenSeconds: 60,
+      }),
+    }) as never);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      code: "RESULTS_EMBARGOED",
+    }));
+    expect(createAdminClient).not.toHaveBeenCalled();
   });
 
   it("keeps standalone grading quota-gated when no test slot remains", async () => {

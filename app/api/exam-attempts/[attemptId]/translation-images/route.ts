@@ -9,11 +9,15 @@ import { ApiError, apiErrorResponse } from "@/lib/api/errors";
 import { requireApiUser } from "@/lib/auth";
 import { uuidSchema } from "@/lib/exams/contracts";
 import { requireAttemptWriter } from "@/lib/exams/attempts";
+import { isAttemptWithinNetworkGrace } from "@/lib/exams/timing";
 import {
+  beginTranslationImageOperation,
   getTranslationAnswerImagePreviews,
+  replaceTranslationAnswerImages,
   TRANSLATION_IMAGE_BUCKET,
 } from "@/lib/exams/translation-images";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { finishExamOcrOperation } from "@/lib/ocr/exam-operations";
 
 const writerTokenSchema = z.string().min(32).max(256);
 
@@ -34,6 +38,10 @@ export async function POST(
 ) {
   const uploadedPaths: string[] = [];
   let databaseCommitted = false;
+  let operation: { id: string; userId: string } | null = null;
+  let operationPending = false;
+  let replacementStarted = false;
+  let uploadsSafeToRemove = true;
   try {
     const user = await requireApiUser();
     const { attemptId: rawAttemptId } = await context.params;
@@ -59,7 +67,7 @@ export async function POST(
     // time ran out must still have enough time to finish transferring up to
     // two page photos. The attempt must remain active, so this does not permit
     // changing an answer after it has been finalized.
-    if (Date.now() > new Date(attempt.expires_at).getTime() + 3 * 60_000) {
+    if (!isAttemptWithinNetworkGrace(attempt.expires_at)) {
       throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
     }
 
@@ -79,12 +87,15 @@ export async function POST(
       );
     }
 
-    const { data: previousRows, error: previousError } = await admin
-      .from("translation_answer_images")
-      .select("storage_path")
-      .eq("attempt_id", attempt.id)
-      .eq("exam_question_id", examQuestion.id);
-    if (previousError) throw previousError;
+    operation = { id: randomUUID(), userId: user.id };
+    await beginTranslationImageOperation({
+      operationId: operation.id,
+      attemptId: attempt.id,
+      examQuestionId: examQuestion.id,
+      userId: user.id,
+      writerToken,
+    });
+    operationPending = true;
 
     const replacementRows = [];
     for (const [index, image] of images.entries()) {
@@ -108,24 +119,21 @@ export async function POST(
       });
     }
 
-    const { error: upsertError } = await admin
-      .from("translation_answer_images")
-      .upsert(replacementRows, { onConflict: "attempt_id,exam_question_id,page_index" });
-    if (upsertError) throw upsertError;
+    replacementStarted = true;
+    const oldPaths = await replaceTranslationAnswerImages({
+      operationId: operation.id,
+      attemptId: attempt.id,
+      examQuestionId: examQuestion.id,
+      userId: user.id,
+      writerToken,
+      rows: replacementRows.map((row) => ({
+        pageIndex: row.page_index,
+        storagePath: row.storage_path,
+      })),
+    });
     databaseCommitted = true;
-
-    const { error: excessError } = await admin
-      .from("translation_answer_images")
-      .delete()
-      .eq("attempt_id", attempt.id)
-      .eq("exam_question_id", examQuestion.id)
-      .gt("page_index", images.length);
-    if (excessError) throw excessError;
-
-    const oldPaths = (previousRows ?? [])
-      .map((row) => row.storage_path)
-      .filter((path): path is string => typeof path === "string" && !uploadedPaths.includes(path));
-    await removeUploadedObjects(oldPaths);
+    operationPending = false;
+    await removeUploadedObjects(oldPaths.filter((path) => !uploadedPaths.includes(path)));
 
     const previews = await getTranslationAnswerImagePreviews(attempt.id);
     return NextResponse.json({
@@ -133,9 +141,41 @@ export async function POST(
       images: previews[examQuestion.id] ?? [],
     });
   } catch (error) {
+    if (operation && operationPending) {
+      if (replacementStarted) {
+        try {
+          const admin = createAdminClient();
+          const { data: operationState, error: stateError } = await admin
+            .from("exam_ocr_operations")
+            .select("status")
+            .eq("id", operation.id)
+            .eq("user_id", operation.userId)
+            .maybeSingle();
+          if (stateError) {
+            uploadsSafeToRemove = false;
+          } else if (operationState?.status === "succeeded") {
+            databaseCommitted = true;
+            operationPending = false;
+          }
+        } catch {
+          // A lost RPC response has an uncertain commit outcome. Preserve the
+          // private objects rather than deleting files a committed row may use.
+          uploadsSafeToRemove = false;
+        }
+      }
+      if (operationPending && uploadsSafeToRemove) {
+        await finishExamOcrOperation({
+          operationId: operation.id,
+          userId: operation.userId,
+          success: false,
+        }).catch(() => undefined);
+      }
+    }
     // If storage succeeded but the database replacement did not, avoid
     // leaving private orphan objects behind.
-    if (uploadedPaths.length && !databaseCommitted) await removeUploadedObjects(uploadedPaths);
+    if (uploadedPaths.length && !databaseCommitted && uploadsSafeToRemove) {
+      await removeUploadedObjects(uploadedPaths);
+    }
     return apiErrorResponse(error);
   }
 }

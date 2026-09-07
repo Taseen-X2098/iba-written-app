@@ -2,17 +2,26 @@ import { NextRequest } from "next/server";
 
 import { requireApiUser } from "@/lib/auth";
 import { requireAttemptWriter } from "@/lib/exams/attempts";
-import { getTranslationAnswerImagePreviews } from "@/lib/exams/translation-images";
+import {
+  beginTranslationImageOperation,
+  getTranslationAnswerImagePreviews,
+  replaceTranslationAnswerImages,
+} from "@/lib/exams/translation-images";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { finishExamOcrOperation } from "@/lib/ocr/exam-operations";
+import { EXAM_NETWORK_GRACE_MS } from "@/lib/exams/timing";
 import { POST } from "./route";
 
 jest.mock("@/lib/auth", () => ({ requireApiUser: jest.fn() }));
 jest.mock("@/lib/exams/attempts", () => ({ requireAttemptWriter: jest.fn() }));
 jest.mock("@/lib/exams/translation-images", () => ({
   TRANSLATION_IMAGE_BUCKET: "translation-answer-images",
+  beginTranslationImageOperation: jest.fn(),
   getTranslationAnswerImagePreviews: jest.fn(),
+  replaceTranslationAnswerImages: jest.fn(),
 }));
 jest.mock("@/lib/supabase/admin", () => ({ createAdminClient: jest.fn() }));
+jest.mock("@/lib/ocr/exam-operations", () => ({ finishExamOcrOperation: jest.fn() }));
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
 const ATTEMPT_ID = "20000000-0000-4000-8000-000000000002";
@@ -49,6 +58,9 @@ describe("POST translation answer images", () => {
     jest.mocked(getTranslationAnswerImagePreviews).mockResolvedValue({
       [EXAM_QUESTION_ID]: [{ id: "image-id", pageIndex: 1, url: "https://example.test/signed" }],
     });
+    jest.mocked(beginTranslationImageOperation).mockResolvedValue({ id: "operation-id" } as never);
+    jest.mocked(replaceTranslationAnswerImages).mockResolvedValue([]);
+    jest.mocked(finishExamOcrOperation).mockResolvedValue({} as never);
   });
 
   it("stores the original page in the private human-review bucket", async () => {
@@ -73,27 +85,8 @@ describe("POST translation answer images", () => {
     examQuestionQuery.select.mockReturnValue(examQuestionQuery);
     examQuestionQuery.eq.mockReturnValue(examQuestionQuery);
 
-    const previousRowsResult = { data: [], error: null };
-    const imageQuery = {
-      select: jest.fn(),
-      eq: jest.fn(),
-      upsert: jest.fn().mockResolvedValue({ error: null }),
-      delete: jest.fn(),
-      gt: jest.fn().mockResolvedValue({ error: null }),
-      then: (onfulfilled, onrejected) => Promise.resolve(previousRowsResult).then(onfulfilled, onrejected),
-    } as {
-      select: jest.Mock;
-      eq: jest.Mock;
-      upsert: jest.Mock;
-      delete: jest.Mock;
-      gt: jest.Mock;
-    } & PromiseLike<typeof previousRowsResult>;
-    imageQuery.select.mockReturnValue(imageQuery);
-    imageQuery.eq.mockReturnValue(imageQuery);
-    imageQuery.delete.mockReturnValue(imageQuery);
-
     jest.mocked(createAdminClient).mockReturnValue({
-      from: jest.fn((table: string) => table === "exam_questions" ? examQuestionQuery : imageQuery),
+      from: jest.fn(() => examQuestionQuery),
       storage: { from: jest.fn(() => ({ upload, remove })) },
     } as unknown as ReturnType<typeof createAdminClient>);
 
@@ -109,6 +102,23 @@ describe("POST translation answer images", () => {
       expect.any(ArrayBuffer),
       expect.objectContaining({ contentType: "image/png", upsert: false }),
     );
+    expect(beginTranslationImageOperation).toHaveBeenCalledWith(expect.objectContaining({
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      userId: USER_ID,
+      writerToken: WRITER_TOKEN,
+    }));
+    expect(replaceTranslationAnswerImages).toHaveBeenCalledWith(expect.objectContaining({
+      attemptId: ATTEMPT_ID,
+      examQuestionId: EXAM_QUESTION_ID,
+      userId: USER_ID,
+      writerToken: WRITER_TOKEN,
+      rows: [{ pageIndex: 1, storagePath: expect.stringMatching(/\.png$/) }],
+    }));
+    expect(jest.mocked(beginTranslationImageOperation).mock.invocationCallOrder[0])
+      .toBeLessThan(upload.mock.invocationCallOrder[0]);
+    expect(upload.mock.invocationCallOrder[0])
+      .toBeLessThan(jest.mocked(replaceTranslationAnswerImages).mock.invocationCallOrder[0]);
   });
 
   it("rejects an image after the final network grace period", async () => {
@@ -118,7 +128,7 @@ describe("POST translation answer images", () => {
       user_id: USER_ID,
       mode: "official",
       status: "active",
-      expires_at: new Date(Date.now() - 3 * 60_000 - 1_000).toISOString(),
+      expires_at: new Date(Date.now() - EXAM_NETWORK_GRACE_MS - 1_000).toISOString(),
     } as Awaited<ReturnType<typeof requireAttemptWriter>>);
 
     const response = await POST(formRequest(), { params: Promise.resolve({ attemptId: ATTEMPT_ID }) });

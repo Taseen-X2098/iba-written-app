@@ -10,6 +10,28 @@ import {
   requireAttemptWriter,
 } from "@/lib/exams/attempts";
 
+async function getFinalizationDrafts(attemptId: string, examId: string) {
+  let cachedDrafts: Awaited<ReturnType<typeof getAttemptDrafts>> = {};
+  try {
+    cachedDrafts = await getAttemptDrafts(attemptId);
+  } catch (error) {
+    // Postgres drafts and completed OCR operations are authoritative. A cache
+    // outage must not strand an otherwise finalizable timed attempt.
+    console.error("Unable to read the exam draft resume cache during finalization:", error);
+  }
+  return assertAttemptDraftWordLimits(attemptId, examId, cachedDrafts);
+}
+
+async function clearFinalizedDraftCache(attemptId: string) {
+  try {
+    await getRedis().del(CacheKeys.attemptDrafts(attemptId));
+  } catch (error) {
+    // Finalization is already committed. Cache cleanup is best-effort and a
+    // retry will observe the idempotent finalized attempt.
+    console.error("Unable to clear the finalized exam draft cache:", error);
+  }
+}
+
 export async function finalizeOfficialAttempt(input: {
   attemptId: string;
   userId?: string;
@@ -31,13 +53,12 @@ export async function finalizeOfficialAttempt(input: {
   }
 
   const admin = await createAdminClient();
-  const redis = getRedis();
-  const drafts = await assertAttemptDraftWordLimits(attempt.id, attempt.exam_id);
-  const { data: finalizedData, error: finalizeError } = await admin.rpc("finalize_exam_attempt", {
+  const drafts = await getFinalizationDrafts(attempt.id, attempt.exam_id);
+  const { data: finalizedData, error: finalizeError } = await admin.rpc("finalize_exam_attempt_durable", {
     p_attempt_id: attempt.id,
     p_user_id: input.userId ?? null,
     p_writer_token_hash: input.writerToken ? hashWriterToken(input.writerToken) : null,
-    p_drafts: drafts,
+    p_cached_drafts: drafts,
   });
   if (finalizeError) {
     if (finalizeError.message.includes("WRITER_REVOKED")) throw new ApiError("WRITER_REVOKED", "This writer was revoked", 409);
@@ -53,7 +74,69 @@ export async function finalizeOfficialAttempt(input: {
   }
   const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData;
 
-  await redis.del(CacheKeys.attemptDrafts(attempt.id));
+  await clearFinalizedDraftCache(attempt.id);
+  return { alreadyFinalized: false, attempt: finalized };
+}
+
+/**
+ * Reconcile an expired official attempt for its authenticated owner.
+ *
+ * This intentionally accepts neither a writer token nor browser answer data.
+ * The database rechecks ownership and expiry while holding the attempt row
+ * lock, then snapshots only drafts already acknowledged by the server and
+ * durable OCR results. Answer mutation endpoints keep their existing grace
+ * deadline.
+ */
+export async function finalizeExpiredOfficialAttempt(input: {
+  attemptId: string;
+  userId: string;
+}) {
+  const attempt = await getAttempt(input.attemptId, input.userId);
+  if (attempt.mode !== "official") {
+    throw new ApiError("VALIDATION_ERROR", "This is not an official attempt", 400);
+  }
+  if (attempt.status === "finalized") {
+    return { alreadyFinalized: true, attempt };
+  }
+  if (!["active", "locked"].includes(attempt.status)) {
+    throw new ApiError("ATTEMPT_NOT_ACTIVE", "The attempt can no longer be finalized", 409);
+  }
+  if (Date.now() < new Date(attempt.expires_at).getTime()) {
+    throw new ApiError("ATTEMPT_NOT_EXPIRED", "The exam timer has not ended", 409);
+  }
+
+  const admin = createAdminClient();
+  const drafts = await getFinalizationDrafts(attempt.id, attempt.exam_id);
+  const { data: finalizedData, error: finalizeError } = await admin.rpc(
+    "finalize_expired_exam_attempt",
+    {
+      p_attempt_id: attempt.id,
+      p_user_id: input.userId,
+      p_drafts: drafts,
+    },
+  );
+  if (finalizeError) {
+    if (finalizeError.message.includes("ATTEMPT_NOT_EXPIRED")) {
+      throw new ApiError("ATTEMPT_NOT_EXPIRED", "The exam timer has not ended", 409);
+    }
+    if (finalizeError.message.includes("OCR_PENDING")) {
+      throw new ApiError(
+        "OCR_PENDING",
+        "A page photo is still being scanned. Finalization will continue automatically when it finishes.",
+        409,
+      );
+    }
+    if (
+      finalizeError.message.includes("ATTEMPT_NOT_ACTIVE")
+      || finalizeError.message.includes("INVALID_ATTEMPT_MODE")
+    ) {
+      throw new ApiError("ATTEMPT_NOT_ACTIVE", "The attempt can no longer be finalized", 409);
+    }
+    throw finalizeError;
+  }
+  const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData;
+
+  await clearFinalizedDraftCache(attempt.id);
   return { alreadyFinalized: false, attempt: finalized };
 }
 

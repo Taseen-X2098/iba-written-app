@@ -28,9 +28,11 @@ describe("owned in-progress exam records", () => {
     expect(parseOwnedInProgressExam(record(), "user-2", NOW)).toBeNull();
   });
 
-  it("rejects legacy unscoped and expired records", () => {
+  it("rejects legacy unscoped records and keeps expired official recovery bounded", () => {
     expect(parseOwnedInProgressExam(record({ userId: undefined }), "user-1", NOW)).toBeNull();
-    expect(parseOwnedInProgressExam(record({ expiresAt: "2026-08-29T11:50:00.000Z" }), "user-1", NOW)).toBeNull();
+    expect(parseOwnedInProgressExam(record({ expiresAt: "2026-08-29T11:50:00.000Z" }), "user-1", NOW))
+      .toEqual(expect.objectContaining({ attemptId: "attempt-1" }));
+    expect(parseOwnedInProgressExam(record({ expiresAt: "2026-08-25T11:50:00.000Z" }), "user-1", NOW)).toBeNull();
   });
 
   it("keeps an expired practice workflow active while grading is pending", () => {

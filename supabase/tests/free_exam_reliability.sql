@@ -9,6 +9,7 @@ DECLARE
   v_participant constant uuid := '41000000-0000-4000-8000-000000000003';
   v_question constant uuid := '42000000-0000-4000-8000-000000000001';
   v_default_exam constant uuid := '43000000-0000-4000-8000-000000000001';
+  v_direct_free_exam constant uuid := '43000000-0000-4000-8000-000000000002';
   v_free_exam uuid;
   v_starts_at timestamptz := now() - interval '2 hours';
   v_ends_at timestamptz := now() - interval '1 hour';
@@ -19,6 +20,40 @@ BEGIN
     (v_participant, 'free-exam-participant@example.com', '{"name":"Participant","institute":"Institute B"}');
   UPDATE public.profiles SET is_admin = true WHERE id = v_admin;
   PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+
+  -- Free Exams are open to every signed-in student, but publication
+  -- notifications are deliberately reserved for active paid Exam plans.
+  INSERT INTO public.subscriptions(
+    user_id, plan_type, tests_remaining, extra_tests_purchased, expires_at
+  ) VALUES (
+    v_participant, 'plan_2', 300, 0, now() + interval '30 days'
+  );
+
+  -- Exercise the INSERT branch of the publication trigger as well as the
+  -- normal draft-to-published UPDATE path below.
+  INSERT INTO public.exams(
+    id, title, time_limit_minutes, starts_at, ends_at,
+    is_published, is_free, created_by
+  ) VALUES (
+    v_direct_free_exam, 'Directly Published Open Assessment', 30,
+    v_starts_at, v_ends_at, true, true, v_admin
+  );
+  IF NOT EXISTS (
+    SELECT 1 FROM public.notifications
+    WHERE user_id = v_participant
+      AND exam_id = v_direct_free_exam
+      AND type = 'exam_available'
+  ) THEN
+    RAISE EXCEPTION 'ASSERT: directly published free exam did not notify paid Exam-plan user';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.notifications
+    WHERE user_id = v_viewer
+      AND exam_id = v_direct_free_exam
+      AND type = 'exam_available'
+  ) THEN
+    RAISE EXCEPTION 'ASSERT: directly published free exam notified free user';
+  END IF;
 
   INSERT INTO public.questions(id, category, marks, difficulty, prompt, created_by)
   VALUES (v_question, 'basic_paragraph', 10, 'medium', 'Write one paragraph.', v_admin);
@@ -110,6 +145,24 @@ BEGIN
   END IF;
   IF NOT public.can_access_exam_audience(v_free_exam, v_viewer) THEN
     RAISE EXCEPTION 'ASSERT: signed-in viewer cannot discover free exam';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.notifications
+    WHERE user_id = v_participant
+      AND exam_id = v_free_exam
+      AND type = 'exam_available'
+  ) THEN
+    RAISE EXCEPTION 'ASSERT: paid Exam-plan user did not receive free-exam publication notification';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.notifications
+    WHERE user_id = v_viewer
+      AND exam_id = v_free_exam
+      AND type = 'exam_available'
+  ) THEN
+    RAISE EXCEPTION 'ASSERT: free user received a free-exam publication notification';
   END IF;
 
   BEGIN

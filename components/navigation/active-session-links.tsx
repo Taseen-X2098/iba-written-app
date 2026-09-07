@@ -41,6 +41,8 @@ export function ActiveSessionSidenavLinks({
                 ? `${session.timedOut ? "Time Up · " : ""}Grading`
                 : session.type === "exam" && session.isPractice && session.phase === "awaiting_grading"
                   ? `${session.timedOut ? "Time Up · " : ""}Choose Grading`
+                  : session.type === "exam" && !session.isPractice && session.timedOut
+                    ? "Time Up · Finalize Exam"
                   : `Active ${session.type === "exam" ? session.isPractice ? "Practice Exam" : "Exam" : "Test"}`}
             </span>
             <span className="block truncate">{session.title}</span>

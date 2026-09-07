@@ -1,3 +1,8 @@
+import {
+  EXAM_NETWORK_GRACE_MS,
+  EXPIRED_OFFICIAL_ATTEMPT_RECOVERY_MS,
+} from "@/lib/exams/timing";
+
 export const IN_PROGRESS_EXAM_KEY = "in_progress_exam";
 export const IN_PROGRESS_EXAM_KEY_PREFIX = `${IN_PROGRESS_EXAM_KEY}:`;
 export const IN_PROGRESS_EXAM_UPDATED_EVENT = "in_progress_exam_updated";
@@ -25,6 +30,23 @@ export function inProgressExamStorageKey(attemptId: string) {
   return `${IN_PROGRESS_EXAM_KEY_PREFIX}${encodeURIComponent(attemptId)}`;
 }
 
+export function examAttemptSessionKey(
+  userId: string,
+  examId: string,
+  mode: "official" | "practice",
+) {
+  return `${EXAM_SESSION_PREFIX}${userId}:${examId}:${mode}`;
+}
+
+export function clearExamAttemptSession(
+  storage: Pick<Storage, "removeItem">,
+  userId: string,
+  examId: string,
+  mode: "official" | "practice",
+) {
+  storage.removeItem(examAttemptSessionKey(userId, examId, mode));
+}
+
 export function isInProgressExamStorageKey(key: string | null) {
   return key === null
     || key === IN_PROGRESS_EXAM_KEY
@@ -48,8 +70,12 @@ export function parseOwnedInProgressExam(
     // until grading reaches a terminal state. The exam page removes the record
     // when grading completes or is cancelled.
     const isPostTimerPractice = value.isPractice === true && phase !== "taking";
-    const isActive = isPostTimerPractice || (Number.isFinite(expiresAt)
-      ? now <= expiresAt + 3 * 60_000
+    const isExpiredOfficialRecoverable = value.isPractice === false
+      && phase === "taking"
+      && Number.isFinite(expiresAt)
+      && now <= expiresAt + EXPIRED_OFFICIAL_ATTEMPT_RECOVERY_MS;
+    const isActive = isPostTimerPractice || isExpiredOfficialRecoverable || (Number.isFinite(expiresAt)
+      ? now <= expiresAt + EXAM_NETWORK_GRACE_MS
       : Number.isFinite(lastUpdatedAt) && now - lastUpdatedAt <= 60 * 60_000);
     if (
       value.userId !== userId

@@ -13,6 +13,8 @@ DECLARE
   v_eq uuid;
   v_translation_eq uuid;
   v_ocr_operation constant uuid := '30000000-0000-0000-0000-000000000001';
+  v_translation_operation constant uuid := '30000000-0000-0000-0000-000000000002';
+  v_rejected_translation_operation constant uuid := '30000000-0000-0000-0000-000000000003';
   v_attempt_1 exam_attempts;
   v_attempt_2 exam_attempts;
   v_practice_1 exam_attempts;
@@ -63,12 +65,36 @@ BEGIN
       'updatedAt', now() - interval '1 minute'
     )
   );
-  PERFORM finalize_exam_attempt(v_attempt_1.id, v_user_1, 'writer-1', '{}'::jsonb);
+  PERFORM save_exam_attempt_drafts(
+    v_attempt_2.id,
+    v_user_2,
+    'writer-2',
+    v_previous_drafts
+  );
+  BEGIN
+    PERFORM finalize_expired_exam_attempt(v_attempt_2.id, v_user_2, '{}'::jsonb);
+    RAISE EXCEPTION 'ASSERT: owner reconciliation finalized an unexpired attempt';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%ATTEMPT_NOT_EXPIRED%' THEN RAISE; END IF;
+  END;
+  UPDATE exam_attempts
+  SET started_at = now() - interval '1 hour',
+      expires_at = now() - interval '1 second'
+  WHERE id = v_attempt_1.id;
+  BEGIN
+    PERFORM finalize_expired_exam_attempt(v_attempt_1.id, v_user_2, '{}'::jsonb);
+    RAISE EXCEPTION 'ASSERT: another user finalized an expired attempt';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%ATTEMPT_NOT_ACTIVE%' THEN RAISE; END IF;
+  END;
+  PERFORM finalize_expired_exam_attempt(v_attempt_1.id, v_user_1, '{}'::jsonb);
+  -- Owner reconciliation is safe to retry after a lost response.
+  PERFORM finalize_expired_exam_attempt(v_attempt_1.id, v_user_1, '{}'::jsonb);
   PERFORM begin_exam_ocr_operation(
     v_ocr_operation, v_attempt_2.id, v_eq, v_user_2, 'writer-2'
   );
   BEGIN
-    PERFORM finalize_exam_attempt(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
+    PERFORM finalize_exam_attempt_durable(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
     RAISE EXCEPTION 'ASSERT: finalization overtook a pending OCR operation';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE '%OCR_PENDING%' THEN RAISE; END IF;
@@ -76,7 +102,41 @@ BEGIN
   PERFORM finish_exam_ocr_operation(
     v_ocr_operation, v_user_2, true, 'A nonblank answer recovered by OCR.'
   );
-  PERFORM finalize_exam_attempt(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
+  PERFORM begin_translation_image_operation(
+    v_translation_operation,
+    v_attempt_2.id,
+    v_translation_eq,
+    v_user_2,
+    'writer-2'
+  );
+  BEGIN
+    PERFORM finalize_exam_attempt_durable(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
+    RAISE EXCEPTION 'ASSERT: finalization overtook a translation image upload';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%OCR_PENDING%' THEN RAISE; END IF;
+  END;
+  PERFORM replace_translation_answer_images(
+    v_translation_operation,
+    v_attempt_2.id,
+    v_translation_eq,
+    v_user_2,
+    'writer-2',
+    '[{"page_index":1,"storage_path":"reliability/translation-page.png"}]'::jsonb
+  );
+  PERFORM finalize_exam_attempt_durable(v_attempt_2.id, v_user_2, 'writer-2', v_previous_drafts);
+
+  BEGIN
+    PERFORM begin_translation_image_operation(
+      v_rejected_translation_operation,
+      v_attempt_2.id,
+      v_translation_eq,
+      v_user_2,
+      'writer-2'
+    );
+    RAISE EXCEPTION 'ASSERT: finalized translation images remained mutable';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%ATTEMPT_NOT_ACTIVE%' THEN RAISE; END IF;
+  END;
 
   SELECT count(*) INTO v_count FROM exam_submissions WHERE attempt_id = v_attempt_1.id;
   IF v_count <> 2 THEN RAISE EXCEPTION 'ASSERT: finalization did not snapshot every answer'; END IF;
@@ -91,6 +151,17 @@ BEGIN
     WHERE attempt_id = v_attempt_2.id AND question_id = v_eq
   ) <> 'A nonblank answer recovered by OCR.' THEN
     RAISE EXCEPTION 'ASSERT: finalization kept the previous draft instead of the replacement OCR result';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM translation_answer_images
+    WHERE attempt_id = v_attempt_2.id
+      AND exam_question_id = v_translation_eq
+      AND user_id = v_user_2
+      AND page_index = 1
+      AND storage_path = 'reliability/translation-page.png'
+  ) THEN
+    RAISE EXCEPTION 'ASSERT: atomic translation image replacement was not persisted';
   END IF;
 
   BEGIN

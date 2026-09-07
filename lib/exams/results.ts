@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getRedis, CacheKeys, CacheTTL } from "@/lib/redis";
 import { ApiError } from "@/lib/api/errors";
 import type { Highlight } from "@/lib/types";
@@ -34,6 +35,7 @@ export async function getOfficialExamResponse(
   userId: string,
 ): Promise<OfficialExamResponseDetail[]> {
   const supabase = await createClient();
+  const admin = createAdminClient();
   const { data: officialAttempt, error: attemptError } = await supabase
     .from("exam_attempts")
     .select("id, status")
@@ -46,7 +48,7 @@ export async function getOfficialExamResponse(
   // Never expose drafts from an active or locked attempt.
   if (officialAttempt && officialAttempt.status !== "finalized") return [];
 
-  let responseQuery = supabase
+  let responseQuery = admin
     .from("exam_submissions")
     .select("id, edited_text, exam_questions(order_index, questions(prompt))")
     .eq("exam_id", examId)
@@ -70,6 +72,7 @@ export async function getOfficialExamResponse(
 
 export async function getPublishedExamResults(examId: string, userId: string, page: number) {
   const supabase = await createClient();
+  const admin = createAdminClient();
   const { data: exam, error: examError } = await supabase
     .from("exams")
     .select("id, title, ends_at, results_published, results_version")
@@ -137,7 +140,7 @@ export async function getPublishedExamResults(examId: string, userId: string, pa
     .eq("mode", "official")
     .eq("status", "finalized")
     .maybeSingle();
-  let detailsQuery = supabase
+  let detailsQuery = admin
     .from("exam_submissions")
     .select("id, edited_text, grading_result, question_id, exam_questions(marks, order_index, questions(prompt, category))")
     .eq("exam_id", examId)

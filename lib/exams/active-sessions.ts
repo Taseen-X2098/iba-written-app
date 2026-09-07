@@ -35,7 +35,7 @@ export function listActiveSessionLinks(
     isPractice: record.isPractice,
     phase: record.phase,
     gradingJobId: record.gradingJobId,
-    timedOut: record.isPractice && Date.parse(record.expiresAt) <= now,
+    timedOut: Date.parse(record.expiresAt) <= now,
     lastUpdatedAt: record.lastUpdatedAt,
   }));
   const tests: ActiveSessionLink[] = listStandaloneSessions(storage, now).map((record) => ({

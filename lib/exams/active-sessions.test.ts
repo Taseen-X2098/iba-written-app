@@ -71,3 +71,23 @@ it("lists an expired practice exam until its grading workflow ends", () => {
     expect.objectContaining({ key: "exam:attempt-1", phase: "grading", gradingJobId: "job-1", timedOut: true }),
   ]);
 });
+
+it("lists an expired official attempt as timed out so it can be finalized", () => {
+  const storage = memoryStorage();
+  const examRecord = parseOwnedInProgressExam(JSON.stringify({
+    userId: "student-1",
+    examId: "exam-1",
+    attemptId: "attempt-1",
+    title: "Weekly Exam",
+    isPractice: false,
+    phase: "taking",
+    expiresAt: new Date(NOW - 10 * 60_000).toISOString(),
+    lastUpdatedAt: NOW - 10 * 60_000,
+  }), "student-1", NOW)!;
+
+  writeInProgressExam(storage, examRecord);
+
+  expect(listActiveSessionLinks(storage, "student-1", NOW)).toEqual([
+    expect.objectContaining({ key: "exam:attempt-1", timedOut: true }),
+  ]);
+});

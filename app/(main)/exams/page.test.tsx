@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { createClient } from "@/lib/supabase/server";
 import { getMainUserContext } from "@/lib/main-user-context";
 import StudentExamsPage from "./page";
@@ -32,6 +32,46 @@ function exam(overrides: Partial<Exam> & Pick<Exam, "id" | "title">): Exam {
     updated_at: "2026-09-01T00:00:00.000Z",
     ...rest,
   };
+}
+
+type AttemptSummary = {
+  id: string;
+  exam_id: string;
+  status: "active" | "locked" | "finalized";
+  expires_at: string;
+};
+
+function mockStudentPage(
+  exams: Exam[],
+  attempts: AttemptSummary[] = [],
+  planType: "plan_1" | "plan_2" | "plan_3" | null = null,
+) {
+  const from = jest.fn((table: string) => {
+    if (table === "exams") {
+      return {
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            order: jest.fn().mockResolvedValue({ data: exams, error: null }),
+          })),
+        })),
+      };
+    }
+    if (table === "exam_attempts") {
+      return {
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            eq: jest.fn().mockResolvedValue({ data: attempts, error: null }),
+          })),
+        })),
+      };
+    }
+    throw new Error(`Unexpected table: ${table}`);
+  });
+  jest.mocked(createClient).mockResolvedValue({ from } as never);
+  jest.mocked(getMainUserContext).mockResolvedValue({
+    user: { id: "free-user" },
+    subscription: planType ? { plan_type: planType } : null,
+  } as never);
 }
 
 describe("student free exam access", () => {
@@ -100,5 +140,83 @@ describe("student free exam access", () => {
     expect(within(pastExamLock).getByRole("link", { name: /View Plans/ })).toHaveAttribute("href", "/subscription");
     expect(screen.queryByText("Published Assessment")).not.toBeInTheDocument();
     expect(screen.queryByText(/View Past Exams/)).not.toBeInTheDocument();
+  });
+
+  it("uses a half-open live window and moves an exam to past at its exact end", async () => {
+    mockStudentPage([
+      exam({
+        id: "just-ended",
+        title: "Just Ended Free Exam",
+        is_free: true,
+        ends_at: NOW,
+      }),
+    ]);
+
+    render(await StudentExamsPage());
+
+    expect(screen.queryByText("Live Now")).not.toBeInTheDocument();
+    expect(screen.getByText("No weekly exams are currently scheduled.")).toBeVisible();
+    expect(screen.getByText("View Past Exams (1)")).toBeVisible();
+    fireEvent.click(screen.getByText("View Past Exams (1)"));
+    expect(screen.getByText("Just Ended Free Exam")).toBeVisible();
+  });
+
+  it("shows past free exams and owned responses without unlocking paid practice", async () => {
+    const pastWindow = {
+      starts_at: "2026-09-05T09:00:00.000Z",
+      ends_at: "2026-09-05T11:00:00.000Z",
+      results_published: true,
+    };
+    mockStudentPage(
+      [
+        exam({ id: "past-free", title: "Past Free Exam", is_free: true, ...pastWindow }),
+        exam({ id: "past-owned", title: "My Previous Paid Exam", ...pastWindow }),
+        exam({ id: "past-other", title: "Unowned Paid Exam", ...pastWindow }),
+      ],
+      [{
+        id: "attempt-owned",
+        exam_id: "past-owned",
+        status: "finalized",
+        expires_at: "2026-09-05T10:00:00.000Z",
+      }],
+    );
+
+    render(await StudentExamsPage());
+    fireEvent.click(screen.getByText("View Past Exams (2)"));
+
+    expect(screen.getByText("Past Free Exam")).toBeVisible();
+    expect(screen.getByText("My Previous Paid Exam")).toBeVisible();
+    expect(screen.queryByText("Unowned Paid Exam")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /My Response & Results/i })).toHaveAttribute(
+      "href",
+      "/exams/past-owned/results#my-response",
+    );
+    expect(screen.queryByRole("link", { name: /Practice Exam/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Practice requires subscription/i)).toHaveLength(2);
+  });
+
+  it("keeps an owned unfinished past attempt available for finalization", async () => {
+    mockStudentPage(
+      [exam({
+        id: "past-owned",
+        title: "Unfinished Exam",
+        starts_at: "2026-09-05T09:00:00.000Z",
+        ends_at: "2026-09-05T11:00:00.000Z",
+      })],
+      [{
+        id: "attempt-active",
+        exam_id: "past-owned",
+        status: "active",
+        expires_at: "2026-09-05T11:00:00.000Z",
+      }],
+    );
+
+    render(await StudentExamsPage());
+    fireEvent.click(screen.getByText("View Past Exams (1)"));
+
+    expect(screen.getByRole("link", { name: /Finalize Exam/i })).toHaveAttribute(
+      "href",
+      "/exams/past-owned",
+    );
   });
 });

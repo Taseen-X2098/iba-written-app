@@ -12,6 +12,7 @@ import type {
   ExamAttempt,
   ExamAttemptMode,
 } from "@/lib/types";
+import { isAttemptWithinNetworkGrace } from "@/lib/exams/timing";
 
 const WRITER_TOKEN_BYTES = 32;
 
@@ -39,7 +40,7 @@ export function isAttemptResumeWindowClosed(
   now = Date.now(),
 ) {
   return attempt.mode === "official"
-    && now > new Date(attempt.expires_at).getTime() + 3 * 60_000;
+    && !isAttemptWithinNetworkGrace(attempt.expires_at, now);
 }
 
 export async function getAttemptDrafts(attemptId: string) {
@@ -303,7 +304,7 @@ export async function saveAttemptDrafts(input: {
   if (attempt.status !== "active") {
     throw new ApiError("ATTEMPT_NOT_ACTIVE", "The attempt is locked", 409);
   }
-  if (Date.now() > new Date(attempt.expires_at).getTime() + 3 * 60_000) {
+  if (isAttemptResumeWindowClosed(attempt)) {
     throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
   }
 
@@ -356,9 +357,31 @@ export async function saveAttemptDrafts(input: {
       updatedAt,
     };
   }
-  // HSET merges all fields atomically under one attempt key, so overlapping
-  // visibility/manual/interval saves cannot overwrite another acknowledged
-  // answer with an older read-modify-write snapshot.
+  const { error: durableSaveError } = await admin.rpc("save_exam_attempt_drafts", {
+    p_attempt_id: attempt.id,
+    p_user_id: input.userId,
+    p_writer_token_hash: hashWriterToken(input.writerToken),
+    p_updates: updates,
+  });
+  if (durableSaveError) {
+    if (durableSaveError.message.includes("WRITER_REVOKED")) {
+      throw new ApiError(
+        "WRITER_REVOKED",
+        "This session is read-only because the exam was taken over on another device.",
+        409,
+      );
+    }
+    if (durableSaveError.message.includes("ATTEMPT_EXPIRED")) {
+      throw new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
+    }
+    if (durableSaveError.message.includes("ATTEMPT_NOT_ACTIVE")) {
+      throw new ApiError("ATTEMPT_NOT_ACTIVE", "The attempt is locked", 409);
+    }
+    throw durableSaveError;
+  }
+  // Postgres is the durable source and serializes this save with finalization.
+  // HSET remains the fast resume mirror and merges question fields atomically,
+  // so visibility/manual/interval saves do not overwrite unrelated answers.
   await persistAttemptDraftUpdates(attempt.id, updates);
   return { savedQuestionIds: ids, updatedAt };
 }

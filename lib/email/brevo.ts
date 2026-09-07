@@ -189,11 +189,26 @@ function profileName(profile: unknown) {
   return "there";
 }
 
+function profileIsAdmin(profile: unknown) {
+  if (profile && typeof profile === "object" && "is_admin" in profile) {
+    return profile.is_admin === true;
+  }
+  if (Array.isArray(profile)) {
+    return profile.some((item) => (
+      item
+      && typeof item === "object"
+      && "is_admin" in item
+      && item.is_admin === true
+    ));
+  }
+  return false;
+}
+
 async function getEligibleExamRecipients(isMagnusOnly: boolean) {
   const supabase = await createAdminClient();
   const { data: subscriptions, error: subscriptionsError } = await supabase
     .from("subscriptions")
-    .select("user_id, profiles(name)")
+    .select("user_id, profiles(name, is_admin)")
     .eq("is_active", true)
     .in("plan_type", ["plan_2", "plan_3"])
     .gt("expires_at", new Date().toISOString());
@@ -202,6 +217,7 @@ async function getEligibleExamRecipients(isMagnusOnly: boolean) {
 
   const namesByUserId = new Map<string, string>();
   for (const subscription of subscriptions ?? []) {
+    if (profileIsAdmin(subscription.profiles)) continue;
     namesByUserId.set(subscription.user_id, profileName(subscription.profiles));
   }
   if (namesByUserId.size === 0) return [] as Recipient[];

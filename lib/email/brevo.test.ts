@@ -157,6 +157,7 @@ describe("Brevo account-update emails", () => {
       data: [
         { user_id: "eligible-student", profiles: { name: "Ayesha" } },
         { user_id: "eligible-student", profiles: { name: "Ayesha" } },
+        { user_id: "paid-admin", profiles: { name: "Admin", is_admin: true } },
       ],
       error: null,
     });
@@ -168,6 +169,7 @@ describe("Brevo account-update emails", () => {
         users: [
           { id: "eligible-student", email: "ayesha@example.com" },
           { id: "plan-one-student", email: "other@example.com" },
+          { id: "paid-admin", email: "admin@example.com" },
         ],
       },
       error: null,

@@ -15,6 +15,7 @@ import { wakeGradingWorker } from "@/lib/grading/jobs";
 import { getWordLimitViolation } from "@/lib/answers/word-limit";
 import { parseJsonRequest } from "@/lib/api/request";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { requireStandaloneQuestionNotEmbargoed } from "@/lib/exams/standalone-access";
 
 const schema = z.object({
   questionId: z.string().uuid(),
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
       message: "Too many grading requests. Wait a minute before trying again.",
     });
     await requireQuestionAccess(input.questionId);
+    await requireStandaloneQuestionNotEmbargoed(input.questionId);
     const admin = await createAdminClient();
     const { data: question, error: questionError } = await admin
       .from("questions")

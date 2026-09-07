@@ -1,4 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ApiError } from "@/lib/api/errors";
+import { hashWriterToken } from "@/lib/exams/attempts";
 import type { TranslationAnswerImagePreview } from "@/lib/types";
 
 export const TRANSLATION_IMAGE_BUCKET = "translation-answer-images";
@@ -10,6 +12,82 @@ type TranslationAnswerImageRow = {
   page_index: number;
   storage_path: string;
 };
+
+function translationOperationError(error: { message: string }) {
+  if (error.message.includes("WRITER_REVOKED")) {
+    return new ApiError(
+      "WRITER_REVOKED",
+      "This session is read-only because the exam was taken over on another device.",
+      409,
+    );
+  }
+  if (error.message.includes("ATTEMPT_EXPIRED")) {
+    return new ApiError("ATTEMPT_EXPIRED", "The final network grace period has ended", 409);
+  }
+  if (error.message.includes("ATTEMPT_NOT_ACTIVE")) {
+    return new ApiError("ATTEMPT_NOT_ACTIVE", "The exam attempt is locked", 409);
+  }
+  if (error.message.includes("INVALID_TRANSLATION_QUESTION")) {
+    return new ApiError(
+      "VALIDATION_ERROR",
+      "Only translation-answer photos can use this human-grading upload route.",
+      400,
+    );
+  }
+  if (error.message.includes("OCR_OPERATION_NOT_ACTIVE")) {
+    return new ApiError(
+      "CONFLICT",
+      "This page-photo upload is no longer active. Please select the images again.",
+      409,
+    );
+  }
+  return error;
+}
+
+export async function beginTranslationImageOperation(input: {
+  operationId: string;
+  attemptId: string;
+  examQuestionId: string;
+  userId: string;
+  writerToken: string;
+}) {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("begin_translation_image_operation", {
+    p_operation_id: input.operationId,
+    p_attempt_id: input.attemptId,
+    p_exam_question_id: input.examQuestionId,
+    p_user_id: input.userId,
+    p_writer_token_hash: hashWriterToken(input.writerToken),
+  });
+  if (error) throw translationOperationError(error);
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function replaceTranslationAnswerImages(input: {
+  operationId: string;
+  attemptId: string;
+  examQuestionId: string;
+  userId: string;
+  writerToken: string;
+  rows: Array<{ pageIndex: number; storagePath: string }>;
+}) {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("replace_translation_answer_images", {
+    p_operation_id: input.operationId,
+    p_attempt_id: input.attemptId,
+    p_exam_question_id: input.examQuestionId,
+    p_user_id: input.userId,
+    p_writer_token_hash: hashWriterToken(input.writerToken),
+    p_rows: input.rows.map((row) => ({
+      page_index: row.pageIndex,
+      storage_path: row.storagePath,
+    })),
+  });
+  if (error) throw translationOperationError(error);
+  return Array.isArray(data)
+    ? data.filter((path): path is string => typeof path === "string")
+    : [];
+}
 
 export async function getTranslationAnswerImagePreviews(attemptId: string) {
   const admin = createAdminClient();

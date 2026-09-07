@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ExamStartGate from "@/components/exams/exam-start-gate";
+import AutoFinalizer from "@/components/exams/auto-finalizer";
 import type { Exam, ExamAttemptMode } from "@/lib/types";
 import { getMainUserContext } from "@/lib/main-user-context";
 import { isExamPlan } from "@/lib/exams/access";
+import { isAttemptWithinNetworkGrace, isExamWindowOpen } from "@/lib/exams/timing";
 
 export default async function TakeExamPage({
   params,
@@ -33,25 +35,40 @@ export default async function TakeExamPage({
     .single();
   if (error || !exam) redirect("/exams");
 
-  const now = Date.now();
+  const now = new Date().getTime();
   let hasResumableAttempt = false;
   if (mode === "official") {
-    const { data: resumable } = await supabase
+    const { data: officialAttempt } = await supabase
       .from("exam_attempts")
       .select("id, status, expires_at")
       .eq("exam_id", id)
       .eq("user_id", user.id)
       .eq("mode", "official")
-      .in("status", ["active", "locked"])
       .maybeSingle();
-    hasResumableAttempt = Boolean(
-      resumable && now <= new Date(resumable.expires_at).getTime() + 3 * 60_000,
-    );
 
-    const startsAt = new Date(exam.starts_at).getTime();
-    const endsAt = new Date(exam.ends_at).getTime();
-    if (now < startsAt || now >= endsAt) {
-      if (!hasResumableAttempt) redirect("/exams");
+    if (officialAttempt?.status === "finalized") {
+      redirect(`/exams/${id}/results#my-response`);
+    }
+
+    const isOngoing = officialAttempt
+      && ["active", "locked"].includes(officialAttempt.status);
+    if (officialAttempt && !isOngoing) redirect("/exams");
+
+    if (isOngoing) {
+      hasResumableAttempt = isAttemptWithinNetworkGrace(officialAttempt.expires_at, now);
+      if (!hasResumableAttempt) {
+        return (
+          <div className="min-h-[calc(100vh-64px)] bg-background">
+            <AutoFinalizer
+              attemptId={officialAttempt.id}
+              examId={exam.id}
+              userId={user.id}
+            />
+          </div>
+        );
+      }
+    } else if (!isExamWindowOpen(exam.starts_at, exam.ends_at, now)) {
+      redirect("/exams");
     }
   } else {
     if (!exam.results_published) redirect("/exams");

@@ -26,11 +26,13 @@ import { consumeSelectedFiles } from "@/lib/answers/image-input";
 import { clearEncryptedRecovery, loadEncryptedRecovery, saveEncryptedRecovery } from "@/lib/exams/recovery-client";
 import { notifyUsageBalanceUpdated } from "@/lib/usage/balance-client";
 import {
+  clearExamAttemptSession,
   IN_PROGRESS_EXAM_UPDATED_EVENT,
   removeInProgressExam,
   writeInProgressExam,
   type InProgressExamPhase,
 } from "@/lib/exams/in-progress-exam";
+import { isAttemptWithinNetworkGrace } from "@/lib/exams/timing";
 import {
   CATEGORY_LABELS,
   type AttemptDrafts,
@@ -302,7 +304,8 @@ export default function ExamTakerClient({
 
   const completeAttempt = useCallback(async () => {
     if (completionInFlight.current) return;
-    const expired = Date.now() >= new Date(attempt.expires_at).getTime();
+    const expiresAt = new Date(attempt.expires_at).getTime();
+    const expired = Date.now() >= expiresAt;
     const overLimitQuestions = examQuestions.flatMap((question, index) => {
       if (question.questions.category === "translation") return [];
       const violation = getWordLimitViolation(
@@ -319,25 +322,42 @@ export default function ExamTakerClient({
     completionInFlight.current = true;
     setLocked(true);
     setIsSubmitting(true);
+    setReadOnlyReason(null);
     try {
       const uploadResults = await Promise.all([...pendingUploads.current]);
-      if (uploadResults.some((uploaded) => !uploaded)) {
+      if (Date.now() < expiresAt && uploadResults.some((uploaded) => !uploaded)) {
         throw new Error("The exam was not finalized because a selected image could not be saved successfully.");
       }
-      const saved = await saveRef.current();
-      if (!saved) {
+      let useExpiredFinalizer = !isPractice
+        && Date.now() >= expiresAt
+        && !isAttemptWithinNetworkGrace(attempt.expires_at);
+      const saved = useExpiredFinalizer ? true : await saveRef.current();
+      if (!saved && Date.now() < expiresAt) {
         throw new Error("The exam was not finalized because the latest answer could not be saved.");
       }
       let response: Response;
       let data: AttemptCompletionResponse;
       while (true) {
-        response = await fetch(`/api/exam-attempts/${attempt.id}/complete`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ writerToken }),
-        });
+        response = await fetch(
+          useExpiredFinalizer
+            ? `/api/exam-attempts/${attempt.id}/finalize-expired`
+            : `/api/exam-attempts/${attempt.id}/complete`,
+          useExpiredFinalizer
+            ? { method: "POST" }
+            : {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ writerToken }),
+              },
+        );
         data = await response.json();
         if (response.ok) break;
+        if (!isPractice && data.code === "ATTEMPT_EXPIRED" && !useExpiredFinalizer) {
+          // The grace boundary can pass while an upload or draft save is in
+          // flight. Reconcile only the snapshot the server already accepted.
+          useExpiredFinalizer = true;
+          continue;
+        }
         if (data.code !== "OCR_PENDING") {
           throw new Error(data.error ?? "Submission failed");
         }
@@ -361,16 +381,27 @@ export default function ExamTakerClient({
       } else {
         endActiveExam();
         clearEncryptedRecovery(attempt.id);
+        clearExamAttemptSession(
+          sessionStorage,
+          attempt.user_id,
+          exam.id,
+          "official",
+        );
         router.push(`/exams/${exam.id}/results`);
       }
     } catch (error) {
       setReadOnlyReason(error instanceof Error ? error.message : "Submission failed");
-      if (Date.now() < new Date(attempt.expires_at).getTime()) setLocked(false);
+      if (Date.now() < expiresAt) {
+        setLocked(false);
+      } else {
+        setTimedOut(true);
+        setLocked(true);
+      }
     } finally {
       completionInFlight.current = false;
       setIsSubmitting(false);
     }
-  }, [attempt.expires_at, attempt.id, endActiveExam, exam.id, examQuestions, isPractice, persistActiveExam, router, writerToken]);
+  }, [attempt.expires_at, attempt.id, attempt.user_id, endActiveExam, exam.id, examQuestions, isPractice, persistActiveExam, router, writerToken]);
 
   const completeRef = useRef(completeAttempt);
   useEffect(() => {
@@ -770,7 +801,18 @@ export default function ExamTakerClient({
       {timedOut && (
         <div role="alert" className="mb-6 flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
           <AlertCircle className="shrink-0" size={20} />
-          <div><strong>Time is up.</strong> Your answers are locked while we safely finish submitting them.</div>
+          <div className="flex-1">
+            <div><strong>Time is up.</strong> Your answers are locked while we safely finish submitting them.</div>
+            {readOnlyReason && !isSubmitting && (
+              <button
+                type="button"
+                onClick={() => void completeAttempt()}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-red-700 px-4 py-2 text-xs font-bold text-white hover:bg-red-800"
+              >
+                <Upload size={14} /> Retry Finalization
+              </button>
+            )}
+          </div>
         </div>
       )}
 

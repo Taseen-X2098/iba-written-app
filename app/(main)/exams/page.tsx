@@ -2,9 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { Clock, FileText, Lock, ChevronRight, Trophy, Gift } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
-import type { Exam } from "@/lib/types";
+import type { Exam, ExamAttempt } from "@/lib/types";
 import { getMainUserContext } from "@/lib/main-user-context";
 import { isExamPlan } from "@/lib/exams/access";
+import { isAttemptWithinNetworkGrace, isExamWindowOpen } from "@/lib/exams/timing";
 
 export default async function StudentExamsPage() {
   const supabase = await createClient();
@@ -21,7 +22,7 @@ export default async function StudentExamsPage() {
       .order("starts_at", { ascending: false }),
     supabase
       .from("exam_attempts")
-      .select("exam_id, status, expires_at")
+      .select("id, exam_id, status, expires_at")
       .eq("user_id", context.user.id)
       .eq("mode", "official"),
   ]);
@@ -31,7 +32,8 @@ export default async function StudentExamsPage() {
     console.error("Error fetching exams:", error);
   }
 
-  const attemptsByExamId = (attempts || []).reduce((acc: Record<string, any>, attempt: any) => {
+  type AttemptSummary = Pick<ExamAttempt, "id" | "exam_id" | "status" | "expires_at">;
+  const attemptsByExamId = ((attempts || []) as AttemptSummary[]).reduce((acc: Record<string, AttemptSummary>, attempt) => {
     acc[attempt.exam_id] = attempt;
     return acc;
   }, {});
@@ -39,8 +41,11 @@ export default async function StudentExamsPage() {
   const safeExams = exams || [];
   const now = new Date().getTime();
 
-  const upcomingOrLiveExams = safeExams.filter((exam: Exam) => new Date(exam.ends_at).getTime() >= now);
-  const pastExams = safeExams.filter((exam: Exam) => new Date(exam.ends_at).getTime() < now);
+  const upcomingOrLiveExams = safeExams.filter((exam: Exam) => new Date(exam.ends_at).getTime() > now);
+  const pastExams = safeExams.filter((exam: Exam) => new Date(exam.ends_at).getTime() <= now);
+  const visiblePastExams = hasExamPlan
+    ? pastExams
+    : pastExams.filter((exam: Exam) => exam.is_free || Boolean(attemptsByExamId[exam.id]));
 
   return (
     <div className="px-4 py-6 lg:px-8 max-w-5xl mx-auto animate-fade-in">
@@ -83,11 +88,8 @@ export default async function StudentExamsPage() {
           </div>
         ) : (
           upcomingOrLiveExams.map((exam: Exam) => {
-            const startsAt = new Date(exam.starts_at).getTime();
-            const endsAt = new Date(exam.ends_at).getTime();
-            
             let status: "upcoming" | "active" = "upcoming";
-            if (now >= startsAt && now <= endsAt) status = "active";
+            if (isExamWindowOpen(exam.starts_at, exam.ends_at, now)) status = "active";
 
             return (
               <div 
@@ -136,7 +138,7 @@ export default async function StudentExamsPage() {
                       const attempt = attemptsByExamId[exam.id];
                       const hasSubmitted = attempt?.status === "finalized";
                       const isOngoing = attempt && ["active", "locked"].includes(attempt.status);
-                      const canContinue = isOngoing && now < new Date(attempt.expires_at).getTime() + 3 * 60 * 1000;
+                      const canContinue = isOngoing && isAttemptWithinNetworkGrace(attempt.expires_at, now);
                       const canEnter = hasExamPlan || exam.is_free || isOngoing;
 
                       if (hasSubmitted) {
@@ -190,7 +192,7 @@ export default async function StudentExamsPage() {
         )}
       </div>
 
-      {!hasExamPlan ? (
+      {!hasExamPlan && (
         <section
           aria-labelledby="past-exams-locked-title"
           className="rounded-2xl border border-brand-200 bg-brand-50 p-6 sm:p-8"
@@ -204,7 +206,7 @@ export default async function StudentExamsPage() {
                 Past exam practice is locked
               </h3>
               <p className="mt-1 text-sm leading-6 text-brand-800">
-                Subscribe to the <strong>Complete Prep</strong> or <strong>Exams Only</strong> plan to view previous exams and practice them.
+                Subscribe to the <strong>Complete Prep</strong> or <strong>Exams Only</strong> plan to practice previous exams.
               </p>
               <Link
                 href="/subscription"
@@ -216,18 +218,22 @@ export default async function StudentExamsPage() {
             </div>
           </div>
         </section>
-      ) : pastExams.length > 0 ? (
-        <details className="group">
+      )}
+
+      {visiblePastExams.length > 0 && (
+        <details className={`group ${!hasExamPlan ? "mt-8" : ""}`}>
           <summary className="flex items-center gap-2 cursor-pointer list-none text-muted-foreground hover:text-foreground font-bold mb-6 transition-colors">
             <span className="bg-muted px-3 py-1.5 rounded-lg border border-border group-open:bg-brand-50 group-open:text-brand-700 group-open:border-brand-200 transition-colors flex items-center gap-2">
               <ChevronRight size={18} className="group-open:rotate-90 transition-transform" />
-              View Past Exams ({pastExams.length})
+              View Past Exams ({visiblePastExams.length})
             </span>
           </summary>
           
           <div className="grid md:grid-cols-2 gap-6 mt-4">
-            {pastExams.map((exam: Exam) => {
-              const hasSubmitted = attemptsByExamId[exam.id]?.status === "finalized";
+            {visiblePastExams.map((exam: Exam) => {
+              const attempt = attemptsByExamId[exam.id];
+              const hasSubmitted = attempt?.status === "finalized";
+              const isOngoing = Boolean(attempt && ["active", "locked"].includes(attempt.status));
               return (
                 <div
                   key={exam.id}
@@ -259,7 +265,15 @@ export default async function StudentExamsPage() {
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-center gap-3">
-                    {hasSubmitted || exam.results_published ? (
+                    {isOngoing ? (
+                      <Link
+                        href={`/exams/${exam.id}`}
+                        prefetch={false}
+                        className="flex-1 w-full flex items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-red-200/50 transition-colors hover:bg-red-600"
+                      >
+                        Finalize Exam <ChevronRight size={16} />
+                      </Link>
+                    ) : hasSubmitted || exam.results_published ? (
                       <Link
                         href={`/exams/${exam.id}/results${hasSubmitted ? "#my-response" : ""}`}
                         prefetch={false}
@@ -275,7 +289,7 @@ export default async function StudentExamsPage() {
                         Results Pending
                       </span>
                     )}
-                    {exam.results_published ? (
+                    {hasExamPlan && exam.results_published ? (
                       <Link
                         href={`/exams/${exam.id}?practice=true`}
                         prefetch={false}
@@ -283,6 +297,10 @@ export default async function StudentExamsPage() {
                       >
                         <FileText size={16} /> Practice Exam
                       </Link>
+                    ) : !hasExamPlan ? (
+                      <span className="flex-1 w-full rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-center text-sm font-bold text-muted-foreground">
+                        <Lock size={14} className="mr-1 inline" /> Practice requires subscription
+                      </span>
                     ) : (
                       <span className="flex-1 w-full rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-center text-sm font-bold text-muted-foreground">
                         Practice after results
@@ -294,7 +312,7 @@ export default async function StudentExamsPage() {
             })}
           </div>
         </details>
-      ) : null}
+      )}
     </div>
   );
 }

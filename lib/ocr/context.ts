@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api/errors";
 import { requireAttemptWriter } from "@/lib/exams/attempts";
 import { createAdminClient } from "@/lib/supabase/server";
 import type { ExamAttemptMode } from "@/lib/types";
+import { requireStandaloneQuestionNotEmbargoed } from "@/lib/exams/standalone-access";
 
 const uuid = z.string().uuid();
 
@@ -36,6 +37,7 @@ export async function resolveOcrContext(
       throw new ApiError("VALIDATION_ERROR", "A valid question is required for OCR", 400);
     }
     await requireQuestionAccess(parsedQuestionId.data);
+    await requireStandaloneQuestionNotEmbargoed(parsedQuestionId.data);
     const admin = await createAdminClient();
     const { data: question, error } = await admin
       .from("questions")

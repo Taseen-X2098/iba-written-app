@@ -9,6 +9,7 @@
  */
 
 import { PLAN_CONFIG } from "@/lib/types";
+import { EXAM_NETWORK_GRACE_MS, isExamWindowOpen } from "@/lib/exams/timing";
 
 // ─── Mock Setup ──────────────────────────────────────────────────────────────
 
@@ -100,8 +101,7 @@ describe("Server-side timer enforcement", () => {
   it("allows submission within time limit (30 min exam + 3 min grace = 33 min)", () => {
     const examTimeLimitMinutes = 30;
     const startTime = Date.now() - (25 * 60 * 1000); // 25 minutes ago
-    const TIMER_GRACE_MS = 3 * 60 * 1000;
-    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + TIMER_GRACE_MS;
+    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + EXAM_NETWORK_GRACE_MS;
     const elapsedMs = Date.now() - startTime;
 
     expect(elapsedMs).toBeLessThan(allowedMs);
@@ -110,8 +110,7 @@ describe("Server-side timer enforcement", () => {
   it("rejects submission when time limit exceeded (student took too long)", () => {
     const examTimeLimitMinutes = 30;
     const startTime = Date.now() - (40 * 60 * 1000); // 40 minutes ago
-    const TIMER_GRACE_MS = 3 * 60 * 1000;
-    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + TIMER_GRACE_MS;
+    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + EXAM_NETWORK_GRACE_MS;
     const elapsedMs = Date.now() - startTime;
 
     expect(elapsedMs).toBeGreaterThan(allowedMs);
@@ -120,8 +119,7 @@ describe("Server-side timer enforcement", () => {
   it("respects admin-set time limit of 45 minutes", () => {
     const examTimeLimitMinutes = 45;
     const startTime = Date.now() - (44 * 60 * 1000); // 44 min ago
-    const TIMER_GRACE_MS = 3 * 60 * 1000;
-    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + TIMER_GRACE_MS;
+    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + EXAM_NETWORK_GRACE_MS;
     const elapsedMs = Date.now() - startTime;
 
     expect(elapsedMs).toBeLessThan(allowedMs); // Should still be allowed
@@ -130,8 +128,7 @@ describe("Server-side timer enforcement", () => {
   it("rejects for admin-set 45 min limit when 51 minutes elapsed", () => {
     const examTimeLimitMinutes = 45;
     const startTime = Date.now() - (51 * 60 * 1000);
-    const TIMER_GRACE_MS = 3 * 60 * 1000;
-    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + TIMER_GRACE_MS;
+    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + EXAM_NETWORK_GRACE_MS;
     const elapsedMs = Date.now() - startTime;
 
     expect(elapsedMs).toBeGreaterThan(allowedMs);
@@ -140,8 +137,7 @@ describe("Server-side timer enforcement", () => {
   it("respects admin-set time limit of 60 minutes", () => {
     const examTimeLimitMinutes = 60;
     const startTime = Date.now() - (58 * 60 * 1000); // 58 min
-    const TIMER_GRACE_MS = 3 * 60 * 1000;
-    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + TIMER_GRACE_MS;
+    const allowedMs = (examTimeLimitMinutes * 60 * 1000) + EXAM_NETWORK_GRACE_MS;
     const elapsedMs = Date.now() - startTime;
 
     expect(elapsedMs).toBeLessThan(allowedMs);
@@ -153,26 +149,23 @@ describe("Server-side timer enforcement", () => {
 describe("Deadline enforcement", () => {
   it("allows submission before exam deadline", () => {
     const endsAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-    const DEADLINE_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
 
-    expect(now).toBeLessThan(endsAt.getTime() + DEADLINE_GRACE_MS);
+    expect(now).toBeLessThan(endsAt.getTime() + EXAM_NETWORK_GRACE_MS);
   });
 
-  it("allows submission within 2-minute grace period after deadline", () => {
+  it("allows submission within the 3-minute network grace period after deadline", () => {
     const endsAt = new Date(Date.now() - 60 * 1000); // 1 minute ago
-    const DEADLINE_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
 
-    expect(now).toBeLessThan(endsAt.getTime() + DEADLINE_GRACE_MS);
+    expect(now).toBeLessThan(endsAt.getTime() + EXAM_NETWORK_GRACE_MS);
   });
 
   it("rejects submission well past deadline (10 minutes after)", () => {
     const endsAt = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
-    const DEADLINE_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
 
-    expect(now).toBeGreaterThan(endsAt.getTime() + DEADLINE_GRACE_MS);
+    expect(now).toBeGreaterThan(endsAt.getTime() + EXAM_NETWORK_GRACE_MS);
   });
 
   it("handles admin changing deadline to earlier (scenario: mid-exam deadline move)", () => {
@@ -180,13 +173,12 @@ describe("Deadline enforcement", () => {
     const studentStartTime = Date.now() - (25 * 60 * 1000);
     const originalEndsAt = new Date(studentStartTime + 60 * 60 * 1000); // original: 1 hour
     const newEndsAt = new Date(studentStartTime + 20 * 60 * 1000); // admin changed to 20 min
-    const DEADLINE_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
 
     // With original deadline, would be fine
-    expect(now).toBeLessThan(originalEndsAt.getTime() + DEADLINE_GRACE_MS);
+    expect(now).toBeLessThan(originalEndsAt.getTime() + EXAM_NETWORK_GRACE_MS);
     // With new deadline, should be rejected
-    expect(now).toBeGreaterThan(newEndsAt.getTime() + DEADLINE_GRACE_MS);
+    expect(now).toBeGreaterThan(newEndsAt.getTime() + EXAM_NETWORK_GRACE_MS);
   });
 });
 
@@ -370,8 +362,8 @@ describe("Exam visibility and filtering", () => {
   ];
 
   it("separates upcoming/live from past exams", () => {
-    const upcomingOrLive = exams.filter(e => new Date(e.ends_at).getTime() >= now);
-    const past = exams.filter(e => new Date(e.ends_at).getTime() < now);
+    const upcomingOrLive = exams.filter(e => new Date(e.ends_at).getTime() > now);
+    const past = exams.filter(e => new Date(e.ends_at).getTime() <= now);
 
     expect(upcomingOrLive).toHaveLength(2);
     expect(past).toHaveLength(1);
@@ -382,15 +374,13 @@ describe("Exam visibility and filtering", () => {
 
   it("identifies active exam correctly", () => {
     const exam = exams[0];
-    const startsAt = new Date(exam.starts_at).getTime();
-    const endsAt = new Date(exam.ends_at).getTime();
-    const isActive = now >= startsAt && now <= endsAt;
+    const isActive = isExamWindowOpen(exam.starts_at, exam.ends_at, now);
     expect(isActive).toBe(true);
   });
 
   it("practice mode only available for past exams", () => {
-    const pastExams = exams.filter(e => new Date(e.ends_at).getTime() < now);
-    expect(pastExams.every(e => new Date(e.ends_at).getTime() < now)).toBe(true);
+    const pastExams = exams.filter(e => new Date(e.ends_at).getTime() <= now);
+    expect(pastExams.every(e => new Date(e.ends_at).getTime() <= now)).toBe(true);
     // Practice links are only rendered for past exams
     expect(pastExams).toHaveLength(1);
   });

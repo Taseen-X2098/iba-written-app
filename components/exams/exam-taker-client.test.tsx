@@ -4,7 +4,11 @@
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ExamTakerClient from "./exam-taker-client";
-import { inProgressExamStorageKey, parseOwnedInProgressExam } from "@/lib/exams/in-progress-exam";
+import {
+  examAttemptSessionKey,
+  inProgressExamStorageKey,
+  parseOwnedInProgressExam,
+} from "@/lib/exams/in-progress-exam";
 import { USAGE_BALANCE_UPDATED_EVENT } from "@/lib/usage/balance-client";
 import type { AttemptQuestion, Exam, ExamAttempt } from "@/lib/types";
 
@@ -87,6 +91,7 @@ describe.each([
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
     const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/ocr-operations")) {
@@ -423,7 +428,7 @@ describe.each([
     );
   });
 
-  it("never finalizes a blank answer when the last-second scan fails", async () => {
+  it("finalizes the previously acknowledged snapshot when a last-second scan fails", async () => {
     let failOcr!: (response: Response) => void;
     jest.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
@@ -437,6 +442,12 @@ describe.each([
         return new Promise<Response>((resolve) => {
           failOcr = resolve;
         });
+      }
+      if (url.endsWith("/complete")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response);
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -474,11 +485,116 @@ describe.each([
       } as Response);
     });
 
-    expect(await screen.findAllByText(/not finalized because a selected image could not be saved/i)).not.toHaveLength(0);
-    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/complete"),
-      expect.anything(),
+      expect.objectContaining({ method: "POST" }),
+    ));
+  });
+
+  it("uses server-only reconciliation when the server says the grace window closed", async () => {
+    jest.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/complete")) {
+        return {
+          ok: false,
+          json: async () => ({
+            code: "ATTEMPT_EXPIRED",
+            error: "The final network grace period has ended",
+          }),
+        } as Response;
+      }
+      if (url.endsWith("/finalize-expired")) {
+        return {
+          ok: true,
+          json: async () => ({ success: true }),
+        } as Response;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    const exam = makeExam(isMagnusOnly);
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[examQuestion]}
+        attempt={makeAttempt(exam.id)}
+        writerToken="writer-token"
+        initialDrafts={{}}
+      />,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit Exam" }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith(`/exams/${exam.id}/results`));
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/finalize-expired"),
+      { method: "POST" },
+    );
+  });
+
+  it("keeps timed-out answers read-only and retries server-only finalization", async () => {
+    const exam = makeExam(isMagnusOnly);
+    const attempt = {
+      ...makeAttempt(exam.id),
+      expires_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+    };
+    const sessionKey = examAttemptSessionKey(
+      attempt.user_id,
+      exam.id,
+      "official",
+    );
+    sessionStorage.setItem(sessionKey, JSON.stringify({
+      attemptId: attempt.id,
+      writerToken: "writer-token",
+    }));
+    let finalizationCalls = 0;
+    jest.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/finalize-expired")) {
+        finalizationCalls += 1;
+        return finalizationCalls === 1
+          ? {
+              ok: false,
+              json: async () => ({ code: "SERVICE_UNAVAILABLE", error: "Temporary network problem" }),
+            } as Response
+          : {
+              ok: true,
+              json: async () => ({ success: true }),
+            } as Response;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(
+      <ExamTakerClient
+        exam={exam}
+        examQuestions={[examQuestion]}
+        attempt={attempt}
+        writerToken="writer-token"
+        initialDrafts={{
+          [examQuestion.id]: {
+            ocrText: "Already saved answer.",
+            editedText: "Already saved answer.",
+            updatedAt: "2026-09-05T00:00:00.000Z",
+          },
+        }}
+      />,
+    );
+
+    const retry = await screen.findByRole("button", { name: /Retry Finalization/i });
+    expect(screen.getByDisplayValue("Already saved answer.")).toBeDisabled();
+    expect(globalThis.fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/finalize-expired"),
+      { method: "POST" },
+    );
+
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith(`/exams/${exam.id}/results`));
+    expect(finalizationCalls).toBe(2);
+    expect(localStorage.getItem(inProgressExamStorageKey(attempt.id))).toBeNull();
+    expect(sessionStorage.getItem(sessionKey)).toBeNull();
+    expect(mockClearEncryptedRecovery).toHaveBeenCalledWith(attempt.id);
   });
 });
 
