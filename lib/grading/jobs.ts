@@ -224,7 +224,23 @@ export async function createOfficialGradingJob(input: {
       exam_submission_id: submission.id,
     })),
   );
-  if (itemError) throw itemError;
+  if (itemError) {
+    const now = new Date().toISOString();
+    const { error: cleanupError } = await admin
+      .from("grading_jobs")
+      .update({
+        status: "failed",
+        failed_items: eligible.length,
+        last_error: itemError.message.slice(0, 4_000),
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", job.id);
+    if (cleanupError) {
+      console.error("Unable to mark an incomplete official grading job as failed", cleanupError);
+    }
+    throw itemError;
+  }
 
   const woke = await wakeGradingWorker();
   if (!woke && process.env.NODE_ENV !== "production") {
